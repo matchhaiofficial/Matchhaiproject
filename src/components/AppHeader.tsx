@@ -1,6 +1,6 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { AppIcon } from './AppIcon';
 import { COLORS, FONTS, SPACING, TEXT_SIZES } from '../theme';
 
 type AppHeaderProps = {
@@ -47,7 +47,7 @@ export default function AppHeader({
                                 pressed && styles.backButtonPressed,
                             ]}
                         >
-                            <MaterialIcons name="arrow-back" size={22} color={COLORS.text} />
+                            <AppIcon name="back" size={22} color={COLORS.text} />
                         </Pressable>
                     ) : (
                         shouldInlineTitle ? null : <View style={styles.backPlaceholder} />
@@ -91,7 +91,7 @@ export default function AppHeader({
 const styles = StyleSheet.create({
     container: {
         paddingTop: SPACING.xs,
-        marginBottom: SPACING.lg,
+        marginBottom: SPACING.sm,
     },
     topRow: {
         flexDirection: 'row',

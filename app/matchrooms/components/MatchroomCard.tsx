@@ -1,11 +1,13 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { memo, useEffect, useState } from "react";
-import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from "react-native";
+import React, { memo, useMemo } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 
-import { Matchroom } from "../../../src/services/matchService";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { useMinuteTicker } from "../../../src/hooks/useMinuteTicker";
+import { Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
-import { getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
+import { getMatchroomJoinAvailability, getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
+import { getPrimaryLocationLabel, isBroadcastVenuePending } from "../utils/matchroomLocationDisplay";
 import styles from "../matchrooms.styles";
 
 interface MatchroomCardProps {
@@ -14,26 +16,95 @@ interface MatchroomCardProps {
     onJoinPress?: () => void;
     onCancelJoinPress?: () => void;
     isRequested?: boolean;
+    requestLabel?: string;
+    joining?: boolean;
     onAcceptPress?: () => void;
     acceptLabel?: string;
     onPress?: () => void;
     containerStyle?: StyleProp<ViewStyle>;
 }
 
-const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined, onAcceptPress, acceptLabel, onPress, containerStyle }: MatchroomCardProps) => {
+const toValidDate = (value: any): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+    if (typeof value?.seconds === "number") {
+        const parsed = new Date(value.seconds * 1000);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === "number") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === "string") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    return null;
+};
+
+const parseScheduledDateTime = (dateStr?: string | null, timeStr?: string | null): Date | null => {
+    const date = String(dateStr || "").trim();
+    const time = String(timeStr || "").trim();
+    if (!date) return null;
+    let base: Date | null = null;
+    if (date.includes("/")) {
+        const [day, month, year] = date.split("/").map(Number);
+        base = new Date(year, month - 1, day);
+    } else {
+        base = toValidDate(date);
+    }
+    if (!base || Number.isNaN(base.getTime())) return null;
+    const [hours, minutes] = time.split(":").map(Number);
+    if (!Number.isNaN(hours)) base.setHours(hours, Number.isNaN(minutes) ? 0 : minutes, 0, 0);
+    return base;
+};
+
+const localStyles = StyleSheet.create({
+    cardPressed: {
+        opacity: 0.92,
+    },
+    gameRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    badgeRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+    },
+    expiryBadgeExpired: {
+        backgroundColor: COLORS.error,
+    },
+    expiryBadgeDefault: {
+        backgroundColor: COLORS.overlayMedium,
+    },
+    statusBadgeCompleted: {
+        backgroundColor: COLORS.success,
+    },
+    titleActionsRow: {
+        flexDirection: "row",
+        gap: 8,
+    },
+    actionPressed: {
+        opacity: 0.88,
+    },
+});
+
+const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, requestLabel, joining, isJoined, onAcceptPress, acceptLabel, onPress, containerStyle }: MatchroomCardProps) => {
     const router = useRouter();
     const isWalkInRoom = String((room as any).bookingSource || "").toLowerCase() === "walkin";
 
-    // Check if room is locked/full
-    const isLocked = isRoomLocked(room);
+    // "Locked" is time-based (within 24h of start, or zone-confirmed) and is
+    // independent of "full". A full room is not locked until the 24h window.
+    const statusLower = String((room as any).status || "").toLowerCase();
+    const isCompleted = statusLower === "completed";
+    const isCancelled = statusLower === "cancelled";
+    const joinAvailability = getMatchroomJoinAvailability(room);
+    const isLocked = joinAvailability.code === "locked" || isLeaveLocked(room);
     const isFull = isRoomFull(room);
     const isExpired = isRoomExpired(room);
-    const [nowMs, setNowMs] = useState(() => Date.now());
-
-    useEffect(() => {
-        const id = setInterval(() => setNowMs(Date.now()), 60 * 1000);
-        return () => clearInterval(id);
-    }, []);
+    const nowMs = useMinuteTicker();
 
     const formatCountdown = (ms: number) => {
         const total = Math.max(0, Math.floor(ms / 1000));
@@ -48,6 +119,9 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const expiresAt = getRoomExpiresAt(room);
     const lockAt = getRoomLockAt(room);
     const expiryLabel = (() => {
+        // Terminal states win over time-based lock/expiry/full labels so a
+        // finished room never reads "FULL" / "LOCKED".
+        if (isCompleted || isCancelled) return null;
         if (isExpired) return "EXPIRED";
         if (isLocked) return "LOCKED";
         if (isFull) {
@@ -60,37 +134,19 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         return diff <= 0 ? "EXPIRED" : `EXPIRES IN ${formatCountdown(diff)}`;
     })();
 
-    // Prepare Roles/Skills for display
-    const displayRoles: string[] = [];
-    let isSkillTag = false;
+    const roleDemandSummary = useMemo(() => {
+        const openSlots = [...(room.slotsA || []), ...(room.slotsB || [])].filter(
+            (slot) => slot.status === "open"
+        );
+        if (openSlots.length === 0) return null;
+        return openSlots.length === 1 ? "1 seat remaining" : `${openSlots.length} seats remaining`;
+    }, [room.slotsA, room.slotsB]);
 
-    const openSlots = [...(room.slotsA || []), ...(room.slotsB || [])].filter(s => s.status === 'open');
-    const rolesNeeded = openSlots.reduce((acc, s) => {
-        if (s.role) {
-            acc[s.role] = (acc[s.role] || 0) + 1;
-        }
-        return acc;
-    }, {} as Record<string, number>);
-
-    const rolesNeededList = Object.entries(rolesNeeded);
-
-    if (rolesNeededList.length > 0) {
-        rolesNeededList.forEach(([role, count]) => {
-            displayRoles.push(`NEEDS ${role}`);
-        });
-    } else {
-        // Show Skill Level
-        isSkillTag = true;
-        if (room.hostSkillTier && room.hostSkillTier !== 'Any') {
-            displayRoles.push(room.hostSkillTier);
-        } else if (room.skillLevel) {
-            displayRoles.push(room.skillLevel);
-        }
-    }
-
-    // Limit to 2 tags
-    const tagsToShow = displayRoles.slice(0, 2);
-    const remainingCount = displayRoles.length - 2;
+    const friendJoinedLabel = useMemo(() => {
+        const total = Number(room.friendJoinedCount || 0);
+        if (total <= 0) return null;
+        return total === 1 ? "1 friend joined" : `${total} friends joined`;
+    }, [room.friendJoinedCount]);
 
     const handlePress = () => {
         if (onPress) {
@@ -100,31 +156,78 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         router.push({ pathname: "/matchrooms/[id]" as any, params: { id: room.id! } });
     };
 
-    // Format Time (12h)
-    let timeDisplay = 'Flexible Time';
-    if (room.scheduledTime) {
-        const [h, m] = room.scheduledTime.split(':').map(Number);
-        const period = h >= 12 ? 'PM' : 'AM';
-        const h12 = h % 12 || 12;
-        timeDisplay = `${h12}:${String(m).padStart(2, '0')} ${period}`;
-    } else if (room.startTime?.seconds) {
-        timeDisplay = new Date(room.startTime.seconds * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-    }
+    const scheduleDisplay = useMemo(() => {
+        const getStartDate = () => {
+            const startTime = toValidDate(room.startTime);
+            if (startTime) return startTime;
+            if (typeof room.scheduledStartAt === "number") {
+                const scheduledStart = toValidDate(room.scheduledStartAt);
+                if (scheduledStart) return scheduledStart;
+            }
+            const scheduled = parseScheduledDateTime(room.scheduledDate, room.scheduledTime);
+            if (scheduled) return scheduled;
+            if (room.scheduledTime) {
+                const [hours, minutes] = room.scheduledTime.split(":").map(Number);
+                if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
+                    const fallback = new Date();
+                    fallback.setHours(hours, minutes, 0, 0);
+                    return fallback;
+                }
+            }
+            return null;
+        };
+
+        const startDate = getStartDate();
+        if (!startDate) return { dateLabel: null as string | null, timeLabel: "Time not set" };
+
+        const durationMinutes = Number(
+            room.durationMinutes ||
+            (room.durationHours ? room.durationHours * 60 : 0) ||
+            0,
+        );
+        const endDate = durationMinutes > 0
+            ? new Date(startDate.getTime() + durationMinutes * 60 * 1000)
+            : null;
+
+        const startLabel = startDate.toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+        });
+
+        const endLabel = endDate
+            ? endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })
+            : null;
+
+        // Compact date label with Today/Tomorrow shortcuts (device-local, which
+        // matches Asia/Karachi for this app's users).
+        const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const dayDiff = Math.round((startOfDay(startDate) - startOfDay(new Date())) / (24 * 60 * 60 * 1000));
+        const dateLabel =
+            dayDiff === 0
+                ? "Today"
+                : dayDiff === 1
+                ? "Tomorrow"
+                : startDate.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+
+        return {
+            dateLabel,
+            timeLabel: endLabel ? `${startLabel} - ${endLabel}` : startLabel,
+        };
+    }, [room.durationHours, room.durationMinutes, room.scheduledDate, room.scheduledStartAt, room.scheduledTime, room.startTime]);
 
     // Format Location (Mock distance for now, or use location name)
-    const locationDisplay = room.location || 'Online';
-    // Helper to mock distance if location is a string (real app would calc distance)
-    const distanceDisplay = locationDisplay.length > 15 ? locationDisplay.substring(0, 15) + '...' : locationDisplay;
+    const locationDisplay = getPrimaryLocationLabel(room);
+    const isBroadcastPending = isBroadcastVenuePending(room);
 
     return (
-        <TouchableOpacity
-            style={[styles.nearbyCard, containerStyle]}
+        <Pressable
+            style={({ pressed }) => [styles.nearbyCard, containerStyle, pressed && localStyles.cardPressed]}
             onPress={handlePress}
-            activeOpacity={0.7}
         >
-            {/* Row 1: Game Name, Skill Score & Lock Badge */}
+            {/* Row 1: Game Name, Friend Count & Lock Badge */}
             <View style={[styles.nearbyTitleRow, { marginBottom: 6 }]}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={localStyles.gameRow}>
                     <Text style={[styles.nearbyGame, { marginBottom: 0 }]}>{room.game}</Text>
                     {isWalkInRoom ? (
                         <View style={styles.walkInOnlyBadge}>
@@ -132,27 +235,29 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                         </View>
                     ) : null}
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {/* LOCKED/FULL Badge */}
-                    {isLocked && (
+                <View style={localStyles.badgeRow}>
+                    {(isCompleted || isCancelled) && (
+                        <View style={[styles.lockBadge, isCancelled ? localStyles.expiryBadgeExpired : localStyles.statusBadgeCompleted]}>
+                            <Text style={styles.lockBadgeText}>{isCancelled ? "CANCELLED" : "COMPLETED"}</Text>
+                        </View>
+                    )}
+                    {!isCompleted && !isCancelled && isFull && (
                         <View style={styles.lockBadge}>
-                            <MaterialIcons name="lock" size={10} color="#FFF" />
-                            <Text style={styles.lockBadgeText}>
-                                {isFull ? 'FULL' : 'LOCKED'}
-                            </Text>
+                            <AppIcon name="people" size={10} color="#FFF" />
+                            <Text style={styles.lockBadgeText}>FULL</Text>
                         </View>
                     )}
                     {!!expiryLabel && (
-                        <View style={[styles.lockBadge, { backgroundColor: isExpired ? COLORS.error : COLORS.overlayMedium }]}>
+                        <View style={[styles.lockBadge, isExpired ? localStyles.expiryBadgeExpired : localStyles.expiryBadgeDefault]}>
                             <Text style={styles.lockBadgeText}>
                                 {expiryLabel}
                             </Text>
                         </View>
                     )}
-                    {room.hostSkillScore !== undefined && room.hostSkillScore !== null && (
-                        <View style={styles.matchScoreBadge}>
-                            <MaterialIcons name="local-fire-department" size={12} color="#FFF" />
-                            <Text style={styles.matchScoreText}>{room.hostSkillScore}%</Text>
+                    {friendJoinedLabel && (
+                        <View style={styles.matchMetaBadge}>
+                            <AppIcon name="groups-2" size={12} color={COLORS.text} />
+                            <Text style={styles.matchMetaText}>{friendJoinedLabel}</Text>
                         </View>
                     )}
                 </View>
@@ -161,33 +266,49 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
             {/* Row 2: Title & Book Slot Button / Request Button */}
             <View style={styles.nearbyTitleRow}>
                 <Text style={styles.nearbyTitle} numberOfLines={1}>{room.title}</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={localStyles.titleActionsRow}>
                     {isJoined && (
                         <View style={styles.joinedBtn}>
                             <Text style={styles.joinedBtnText}>Joined</Text>
                         </View>
                     )}
-                    {!isJoined && !isRequested && onJoinPress && (room.status !== 'in-progress' && room.status !== 'completed') && (
-                        <TouchableOpacity
-                            style={styles.requestBtn}
+                    {!isJoined && !isRequested && onJoinPress && joinAvailability.available && (
+                        <Pressable
+                            style={({ pressed }) => [styles.requestBtn, pressed && localStyles.actionPressed, joining && { opacity: 0.6 }]}
                             onPress={(e) => {
                                 e.stopPropagation();
-                                onJoinPress();
+                                if (!joining) onJoinPress();
+                            }}
+                            disabled={joining}
+                        >
+                            {joining ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                                <Text style={styles.requestBtnText}>Request</Text>
+                            )}
+                        </Pressable>
+                    )}
+                    {!isJoined && isRequested && onCancelJoinPress && (
+                        <Pressable
+                            style={({ pressed }) => [styles.acceptBtn, pressed && localStyles.actionPressed]}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                onCancelJoinPress();
                             }}
                         >
-                            <Text style={styles.requestBtnText}>Request</Text>
-                        </TouchableOpacity>
+                            <Text style={styles.acceptBtnText}>{requestLabel || "Pending"}</Text>
+                        </Pressable>
                     )}
                     {onAcceptPress && (
-                        <TouchableOpacity
-                            style={styles.acceptBtn}
+                        <Pressable
+                            style={({ pressed }) => [styles.acceptBtn, pressed && localStyles.actionPressed]}
                             onPress={(e) => {
                                 e.stopPropagation();
                                 onAcceptPress();
                             }}
                         >
                             <Text style={styles.acceptBtnText}>{acceptLabel || "Accept"}</Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     )}
                 </View>
             </View>
@@ -195,43 +316,33 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
             {/* Row 3: Location & Time */}
             <View style={styles.nearbyInfoRow}>
                 <View style={styles.nearbyDistance}>
-                    <MaterialIcons name="location-on" size={12} color={COLORS.textSecondary} />
-                    <Text style={styles.nearbyDistanceText}>{distanceDisplay}</Text>
+                    <AppIcon name="location-on" size={12} color={COLORS.textSecondary} />
+                    <Text style={styles.nearbyDistanceText} numberOfLines={1} ellipsizeMode="tail">
+                        {isBroadcastPending ? `Areas: ${locationDisplay}` : locationDisplay}
+                    </Text>
                 </View>
                 <View style={styles.nearbyTime}>
-                    <MaterialIcons name="schedule" size={12} color={COLORS.textSecondary} />
-                    <Text style={styles.nearbyTimeText}>{timeDisplay}</Text>
+                    <AppIcon name="schedule" size={12} color={COLORS.textSecondary} />
+                    <Text style={styles.nearbyTimeText} numberOfLines={1} ellipsizeMode="tail">
+                        {scheduleDisplay.dateLabel
+                            ? `${scheduleDisplay.dateLabel} · ${scheduleDisplay.timeLabel}`
+                            : scheduleDisplay.timeLabel}
+                    </Text>
                 </View>
             </View>
 
             {/* Row 4: Roles & Price */}
             <View style={styles.nearbyBottomRow}>
                 <View style={styles.roleRow}>
-                    {(() => {
-                        const series = (room as any).seriesType;
-                        const overs = (room as any).overs;
-                        const durationHours = (room as any).durationHours;
-                        if (tagsToShow.length === 0 && room.format) {
-                            let label = room.format;
-                            if (series) label = `${label} (${series})`;
-                            else if (overs) label = `${label} (${overs} overs)`;
-                            else if (durationHours) label = `${label} (${durationHours}h)`;
-                            return (
-                                <View style={styles.skillTag}>
-                                    <Text style={styles.skillText}>{label}</Text>
-                                </View>
-                            );
-                        }
-                        return null;
-                    })()}
-                    {tagsToShow.map((tag, index) => (
-                        <View key={index} style={isSkillTag ? styles.skillTag : styles.roleTag}>
-                            <Text style={isSkillTag ? styles.skillText : styles.roleText}>{tag}</Text>
+                    {roleDemandSummary ? (
+                        <View style={styles.roleTag}>
+                            <Text style={styles.roleText}>{roleDemandSummary}</Text>
                         </View>
-                    ))}
-                    {remainingCount > 0 && (
-                        <Text style={styles.moreRolesText}>+{remainingCount}</Text>
-                    )}
+                    ) : room.format ? (
+                        <View style={styles.skillTag}>
+                            <Text style={styles.skillText}>{room.format}</Text>
+                        </View>
+                    ) : null}
                 </View>
                 <View style={styles.priceTagContainer}>
                     <Text style={styles.priceTagText}>
@@ -239,7 +350,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     </Text>
                 </View>
             </View>
-        </TouchableOpacity >
+        </Pressable>
     );
 });
 

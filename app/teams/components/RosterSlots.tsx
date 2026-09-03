@@ -1,7 +1,8 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
+import { AppIcon } from '../../../src/components/AppIcon';
 import { COLORS } from '../../../src/theme';
+import { getTeamMaxSubstitutes } from '../../../src/constants/teamRosterRules';
 import styles from './RosterSlots.styles';
 
 interface Member {
@@ -9,10 +10,14 @@ interface Member {
     username: string;
     role?: string;
     roleForGame?: string;
+    rosterRole?: "main" | "substitute";
+    rosterOrder?: number;
 }
 
 interface RosterSlotsProps {
     maxMembers: number;
+    mainRosterSize?: number;
+    maxSubstitutes?: number;
     members: Member[];
     captainUid: string;
     viewerUid?: string;
@@ -24,6 +29,8 @@ interface RosterSlotsProps {
 
 export default function RosterSlots({
     maxMembers,
+    mainRosterSize,
+    maxSubstitutes,
     members,
     captainUid,
     viewerUid,
@@ -33,12 +40,22 @@ export default function RosterSlots({
     onEmptySlotPress
 }: RosterSlotsProps) {
 
-    // Pad with empty slots
-    const slots = Array.from({ length: maxMembers }, (_, index) => {
-        return members[index] || null;
-    });
+    const safeMainSize = Math.max(1, Math.min(mainRosterSize || maxMembers, maxMembers));
+    const ruleMaxSubstitutes = getTeamMaxSubstitutes(game);
+    const availableSubstitutes = Math.max(
+        0,
+        Math.min(
+            typeof maxSubstitutes === "number" ? maxSubstitutes : ruleMaxSubstitutes,
+            maxMembers - safeMainSize,
+            ruleMaxSubstitutes,
+        ),
+    );
+    const mainMembers = members.filter((member, index) => (member.rosterRole || (index < safeMainSize ? "main" : "substitute")) === "main");
+    const substituteMembers = members.filter((member, index) => (member.rosterRole || (index < safeMainSize ? "main" : "substitute")) === "substitute");
+    const mainSlots = Array.from({ length: safeMainSize }, (_, index) => mainMembers[index] || null);
+    const substituteSlots = Array.from({ length: availableSubstitutes }, (_, index) => substituteMembers[index] || null);
 
-    const renderMember = (member: Member) => {
+    const renderMember = (member: Member, isSubstitute = false) => {
         const isCaptainSlot = member.uid === captainUid;
         const isViewer = member.uid === viewerUid;
 
@@ -48,6 +65,7 @@ export default function RosterSlots({
                 style={({ pressed }) => [
                     styles.memberCard,
                     isCaptainSlot && styles.captainCard,
+                    isSubstitute && styles.substituteCard,
                     pressed && Platform.OS === 'ios' && styles.pressed
                 ]}
                 onPress={() => onMemberPress?.(member)}
@@ -61,7 +79,7 @@ export default function RosterSlots({
                     </Text>
                     {isCaptainSlot && (
                         <View style={styles.captainBadge}>
-                            <MaterialIcons name="star" size={12} color={COLORS.background} />
+                            <AppIcon name="star" size={12} color={COLORS.backgroundDark} />
                         </View>
                     )}
                 </View>
@@ -79,6 +97,11 @@ export default function RosterSlots({
                             </Text>
                         </View>
                     )}
+                    {isSubstitute && (
+                        <View style={styles.substituteBadge}>
+                            <Text style={styles.substituteBadgeText}>SUB</Text>
+                        </View>
+                    )}
 
                     {isViewer && (
                         <View style={styles.youBadge}>
@@ -90,12 +113,13 @@ export default function RosterSlots({
         );
     };
 
-    const renderEmptySlot = (index: number) => {
+    const renderEmptySlot = (index: number, isSubstitute = false) => {
         return (
             <Pressable
                 key={`empty-${index}`}
                 style={({ pressed }) => [
                     styles.emptySlot,
+                    isSubstitute && styles.substituteEmptySlot,
                     pressed && Platform.OS === 'ios' && styles.pressed
                 ]}
                 onPress={() => onEmptySlotPress?.()}
@@ -103,22 +127,36 @@ export default function RosterSlots({
                 android_ripple={{ color: COLORS.overlayMedium }}
             >
                 <View style={styles.emptyIcon}>
-                    <MaterialIcons name="person-add-alt" size={20} color={COLORS.muted} />
+                    <AppIcon name="person-add-alt" size={20} color={COLORS.muted} />
                 </View>
-                <Text style={styles.emptyText}>Open</Text>
+                <Text style={styles.emptyText}>{isSubstitute ? "Sub" : "Open"}</Text>
             </Pressable>
+        );
+    };
+
+    const renderSlotGroup = (label: string, slots: Array<Member | null>, isSubstitute = false) => {
+        if (slots.length === 0) return null;
+        return (
+            <View style={styles.group}>
+                <Text style={styles.groupLabel}>{label}</Text>
+                <View style={styles.grid}>
+                    {slots.map((member, index) => {
+                        if (member) {
+                            return renderMember(member, isSubstitute);
+                        }
+                        return renderEmptySlot(index, isSubstitute);
+                    })}
+                </View>
+            </View>
         );
     };
 
     return (
         <View style={styles.container}>
-            {slots.map((member, index) => {
-                if (member) {
-                    return renderMember(member);
-                }
-                return renderEmptySlot(index);
-            })}
+            {renderSlotGroup("Main lineup", mainSlots)}
+            {renderSlotGroup("Substitutes", substituteSlots, true)}
         </View>
     );
 }
+
 

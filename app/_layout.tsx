@@ -1,21 +1,21 @@
 // app/_layout.tsx
-export const unstable_settings = { initialRouteName: "auth/login" };
+export const unstable_settings = { initialRouteName: "index" };
 
 import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { LogBox, View } from "react-native";
-import { router } from "expo-router";
-import {
-  addNotificationResponseReceivedListener,
-  getLastNotificationResponseAsync,
-} from "expo-notifications/build/NotificationsEmitter";
 
 // Suppress the keep-awake error in development (Expo internal issue)
 LogBox.ignoreLogs([
   "Unable to activate keep awake",
   "Uncaught (in promise, id: 0) Error: Unable to activate keep awake",
+  // Easypaisa failures are user-facing via toasts; don't show LogBox overlays for them.
+  "[CONVEX A(easypaisa:startCheckout)]",
+  "[CONVEX A(easypaisa:syncTransactionStatus)]",
+  // PSN lookup failures are handled by the verification toast.
+  "[CONVEX A(externalApis:verifyPsnProfile)]",
 ]);
 
 if (__DEV__) {
@@ -23,6 +23,13 @@ if (__DEV__) {
   console.error = (...args: any[]) => {
     const text = args.map((item) => String(item ?? "")).join(" ");
     if (text.includes("Unable to activate keep awake")) {
+      return;
+    }
+    if (
+      text.includes("[CONVEX A(easypaisa:startCheckout)]") ||
+      text.includes("[CONVEX A(easypaisa:syncTransactionStatus)]") ||
+      text.includes("[CONVEX A(externalApis:verifyPsnProfile)]")
+    ) {
       return;
     }
     originalConsoleError(...args);
@@ -50,12 +57,15 @@ import {
 // Theme + Auth provider + Toast
 import Toast from "react-native-toast-message";
 import AuthProvider from "../src/context/AuthContext";
-import InAppNotificationBridge from "../src/components/InAppNotificationBridge";
+import AppErrorBoundary from "../src/components/AppErrorBoundary";
+import { initMonitoring } from "../src/lib/monitoring";
+import NotificationRuntimeBridge from "../src/components/NotificationRuntimeBridge";
+import PresenceRuntimeBridge from "../src/components/PresenceRuntimeBridge";
+import PushRegistrationBridge from "../src/components/PushRegistrationBridge";
+import MatchResultGate from "../src/components/MatchResultGate";
+import AuthenticatedConvexProvider from "../src/providers/AuthenticatedConvexProvider";
+import InAppAlertProvider from "../src/providers/InAppAlertProvider";
 import { useToast } from "../src/hooks/useToast";
-import {
-  ensureLocalNotificationsConfigured,
-  requestLocalNotificationPermissions,
-} from "../src/services/localNotifications";
 import { COLORS } from "../src/theme";
 import { toastConfig } from "../src/ui/toastConfig";
 
@@ -79,6 +89,11 @@ export default function RootLayout() {
   const { showToast } = useToast();
 
   useEffect(() => {
+    // Initialise provider-agnostic monitoring once, BEFORE the keep-awake
+    // filter below captures the global handler — this way monitoring's handler
+    // becomes the "previous" handler the filter chains to, so both run.
+    initMonitoring();
+
     const globalAny = globalThis as any;
     const errorUtils = globalAny.ErrorUtils;
     const previousGlobalErrorHandler =
@@ -113,10 +128,8 @@ export default function RootLayout() {
 
     const handleDeepLink = (event: { url: string }) => {
       const { url } = event;
-      console.log("[Linking] Received URL:", url);
 
       const parsed = Linking.parse(url);
-      console.log("[Linking] Parsed:", parsed);
 
       const path = parsed.path; // e.g. "oauth"
       const params = parsed.queryParams || {};
@@ -137,19 +150,24 @@ export default function RootLayout() {
           return;
         }
 
-        if (provider === "faceit") {
-          showToast({
-            type: "success",
-            title: "FACEIT login callback",
-            message: `nickname=${nickname || ""} · faceitId=${faceitId || ""}`,
-          });
-        } else if (provider === "steam") {
-          showToast({
-            type: "success",
-            title: "Steam login callback",
-            message: `steamId=${steamId || ""}`,
-          });
-        } else {
+        if (provider === "faceit" || provider === "steam") {
+          const providerLabel = provider === "faceit" ? "FACEIT" : "Steam";
+          // Never echo externally-supplied provider IDs/nicknames into a
+          // production toast — keep that detail to dev diagnostics only.
+          if (__DEV__) {
+            showToast({
+              type: "success",
+              title: `${providerLabel} login callback`,
+              message: `nickname=${nickname || ""} · faceitId=${faceitId || ""} · steamId=${steamId || ""}`,
+            });
+          } else {
+            showToast({
+              type: "success",
+              title: "Account linked",
+              message: `Your ${providerLabel} account was connected.`,
+            });
+          }
+        } else if (__DEV__) {
           showToast({
             type: "info",
             title: "OAuth callback",
@@ -169,50 +187,41 @@ export default function RootLayout() {
     };
   }, [showToast]);
 
-  useEffect(() => {
-    ensureLocalNotificationsConfigured()
-      .then(() => requestLocalNotificationPermissions())
-      .catch(() => {
-        // Ignore notification setup failures in development/simulator environments.
-      });
-
-    const sub = addNotificationResponseReceivedListener((response) => {
-      const data: any = response?.notification?.request?.content?.data || {};
-      const href = data?.href;
-      if (typeof href === "string" && href.length) {
-        router.push(href as any);
-      }
-    });
-
-    getLastNotificationResponseAsync()
-      .then((response) => {
-        const data: any = response?.notification?.request?.content?.data || {};
-        const href = data?.href;
-        if (typeof href === "string" && href.length) {
-          router.push(href as any);
-        }
-      })
-      .catch(() => null);
-
-    return () => sub.remove();
-  }, []);
-
   if (!ready) return null;
 
   return (
-    <AuthProvider>
-      <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-        <StatusBar style="light" translucent backgroundColor="transparent" />
-        <InAppNotificationBridge />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: COLORS.background },
-          }}
-        />
-        {/* Global toast host */}
-        <Toast config={toastConfig} />
-      </View>
-    </AuthProvider>
+    <AppErrorBoundary autoRetry maxAutoRetries={3}>
+      <AuthenticatedConvexProvider>
+        <AuthProvider>
+          <InAppAlertProvider>
+            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
+              <StatusBar style="light" translucent backgroundColor="transparent" />
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <NotificationRuntimeBridge />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <PresenceRuntimeBridge />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <PushRegistrationBridge />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={3}>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: COLORS.backgroundDark },
+                  }}
+                />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <MatchResultGate />
+              </AppErrorBoundary>
+              <Toast config={toastConfig} />
+            </View>
+          </InAppAlertProvider>
+        </AuthProvider>
+      </AuthenticatedConvexProvider>
+    </AppErrorBoundary>
   );
 }
+

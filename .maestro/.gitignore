@@ -1,0 +1,6 @@
+# Never commit the real E2E credentials file (staging/dev only, no secrets in git).
+.env.e2e
+
+# Do commit the template so others can copy it.
+# (The repo-root .gitignore ignores ".env.*"; force-track the example here.)
+!.env.e2e.example

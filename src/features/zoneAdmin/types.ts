@@ -1,3 +1,5 @@
+import type { AppIconName } from "../../components/AppIcon";
+
 export type ZoneAdminModuleId =
   | "bookings_matchrooms"
   | "resources"
@@ -5,8 +7,10 @@ export type ZoneAdminModuleId =
   | "support_safety"
   | "insights_security"
   | "venue_settings"
+  | "migration_tools"
   | "notifications_center"
-  | "audit_security";
+  | "audit_security"
+  | "wallet";
 
 export type ZoneBookingStatus =
   | "held"
@@ -38,7 +42,7 @@ export interface ZoneAdminModule {
   title: string;
   description: string;
   route: string;
-  icon: string;
+  icon: AppIconName;
   tag?: string;
 }
 

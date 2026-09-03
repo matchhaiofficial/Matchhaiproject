@@ -1,32 +1,54 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
-import React, { useCallback, useRef, useState } from "react";
+import { useAction, useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+import React, { useCallback, useRef, useState, useEffect } from "react";
 import {
     ActivityIndicator,
     Alert,
-    Image,
+    Pressable,
     RefreshControl,
     ScrollView,
+    Share,
     Text,
-    TouchableOpacity,
     View
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated from "react-native-reanimated";
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
+import { AppImage } from "../../../src/components/AppImage";
+import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { BlockingLoader } from "../../../src/components/BlockingLoader";
+import { GameImageIcon } from "../../../src/components/GameImageIcon";
 import Screen from "../../../src/components/Screen";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
+import { useEntrance } from "../../../src/motion/useEntrance";
+import { usePressScale } from "../../../src/motion/usePressScale";
 
 import SkillBadge from "../../../src/components/SkillBadge";
-import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
-import { PsnVerificationResult } from "../../../src/services/psnApi";
-import { GameSkillScore } from "../../../src/services/skillRatingService";
-import { getUserTeams, Team } from "../../../src/services/teamService";
-import { COLORS } from "../../../src/theme";
+import type { PsnVerificationResult } from "../../../src/services/convex/externalApiService";
+import { GameSkillScore, getDisplaySkillScoreForGame } from "../../../src/services/skillRatingService";
+import { getUserTeams, Team } from "../../../src/services/convex/teamService";
+import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
+import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
+import { COLORS, SPACING } from "../../../src/theme";
+import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
+import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
+import { formatValorantRoleAgent } from "../../../constants/profileOptions";
+import {
+    PlayerEmptyStateCard,
+    PlayerSectionHeader,
+} from "../components/PlayerSurface";
+import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
+import { formatPlayerProfileShare } from "../../../src/utils/shareContent";
 import styles from "./profile.styles";
 
 // FACEIT Level Icons
@@ -43,17 +65,33 @@ const faceitLevelIcons: Record<number, any> = {
     10: require("../../../assets/images/faceit-levels/Level 10.png"),
 };
 
-// Generate list from GAME_RULES to ensure consistency
-const ALL_GAMES = Object.entries(GAME_RULES).map(([key, rule]) => ({
-    key,
-    name: rule.label,
-    // Icon mapping (could be moved to constants but fine here for now)
-    icon: (key === 'cs2' ? 'sports-esports' :
-        key === 'fc26' ? 'sports-soccer' :
-            key === 'tekken8' ? 'sports-mma' :
-                key === 'indoor_cricket' ? 'sports-cricket' :
-                    ['padel', 'pickleball'].includes(key) ? 'sports-tennis' : 'sports-soccer') as keyof typeof MaterialIcons.glyphMap
-}));
+const canonicalProfileGameKey = (key: string) => key === 'fc25' ? 'fc26' : key;
+
+const getGameIcon = (key: string): AppIconName => (
+    key === 'cs2' ? 'sports-esports' :
+        key === 'cs16' ? 'sports-esports' :
+            key === 'valorant' ? 'sports-esports' :
+                key === 'fc26' ? 'sports-soccer' :
+                    key === 'tekken8' ? 'sports-mma' :
+                        key === 'indoor_cricket' ? 'sports-cricket' :
+                            ['padel', 'pickleball'].includes(key) ? 'sports-tennis' : 'sports-soccer'
+) as AppIconName;
+
+// Generate list from GAME_RULES while collapsing legacy aliases such as fc25.
+const ALL_GAMES = Array.from(
+    Object.entries(GAME_RULES).reduce((games, [key, rule]) => {
+        const canonicalKey = canonicalProfileGameKey(key);
+        games.set(canonicalKey, {
+            key: canonicalKey,
+            name: rule.label,
+            icon: getGameIcon(canonicalKey),
+        });
+        return games;
+    }, new Map<string, { key: string; name: string; icon: AppIconName }>())
+    .values()
+);
+
+const EXTERNAL_STATS_REFRESH_MS = 5 * 60 * 1000;
 
 interface FullUserProfile {
     uid: string;
@@ -62,9 +100,13 @@ interface FullUserProfile {
     username?: string;
     city?: string;
     ageRange?: string;
+    photoURL?: string;
+    profileImageUpdatedAt?: number;
 
     // Generic Play Flags & Roles
     playsCs2?: boolean; cs2Role?: string;
+    playsCs16?: boolean; cs16Role?: string;
+    playsValorant?: boolean; valorantRole?: string; valorantAgent?: string;
     playsFc?: boolean; fcTeam?: string; fcFormation?: string;
     playsTekken?: boolean; tekkenFavorites?: string[];
     playsFutsal?: boolean; futsalPositions?: string[];
@@ -89,64 +131,161 @@ interface FullUserProfile {
 
     // Platform Metadata
     platformLastSynced?: Record<string, any>; // Reserved for future detailed timestamps per platform if structure changes
+    lastExternalSyncAt?: number;
     updatedAt?: any;
+}
+
+function withCacheBust(url: string, version?: number | null) {
+    const v = Number(version || 0);
+    if (!url) return url;
+    if (!Number.isFinite(v) || v <= 0) return url;
+    return url.includes("?") ? `${url}&v=${v}` : `${url}?v=${v}`;
 }
 
 export default function Profile() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const [loggingOut, setLoggingOut] = useState(false);
+    const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
-    const [profile, setProfile] = useState<FullUserProfile | null>(null);
+    const bottomChromeClearance = getBottomChromeClearance({
+        bottomInset: insets.bottom,
+        tabBarHeight,
+    });
+    const tabBarScrollClearance = useTabBarClearance(SPACING.xxl);
+    const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.xxl, tabBarScrollClearance);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
+    const { animatedStyle: entranceStyle } = useEntrance({
+        axis: "y",
+        distance: 10,
+        initialScale: 0.995,
+    });
+    const {
+        animatedStyle: settingsPressStyle,
+        onPressIn: settingsPressIn,
+        onPressOut: settingsPressOut,
+    } = usePressScale({ activeScale: 0.98 });
+    useRouteLogger("ProfileScreen", { userId: user?._id });
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [myTeams, setMyTeams] = useState<Team[]>([]);
-    const [loadingTeams, setLoadingTeams] = useState(false);
+    // Spinner shows only until the first teams fetch resolves. Background/focus
+    // refreshes update `myTeams` in place and must NOT blank the section.
+    const [initialTeamsLoad, setInitialTeamsLoad] = useState(true);
+    const refreshExternalStats = useAction(api.users.refreshExternalStats);
+    const externalSyncInFlight = useRef(false);
 
-    // Prevent double fetch
+    // Convex reactive query for user profile (replaces getDoc)
+    const convexProfile = useQuery(
+        api.users.getById,
+        user?._id ? { userId: user._id as Id<"users"> } : "skip"
+    );
+
+    // Derive profile from reactive query
+    const profile: FullUserProfile | null = convexProfile
+        ? { uid: convexProfile._id, ...convexProfile } as any as FullUserProfile
+        : null;
+
+    // Update loading state when profile loads
+    useEffect(() => {
+        if (convexProfile !== undefined) {
+            setLoading(false);
+        }
+    }, [convexProfile]);
+
+    // Prevent double fetch for teams
     const isFetching = useRef(false);
 
-    const fetchProfile = useCallback(async (isRefresh = false) => {
-        if (!user?.uid || (isFetching.current && !isRefresh)) return;
+    const hasExternalPlatform = useCallback(() => {
+        return Boolean(
+            profile?.steamProfileUrl ||
+            profile?.steamId ||
+            profile?.faceitProfileUrl ||
+            profile?.faceitNickname ||
+            profile?.psnStats?.psnOnlineId ||
+            (profile as any)?.psnOnlineId
+        );
+    }, [profile?.faceitNickname, profile?.faceitProfileUrl, profile?.steamId, profile?.steamProfileUrl, profile?.psnStats?.psnOnlineId, profile]);
+
+    const maybeRefreshExternalStats = useCallback(async (force = false) => {
+        if (!user?._id || !hasExternalPlatform() || externalSyncInFlight.current) return;
+
+        const lastSync = Number(profile?.lastExternalSyncAt || 0);
+        if (!force && lastSync && Date.now() - lastSync < EXTERNAL_STATS_REFRESH_MS) return;
+
+        try {
+            externalSyncInFlight.current = true;
+            const result = await refreshExternalStats({
+                userId: user._id as Id<"users">,
+                force,
+            });
+            if (force && result.errors.length > 0 && result.refreshed.length === 0) {
+                showToast({
+                    type: "error",
+                    title: "Stats refresh failed",
+                    message: result.errors.map((item) => `${item.platform}: ${item.message}`).join("\n"),
+                });
+            }
+        } catch (error: any) {
+            if (force) {
+                showToast({
+                    type: "error",
+                    title: "Stats refresh failed",
+                    message: error?.message || "Could not refresh Steam/FACEIT stats.",
+                });
+            }
+        } finally {
+            externalSyncInFlight.current = false;
+        }
+    }, [hasExternalPlatform, profile?.lastExternalSyncAt, refreshExternalStats, showToast, user?._id]);
+
+    const fetchTeams = useCallback(async (isRefresh = false) => {
+        if (!user?._id || (isFetching.current && !isRefresh)) return;
 
         try {
             isFetching.current = true;
-            if (!isRefresh && !profile) setLoading(true); // Initial load only
-
-            const userRef = doc(db, "users", user.uid);
-            const snap = await getDoc(userRef);
-
-            if (snap.exists()) {
-                setProfile({ uid: snap.id, ...snap.data() } as FullUserProfile);
-            }
-
-            setLoadingTeams(true);
-            const teamsRes = await getUserTeams(user.uid);
+            const teamsRes = await getUserTeams(user._id);
             if (teamsRes.ok && teamsRes.data) {
-                setMyTeams(teamsRes.data);
+                setMyTeams(teamsRes.data.filter((team) => !isPhysicalGameDisabled(team.game)));
             } else {
                 setMyTeams([]);
             }
         } catch (e) {
-            console.error("[Profile] Failed to fetch profile", e);
+            console.error("[Profile] Failed to fetch teams", e);
             if (isRefresh) showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
         } finally {
-            setLoading(false);
             setRefreshing(false);
-            setLoadingTeams(false);
+            setInitialTeamsLoad(false);
             isFetching.current = false;
         }
-    }, [user?.uid]);
+    }, [user?._id]);
 
-    // Focus Effect: Re-fetch only if data might be stale (simplified to always fetch on focus for now to ensure sync after edit)
+    // Call external-stats refresh through a ref so its identity changing after each
+    // sync (it depends on `profile`) does NOT re-run the focus effect. Previously
+    // that re-ran the effect, which refetched teams + triggered another sync in a
+    // loop, flickering the My Teams section.
+    const maybeRefreshExternalStatsRef = useRef(maybeRefreshExternalStats);
+    maybeRefreshExternalStatsRef.current = maybeRefreshExternalStats;
+
+    // Focus Effect: Re-fetch teams on focus. Only `fetchTeams` (which changes solely
+    // when the user id changes) is a dependency, so the effect runs once per focus.
     useFocusEffect(
         useCallback(() => {
-            fetchProfile();
-        }, [fetchProfile])
+            fetchTeams();
+            void maybeRefreshExternalStatsRef.current(false);
+
+            const interval = setInterval(() => {
+                void maybeRefreshExternalStatsRef.current(false);
+            }, EXTERNAL_STATS_REFRESH_MS);
+
+            return () => clearInterval(interval);
+        }, [fetchTeams])
     );
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchProfile(true);
+        void maybeRefreshExternalStats(true);
+        fetchTeams(true);
     };
 
     const handleLogout = async () => {
@@ -159,9 +298,14 @@ export default function Profile() {
                     text: "Logout",
                     style: "destructive",
                     onPress: async () => {
-                        const res = await signOutUser();
-                        if (res.ok) router.replace("/auth/login");
-                        else Alert.alert("Logout Failed", res.message);
+                        setLoggingOut(true);
+                        try {
+                            const res = await signOutUser();
+                            if (res.ok) router.replace("/auth/login");
+                            else showToast({ type: "error", title: "Logout Failed", message: res.message });
+                        } finally {
+                            setLoggingOut(false);
+                        }
                     }
                 }
             ]
@@ -170,8 +314,34 @@ export default function Profile() {
 
     const handleSettings = () => router.push("/profile/edit");
 
+    const handleShareProfile = async () => {
+        if (!profile || !user?._id) return;
+        try {
+            const activeKeys = ALL_GAMES.map((g) => g.key).filter((key) =>
+                isGameActive(key),
+            );
+            const gameLabels = activeKeys.map((key) => getCanonicalGameLabel(key));
+            const firstRating = activeKeys
+                .map((key) => getDisplaySkillScoreForGame(profile.skillScores, key)?.rating)
+                .find((rating) => typeof rating === "number");
+            const message = formatPlayerProfileShare({
+                uid: String(user._id),
+                displayName: profile.fullName || profile.username,
+                gameLabels,
+                rating: typeof firstRating === "number" ? firstRating : null,
+                faceitLevel:
+                    typeof profile.faceitSkillLevel === "number"
+                        ? profile.faceitSkillLevel
+                        : null,
+            });
+            await Share.share({ message });
+        } catch {
+            // ignore
+        }
+    };
+    const handleSupport = () => router.push("/(player)/support" as any);
+
     const handleAddGame = (gameKey: string) => {
-        // Validation based on GAME_RULES requirements
         const rules = GAME_RULES[gameKey];
         if (rules && rules.requiresOneOf) {
             const hasRequirement = rules.requiresOneOf.some(platform => {
@@ -185,11 +355,10 @@ export default function Profile() {
             if (!hasRequirement) {
                 const prettyPlatforms = rules.requiresOneOf.map(p => p.toUpperCase()).join(' or ');
                 showToast({
-                    type: "warning",
-                    title: "Platform Required",
-                    message: `Please connect your ${prettyPlatforms} account in Edit Profile to add ${rules.label}.`
+                    type: "info",
+                    title: "Verification optional",
+                    message: `${rules.label} can use ${prettyPlatforms} for faster verification, but you can continue and set your skill in-app.`
                 });
-                return;
             }
         }
         router.push(`/profile/game-details?gameId=${gameKey}`);
@@ -211,6 +380,8 @@ export default function Profile() {
         if (!profile) return false;
         switch (gameKey) {
             case 'cs2': return !!(profile.playsCs2);
+            case 'cs16': return !!(profile.playsCs16);
+            case 'valorant': return !!(profile.playsValorant);
             case 'fc26': return !!(profile.playsFc);
             case 'tekken8': return !!(profile.playsTekken);
             case 'futsal': return !!(profile.playsFutsal);
@@ -230,6 +401,14 @@ export default function Profile() {
             if (profile.faceitElo) return `Elo ${profile.faceitElo}`;
             if (profile.steamCs2Hours) return `${Math.round(profile.steamCs2Hours)}h Played`;
         }
+        if (gameKey === 'cs16') {
+            const score = getDisplaySkillScoreForGame(profile.skillScores, 'cs16');
+            if (score?.tier) return `${score.tier} ${score.rating ?? ''}`.trim();
+        }
+        if (gameKey === 'valorant') {
+            const score = getDisplaySkillScoreForGame(profile.skillScores, 'valorant');
+            if (score?.tier) return `${score.tier} ${score.rating ?? ''}`.trim();
+        }
         if (gameKey === 'fc26') {
             if (profile.psnStats?.fc?.progress) return `PSN ${profile.psnStats.fc.progress}%`;
             if (profile.steamFc26Hours) return `${Math.round(profile.steamFc26Hours)}h Played`;
@@ -246,6 +425,8 @@ export default function Profile() {
         if (!profile) return 'Not configured';
         switch (gameKey) {
             case 'cs2': return profile.cs2Role || 'No role set';
+            case 'cs16': return profile.cs16Role || 'No role set';
+            case 'valorant': return formatValorantRoleAgent(profile.valorantRole, profile.valorantAgent) || 'No role set';
             case 'fc26': return profile.fcTeam || 'No team set';
             case 'tekken8': return profile.tekkenFavorites?.join(', ') || 'No characters set';
             case 'futsal': return profile.futsalPositions?.join(', ') || 'No position set';
@@ -254,6 +435,18 @@ export default function Profile() {
             case 'pickleball': return profile.pickleballRole || 'No mode set';
             default: return 'Active';
         }
+    };
+
+    // Format updatedAt for sync display
+    const formatSyncDate = (updatedAt: any) => {
+        if (!updatedAt) return 'Just now';
+        if (typeof updatedAt === 'number') {
+            return new Date(updatedAt).toLocaleDateString();
+        }
+        if (updatedAt?.toDate) {
+            return updatedAt.toDate().toLocaleDateString();
+        }
+        return 'Just now';
     };
 
     if (loading) {
@@ -269,31 +462,71 @@ export default function Profile() {
     return (
         <Screen
             style={styles.screen}
-            scroll
-            contentStyle={[
-                styles.scrollContent,
-                { paddingBottom: 24 },
-            ]}
+            scroll={false}
+            routeKey="/(player)/(tabs)/profile"
+            contentStyle={styles.screenContent}
             edges={['top']}
-            scrollProps={{
-                showsVerticalScrollIndicator: false,
-                refreshControl: <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />,
-            }}
         >
+            <BlockingLoader visible={loggingOut} label="Logging out..." />
             <AppHeader
                 title="Profile"
                 inlineTitle
                 rightAction={(
-                    <TouchableOpacity style={styles.headerIcon} onPress={handleSettings}>
-                        <MaterialIcons name="settings" size={24} color={COLORS.text} />
-                    </TouchableOpacity>
+                    <View style={styles.headerActions}>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={() => void handleShareProfile()}
+                            accessibilityRole="button"
+                            accessibilityLabel="Share profile"
+                        >
+                            <AppIcon name="share" size={22} color={COLORS.text} />
+                        </Pressable>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={handleSupport}
+                            accessibilityRole="button"
+                            accessibilityLabel="Open Help and Support"
+                        >
+                            <AppIcon name="support" size={22} color={COLORS.text} />
+                        </Pressable>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={handleSettings}
+                            onPressIn={settingsPressIn}
+                            onPressOut={settingsPressOut}
+                            accessibilityRole="button"
+                            accessibilityLabel="Open profile settings"
+                        >
+                            <Animated.View style={settingsPressStyle}>
+                                <AppIcon name="settings" size={24} color={COLORS.text} />
+                            </Animated.View>
+                        </Pressable>
+                    </View>
                 )}
             />
 
+            <Animated.View style={[styles.contentWrap, entranceStyle]}>
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={[
+                        styles.scrollContent,
+                        { paddingBottom: profileBottomPadding },
+                    ]}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
+                >
             {/* Profile Card */}
-            <View style={styles.profileCard}>
+            <AppCard style={styles.profileCard}>
                     <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{getInitials()}</Text>
+                        {profile?.photoURL ? (
+                            <AppImage
+                                source={{ uri: withCacheBust(profile.photoURL, profile.profileImageUpdatedAt) }}
+                                containerStyle={styles.avatarImage}
+                                contentFit="cover"
+                            />
+                        ) : (
+                            <Text style={styles.avatarText}>{getInitials()}</Text>
+                        )}
                     </View>
                     <Text style={styles.profileName}>{profile?.fullName || 'Player'}</Text>
                     {profile?.username && <Text style={styles.profileUsername}>@{profile.username}</Text>}
@@ -302,24 +535,22 @@ export default function Profile() {
                     <View style={styles.profileMeta}>
                         {profile?.city && (
                             <View style={styles.profileMetaItem}>
-                                <MaterialIcons name="location-on" size={14} color={COLORS.muted} />
+                                <AppIcon name="location-on" size={14} color={COLORS.muted} />
                                 <Text style={styles.profileMetaText}>{profile.city}</Text>
                             </View>
                         )}
                         {profile?.ageRange && (
                             <View style={styles.profileMetaItem}>
-                                <MaterialIcons name="cake" size={14} color={COLORS.muted} />
+                                <AppIcon name="cake" size={14} color={COLORS.muted} />
                                 <Text style={styles.profileMetaText}>{profile.ageRange}</Text>
                             </View>
                         )}
                     </View>
-                </View>
+                </AppCard>
 
                 {/* My Games */}
                 <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>My Games</Text>
-                    </View>
+                    <PlayerSectionHeader title="My Games" />
 
                     <ScrollView
                         horizontal
@@ -328,18 +559,47 @@ export default function Profile() {
                     >
                         {ALL_GAMES.map(game => {
                             const isActive = isGameActive(game.key);
-                            const skillScore = profile?.skillScores?.[game.key];
+                            const skillScore = getDisplaySkillScoreForGame(profile?.skillScores, game.key);
                             const externalStat = getExternalStatLine(game.key);
                             const roleText = getGameRole(game.key);
 
                             if (isActive) {
                                 return (
-                                    <TouchableOpacity key={game.key} style={styles.gameCard} onPress={() => handleEditGame(game.key)}>
+                                    <Pressable key={game.key} style={styles.gameCard} onPress={() => handleEditGame(game.key)}>
+                                        <AppCard style={styles.gameCardInner}>
                                         <View style={styles.gameIcon}>
-                                            <MaterialIcons name={game.icon} size={24} color={COLORS.accent} />
+                                            <GameImageIcon
+                                                game={game.key}
+                                                size={60}
+                                                fallbackIconName={game.icon}
+                                                fallbackIconColor={COLORS.accent}
+                                            />
                                         </View>
                                         <View style={styles.gameInfo}>
-                                            <Text style={styles.gameName} numberOfLines={1}>{game.name}</Text>
+                                            <View style={styles.gameTitleRow}>
+                                                <Text style={styles.gameName} numberOfLines={1} ellipsizeMode="tail">{game.name}</Text>
+                                                {/* Primary Badge: SkillScore > Faceit Level > PSN */}
+                                                <View style={styles.gameBadge}>
+                                                    {skillScore ? (
+                                                        <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
+                                                    ) : (
+                                                        /* Legacy/External Badge Fallback */
+                                                        game.key === 'cs2' && profile?.faceitSkillLevel ? (
+                                                            <AppImage
+                                                                source={faceitLevelIcons[profile.faceitSkillLevel]}
+                                                                containerStyle={styles.faceitIcon}
+                                                                contentFit="contain"
+                                                            />
+                                                        ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
+                                                            <View style={styles.gameSkill}>
+                                                                <AppIcon name="emoji-events" size={16} color="#FFD700" style={styles.yellowIcon} />
+                                                            </View>
+                                                        ) : (
+                                                            <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+                                                        )
+                                                    )}
+                                                </View>
+                                            </View>
                                             <Text style={styles.gameRole} numberOfLines={1}>{roleText}</Text>
                                             {/* New Secondary Stat Line */}
                                             {externalStat && (
@@ -348,37 +608,27 @@ export default function Profile() {
                                                 </Text>
                                             )}
                                         </View>
-
-                                        {/* Primary Badge: SkillScore > Faceit Level > PSN */}
-                                        <View style={styles.marginLeftAuto}>
-                                            {skillScore ? (
-                                                <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
-                                            ) : (
-                                                /* Legacy/External Badge Fallback */
-                                                game.key === 'cs2' && profile?.faceitSkillLevel ? (
-                                                    <Image source={faceitLevelIcons[profile.faceitSkillLevel]} style={styles.faceitIcon} resizeMode="contain" />
-                                                ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
-                                                    <View style={styles.gameSkill}>
-                                                        <MaterialIcons name="emoji-events" size={16} color="#FFD700" style={styles.yellowIcon} />
-                                                    </View>
-                                                ) : (
-                                                    <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                                                )
-                                            )}
-                                        </View>
-                                    </TouchableOpacity>
+                                        </AppCard>
+                                    </Pressable>
                                 );
                             } else {
                                 return (
-                                    <TouchableOpacity key={game.key} style={styles.gameCardInactive} onPress={() => handleAddGame(game.key)}>
+                                    <Pressable key={game.key} style={styles.gameCardInactive} onPress={() => handleAddGame(game.key)}>
+                                        <AppCard style={styles.gameCardInactiveInner}>
                                         <View style={styles.gameIconInactive}>
-                                            <MaterialIcons name={game.icon} size={24} color={COLORS.muted} />
+                                            <GameImageIcon
+                                                game={game.key}
+                                                size={56}
+                                                fallbackIconName={game.icon}
+                                                fallbackIconColor={COLORS.muted}
+                                            />
                                         </View>
                                         <View>
                                             <Text style={styles.gameNameInactive}>{game.name}</Text>
                                             <Text style={styles.gameAddText}>Tap to add</Text>
                                         </View>
-                                    </TouchableOpacity>
+                                        </AppCard>
+                                    </Pressable>
                                 );
                             }
                         })}
@@ -387,15 +637,14 @@ export default function Profile() {
 
                 {/* Platforms */}
                 <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Connected Platforms</Text>
-                    </View>
+                    <PlayerSectionHeader title="Connected Platforms" />
 
                     <View style={styles.sectionPadding}>
                         {/* Steam */}
-                        <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
+                        <Pressable style={styles.platformCard} onPress={handleSettings}>
+                            <AppCard style={styles.platformCardInner}>
                             <View style={[styles.platformIcon, styles.steamIcon]}>
-                                <MaterialIcons name="sports-esports" size={20} color={COLORS.steamBorder} />
+                                <AppIcon name="sports-esports" size={20} color={COLORS.steamBorder} />
                             </View>
                             <View style={styles.platformInfo}>
                                 <Text style={styles.platformName}>Steam</Text>
@@ -403,18 +652,20 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatSyncDate(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
                             </View>
-                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                        </TouchableOpacity>
+                            <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+                            </AppCard>
+                        </Pressable>
 
                         {/* FACEIT */}
-                        <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
+                        <Pressable style={styles.platformCard} onPress={handleSettings}>
+                            <AppCard style={styles.platformCardInner}>
                             <View style={[styles.platformIcon, styles.faceitPlatformIcon]}>
-                                <MaterialIcons name="verified" size={20} color={COLORS.faceitBorder} />
+                                <AppIcon name="verified" size={20} color={COLORS.faceitBorder} />
                             </View>
                             <View style={styles.platformInfo}>
                                 <Text style={styles.platformName}>FACEIT</Text>
@@ -422,18 +673,20 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatSyncDate(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
                             </View>
-                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                        </TouchableOpacity>
+                            <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+                            </AppCard>
+                        </Pressable>
 
                         {/* PSN */}
-                        <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
+                        <Pressable style={styles.platformCard} onPress={handleSettings}>
+                            <AppCard style={styles.platformCardInner}>
                             <View style={[styles.platformIcon, styles.psnIconContainer]}>
-                                <MaterialIcons name="sports-esports" size={20} color="#003791" />
+                                <AppIcon name="sports-esports" size={20} color="#003791" />
                             </View>
                             <View style={styles.platformInfo}>
                                 <Text style={styles.platformName}>PlayStation Network</Text>
@@ -441,28 +694,35 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatSyncDate(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
                             </View>
-                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                        </TouchableOpacity>
+                            <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+                            </AppCard>
+                        </Pressable>
                     </View>
                 </View>
 
                 {/* Preferred Areas */}
                 {profile?.areasPreferred && profile.areasPreferred.length > 0 && (
                     <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>Preferred Areas</Text>
-                        </View>
+                        <PlayerSectionHeader
+                            title="Preferred Areas"
+                            actionLabel="Edit"
+                            onPress={() => router.push({ pathname: "/profile/edit", params: { focus: "areas" } })}
+                        />
                         <View style={styles.sectionPadding}>
                             <View style={styles.areaChipsRow}>
                                 {profile.areasPreferred.map(area => (
-                                    <View key={area} style={styles.areaChip}>
-                                        <Text style={styles.areaChipText}>{area}</Text>
-                                    </View>
+                                    <StatusPill
+                                        key={area}
+                                        label={area}
+                                        tone="neutral"
+                                        style={styles.areaChip}
+                                        textStyle={styles.areaChipText}
+                                    />
                                 ))}
                             </View>
                         </View>
@@ -471,76 +731,73 @@ export default function Profile() {
 
                 {/* My Teams */}
                 <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>My Teams</Text>
-                        <TouchableOpacity onPress={() => router.push("/(player)/(tabs)/teams")}>
-                            <Text style={styles.sectionLink}>View All</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <PlayerSectionHeader
+                        title="My Teams"
+                        actionLabel="View All"
+                        onPress={() => router.push(buildLegacyTeamsHref("my") as any)}
+                    />
                     <View style={styles.sectionPadding}>
-                        {loadingTeams ? (
-                            <View style={styles.emptyState}>
+                        {initialTeamsLoad ? (
+                            <AppCard variant="empty" style={styles.emptyState}>
                                 <ActivityIndicator size="small" color={COLORS.accent} />
-                            </View>
+                            </AppCard>
                         ) : myTeams.length > 0 ? (
                             myTeams.slice(0, 3).map(team => {
-                                const maxMembers = team.maxMembers || 0;
-                                const rawCount = team.memberUids?.length ?? team.memberCount ?? 0;
-                                const memberCount = maxMembers > 0 ? Math.min(rawCount, maxMembers) : rawCount;
+                                const { currentMembers, maxMembers } = getTeamMainDisplayRoster(team);
                                 return (
-                                    <TouchableOpacity
+                                    <Pressable
                                         key={team.id}
                                         style={styles.teamCard}
                                         onPress={() => router.push(`/teams/${team.id}` as any)}
                                     >
+                                        <AppCard style={styles.teamCardInner}>
                                         <View style={styles.teamIcon}>
-                                            <MaterialIcons name="groups" size={20} color={COLORS.accent} />
+                                            <AppIcon name="groups" size={20} color={COLORS.accent} />
                                         </View>
                                         <View style={styles.teamInfo}>
                                             <Text style={styles.teamName} numberOfLines={1}>{team.name}</Text>
                                             <Text style={styles.teamGame}>{(team.game || '').toUpperCase()}</Text>
-                                            <Text style={styles.teamMembers}>{memberCount} / {maxMembers} members</Text>
+                                            <Text style={styles.teamMembers}>{currentMembers} / {maxMembers} members</Text>
                                         </View>
-                                    </TouchableOpacity>
+                                        </AppCard>
+                                    </Pressable>
                                 );
                             })
                         ) : (
-                            <View style={styles.emptyState}>
-                                <Text style={styles.emptyText}>You haven't joined any teams yet.</Text>
-                                <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/teams/create")}>
-                                    <Text style={styles.emptyButtonText}>Create a Team</Text>
-                                </TouchableOpacity>
-                            </View>
+                            <PlayerEmptyStateCard
+                                title="You haven't joined any teams yet."
+                                actionLabel="Create a Team"
+                                onPress={() => router.push("/teams/create")}
+                                style={styles.emptyState}
+                            />
                         )}
                     </View>
                 </View>
 
                 {/* Recent Matches */}
                 <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Recent Matches</Text>
-                        <TouchableOpacity onPress={() => router.push("/matchrooms/my")}>
-                            <Text style={styles.sectionLink}>View All</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <PlayerSectionHeader
+                        title="Recent Matches"
+                        actionLabel="View All"
+                        onPress={() => router.push("/matchrooms/my")}
+                    />
                     <View style={styles.sectionPadding}>
-                        <View style={styles.emptyState}>
-                            <Text style={styles.emptyText}>No matches played yet.</Text>
-                            <TouchableOpacity
-                                style={styles.emptyButton}
-                                onPress={() => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: 'matchrooms', t: Date.now().toString() } } as any)}
-                            >
-                                <Text style={styles.emptyButtonText}>Find a Match</Text>
-                            </TouchableOpacity>
-                        </View>
+                        <PlayerEmptyStateCard
+                            title="No matches played yet."
+                            actionLabel="Find a Match"
+                            onPress={() => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: 'matchrooms', t: Date.now().toString() } } as any)}
+                            style={styles.emptyState}
+                        />
                     </View>
                 </View>
 
                 {/* Logout */}
-                <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-                    <MaterialIcons name="logout" size={20} color={COLORS.error} />
+                <AppButton variant="danger" style={styles.logoutButton} onPress={handleLogout}>
+                    <AppIcon name="logout" size={20} color={COLORS.error} />
                     <Text style={styles.logoutButtonText}>Logout</Text>
-                </TouchableOpacity>
+                </AppButton>
+                </ScrollView>
+            </Animated.View>
         </Screen>
     );
 }

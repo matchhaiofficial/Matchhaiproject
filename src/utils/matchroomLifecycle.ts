@@ -1,10 +1,14 @@
 // src/utils/matchroomLifecycle.ts
 // Helpers for matchroom expiry/lock using scheduled match time.
 
+import {
+    DAY_MS,
+    MATCHROOM_LOCK_BEFORE_START_MS,
+} from "../constants/timing";
+
 // Legacy fallback TTL (older docs without scheduled timestamps)
 const ROOM_TTL_MS = 48 * 60 * 60 * 1000;
-const ONE_HOUR_MS = 60 * 60 * 1000;
-const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+const ONE_DAY_MS = DAY_MS;
 
 function toDate(value: any): Date | null {
     if (!value) return null;
@@ -17,8 +21,14 @@ function toDate(value: any): Date | null {
         const ms = value.toMillis();
         return Number.isFinite(ms) ? new Date(ms) : null;
     }
-    if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
-    if (typeof value === "number") return new Date(value);
+    if (typeof value?.seconds === "number") {
+        const parsed = new Date(value.seconds * 1000);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === "number") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
     if (typeof value === "string") {
         const parsed = new Date(value);
         return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -42,22 +52,18 @@ export function parseScheduledStartAt(room: any): Date | null {
 export function getRoomLockAt(room: any): Date | null {
     const explicit = toDate(room?.lockAt);
     if (explicit) return explicit;
-
-    const startAt = parseScheduledStartAt(room);
-    if (!startAt) return null;
-    return new Date(startAt.getTime() - ONE_DAY_MS);
+    const start = parseScheduledStartAt(room);
+    return start ? new Date(start.getTime() - MATCHROOM_LOCK_BEFORE_START_MS) : null;
 }
 
 export function getRoomExpiresAt(room: any): Date | null {
     const explicit = toDate(room?.expiresAt);
     if (explicit) return explicit;
+    return parseScheduledStartAt(room);
+}
 
-    const lockAt = getRoomLockAt(room);
-    if (lockAt) return lockAt;
-
-    const createdAt = getRoomCreatedAt(room);
-    if (!createdAt) return null;
-    return new Date(createdAt.getTime() + ROOM_TTL_MS);
+export function isWalkInMatchroom(room: any): boolean {
+    return String(room?.bookingSource || "").toLowerCase() === "walkin";
 }
 
 /**
@@ -86,9 +92,8 @@ export function isRoomFull(room: any): boolean {
 
     // If slots exist, check confirmed count
     if (allSlots.length > 0) {
-        const totalSlots = allSlots.length;
-        const confirmedSlots = allSlots.filter((s: any) => s.status === 'confirmed').length;
-        return confirmedSlots >= totalSlots;
+        const confirmedSlots = allSlots.filter((s: any) => s.status === 'confirmed' && (s.uid || s.user?.uid)).length;
+        return confirmedSlots >= allSlots.length && confirmedSlots >= (room.maxPlayers || allSlots.length);
     }
 
     // Fallback: player count
@@ -112,41 +117,126 @@ export function isRoomFull(room: any): boolean {
  * @returns true if room is expired
  */
 export function isRoomExpired(room: any, now = new Date()): boolean {
-    // Already marked as expired
-    if (room.status === 'expired') return true;
-
-    // Full rooms don't expire
+    if (!room) return false;
+    if (room.status === "expired" || room.status === "cancelled") return true;
+    // Completed / in-progress rooms are a valid terminal/active lifecycle, never
+    // "expired" regardless of roster.
+    if (room.status === "completed" || room.status === "in-progress") return false;
     if (isRoomFull(room)) return false;
-
+    if (isWalkInMatchroom(room)) {
+        const start = parseScheduledStartAt(room);
+        return Boolean(start && start.getTime() <= now.getTime());
+    }
+    // Joins close at lockAt (24h before start). An unfilled room that has passed
+    // its join-lock can never fill, so it is expired/dead — not merely "locked".
+    const lockAt = getRoomLockAt(room);
+    if (lockAt && lockAt.getTime() <= now.getTime()) return true;
     const expiresAt = getRoomExpiresAt(room);
     if (!expiresAt) return false;
-    return now.getTime() >= expiresAt.getTime();
+    return expiresAt.getTime() <= now.getTime();
 }
 
 /**
- * Check if a matchroom is locked.
+ * Check if a matchroom is join-locked.
  *
- * Locked rules:
+ * Join-lock rules:
  * - Full rooms are considered locked (no more joins).
- * - If now >= lockAt, room is locked (but if not full by then, it is expired instead).
+ * - If now >= lockAt, new join flows are blocked.
  * 
  * @param room The matchroom object
- * @returns true if room is locked
+ * @returns true if room is join-locked
  */
-export function isRoomLocked(room: any, now = new Date()): boolean {
-    // Explicit lock
-    if (room.status === 'locked') return true;
-    if (room.isLocked === true) return true;
-
+export function isJoinLocked(room: any, now = new Date()): boolean {
     // Expired rooms aren't treated as locked for join logic
     if (isRoomExpired(room, now)) return false;
 
-    // Time lock (24h before match)
-    const lockAt = getRoomLockAt(room);
-    if (lockAt && now.getTime() >= lockAt.getTime()) return true;
+    if (isRoomFull(room)) return true;
 
-    // Full = locked
-    return isRoomFull(room);
+    if (isWalkInMatchroom(room)) {
+        const start = parseScheduledStartAt(room);
+        return Boolean(start && start.getTime() <= now.getTime());
+    }
+
+    if (
+        room?.status === "locked" ||
+        room?.isLocked === true ||
+        room?.venueConfirmedAt ||
+        room?.confirmedZoneId ||
+        room?.zoneAdminApproved === true
+    ) {
+        return true;
+    }
+
+    const lockAt = getRoomLockAt(room);
+    return Boolean(lockAt && lockAt.getTime() <= now.getTime());
+}
+
+export type MatchroomJoinAvailability =
+    | { available: true; code: "available"; message: null }
+    | {
+        available: false;
+        code: "full" | "locked" | "expired" | "closed";
+        message: string;
+    };
+
+export function getMatchroomJoinAvailability(
+    room: any,
+    now = new Date(),
+): MatchroomJoinAvailability {
+    if (!room) {
+        return {
+            available: false,
+            code: "closed",
+            message: "This matchroom is unavailable.",
+        };
+    }
+
+    const status = String(room.status || "").toLowerCase();
+    if (["completed", "in-progress", "cancelled", "closed", "admin_review", "payment_failed"].includes(status)) {
+        return {
+            available: false,
+            code: "closed",
+            message: "This matchroom is no longer accepting join requests.",
+        };
+    }
+
+    if (isRoomExpired(room, now)) {
+        return {
+            available: false,
+            code: "expired",
+            message: "This matchroom has expired.",
+        };
+    }
+
+    if (isRoomFull(room)) {
+        return {
+            available: false,
+            code: "full",
+            message: "This matchroom is full.",
+        };
+    }
+
+    if (isJoinLocked(room, now)) {
+        return {
+            available: false,
+            code: "locked",
+            message: "This matchroom is locked and no longer accepting join requests.",
+        };
+    }
+
+    return { available: true, code: "available", message: null };
+}
+
+export function isLeaveLocked(room: any, now = new Date()): boolean {
+    if (!room) return false;
+    if (room.status === "expired" || room.status === "cancelled") return true;
+    if (room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true) return true;
+    const lockAt = getRoomLockAt(room);
+    return Boolean(lockAt && lockAt.getTime() <= now.getTime());
+}
+
+export function isRoomLocked(room: any, now = new Date()): boolean {
+    return isJoinLocked(room, now);
 }
 
 /**
@@ -158,6 +248,7 @@ export function isRoomLocked(room: any, now = new Date()): boolean {
 export function getRoomDisplayStatus(room: any): string {
     if (isRoomExpired(room)) return 'expired';
     if (isRoomLocked(room)) return 'locked';
+    if (room.status === 'expired') return 'open';
     return room.status || 'open';
 }
 

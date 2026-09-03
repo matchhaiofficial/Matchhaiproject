@@ -1,35 +1,38 @@
 // app/super-admin/_layout.tsx
 import { Redirect, Stack } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserProfile, UserProfile } from "../../src/services/userService";
+import { useLoginFormStore } from "../../src/store/loginFormStore";
 import { COLORS } from "../../src/theme";
+import { isSuperAdminProfile } from "../../src/utils/accountRouting";
 import Logger from "../../src/utils/logger";
+import {
+    recordSuperAdminAccessDenied,
+    recordSuperAdminRouteAccess,
+} from "../../src/services/convex/superAdminService";
 
 export default function SuperAdminLayout() {
     const { user, loading: authLoading } = useAuth();
-    const [profile, setProfile] = React.useState<UserProfile | null>(null);
-    const [profileLoading, setProfileLoading] = React.useState(true);
+    const resetLoginForm = useLoginFormStore((state) => state.reset);
+    const isSuperAdmin = isSuperAdminProfile(user);
 
-    React.useEffect(() => {
-        async function loadProfile() {
-            if (user) {
-                const res = await getUserProfile(user.uid);
-                if (res.ok) {
-                    setProfile(res.data);
-                }
-            }
-            setProfileLoading(false);
+    useEffect(() => {
+        if (authLoading || !user) return;
+        if (isSuperAdmin) {
+            resetLoginForm();
+            void recordSuperAdminRouteAccess("/super-admin");
+            return;
         }
-        loadProfile();
-    }, [user]);
+        Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: user?.role });
+        void recordSuperAdminAccessDenied("/super-admin", "not_authorized");
+    }, [authLoading, isSuperAdmin, resetLoginForm, user]);
 
     // Show loading while checking auth state or profile
-    if (authLoading || (!!user && profileLoading)) {
+    if (authLoading) {
         return (
-            <View style={{ flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark, alignItems: 'center', justifyContent: 'center' }}>
                 <ActivityIndicator color={COLORS.accent} />
             </View>
         );
@@ -40,25 +43,40 @@ export default function SuperAdminLayout() {
         return <Redirect href="/auth/login" />;
     }
 
-    // Redirect if not super-admin
-    const isSuperAdmin = profile?.role === "super-admin" ||
-        (user?.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user?.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
-
     if (!isSuperAdmin) {
-        Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: profile?.role });
         return <Redirect href="/auth/login" />;
+    }
+
+    // Force first-login password change (e.g. provisioned partner Super Admins)
+    // before any Super Admin surface is reachable. Backend authz is unaffected;
+    // this is an additional in-app gate keyed on the per-user flag.
+    if (user.mustChangePassword === true) {
+        return <Redirect href="/auth/change-password" />;
     }
 
     return (
         <Stack
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: COLORS.background },
+                contentStyle: { backgroundColor: COLORS.backgroundDark },
             }}
         >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="notifications" options={{ headerShown: false }} />
+            <Stack.Screen name="easypaisa" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="request/[id]" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="report/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="support-tickets" options={{ headerShown: false }} />
+            <Stack.Screen name="support-ticket/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="audit-logs" options={{ headerShown: false }} />
+            <Stack.Screen name="identity-verifications" options={{ headerShown: false }} />
+            <Stack.Screen name="withdrawals" options={{ headerShown: false }} />
+            <Stack.Screen name="payment/[orderRefNum]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="matchrooms" options={{ headerShown: false }} />
+            <Stack.Screen name="matchroom/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="support" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="users" options={{ headerShown: false }} />
         </Stack>
     );
 }
+

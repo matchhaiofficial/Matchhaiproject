@@ -45,6 +45,50 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         lineHeight: 18,
     },
+    systemToolsCard: {
+        padding: SPACING.lg,
+    },
+    systemToolsHeader: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    systemToolsIconBadge: {
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(66, 165, 245, 0.13)",
+        borderWidth: 1,
+        borderColor: "rgba(66, 165, 245, 0.26)",
+    },
+    systemToolsHeaderText: {
+        flex: 1,
+        minWidth: 0,
+    },
+    migrationStateBox: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: 14,
+        backgroundColor: "rgba(255,255,255,0.035)",
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm + 2,
+        marginBottom: SPACING.md,
+    },
+    migrationStateLabel: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        marginBottom: 4,
+    },
+    migrationStateValue: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 19,
+    },
     metricsRow: {
         flexDirection: "row",
         gap: SPACING.md,
@@ -82,6 +126,9 @@ export default StyleSheet.create({
         flexDirection: "row",
         gap: SPACING.sm,
     },
+    systemToolsButton: {
+        height: 50,
+    },
     primaryButtonDisabled: {
         opacity: 0.6,
     },
@@ -102,6 +149,12 @@ export default StyleSheet.create({
         lineHeight: 18,
         marginLeft: SPACING.sm,
         flex: 1,
+    },
+    pointLabel: {
+        color: COLORS.text,
+    },
+    primaryButtonPressed: {
+        opacity: 0.9,
     },
 });
 

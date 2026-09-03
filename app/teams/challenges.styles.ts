@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from "../../src/th
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     loadingWrap: {
         flex: 1,
@@ -44,7 +44,12 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         padding: SPACING.md,
+        width: "100%",
+        alignSelf: "stretch",
         ...SHADOWS.cardElevated,
+    },
+    cardPressed: {
+        opacity: 0.9,
     },
     topRow: {
         flexDirection: "row",
@@ -83,3 +88,4 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
     },
 });
+

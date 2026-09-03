@@ -4,14 +4,14 @@ import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../../../src/theme';
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         padding: SPACING.screenPadding,
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -21,6 +21,12 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
+    },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        paddingBottom: SPACING.md,
+        marginBottom: 0,
+        backgroundColor: COLORS.backgroundDark,
     },
     saveButton: {
         marginLeft: 'auto',
@@ -48,7 +54,10 @@ export default StyleSheet.create({
 
     scrollContent: {
         padding: SPACING.screenPadding,
-        paddingBottom: 100,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
+    },
+    scrollContentInsideScreen: {
+        paddingHorizontal: 0,
     },
 
     sectionTitle: {
@@ -253,24 +262,23 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        marginRight: 8,
-        marginBottom: 8,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        marginRight: SPACING.sm,
+        marginBottom: SPACING.xs,
     },
     areaChipActive: {
-        backgroundColor: COLORS.accent + '15', // 15% opacity accent
+        backgroundColor: '#1e2a38',
         borderColor: COLORS.accent,
     },
     areaChipText: {
-        color: COLORS.textSecondary,
+        color: COLORS.muted,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.label - 1,
-        fontWeight: '500',
     },
     areaChipTextActive: {
-        color: COLORS.accent,
-        fontWeight: '700',
+        color: COLORS.text,
+        fontWeight: '600',
     },
 
     // Privacy Toggles
@@ -310,7 +318,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     disabledInput: {
         opacity: 0.6,
@@ -326,6 +334,37 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         flex: 1,
+    },
+    profilePhotoRow: {
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 6,
+    },
+    avatarPressable: {
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+    },
+    avatarImage: {
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+        overflow: "hidden",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.10)",
+    },
+    avatarEditBadge: {
+        position: "absolute",
+        right: -2,
+        bottom: -2,
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: COLORS.accent,
+        borderWidth: 2,
+        borderColor: COLORS.backgroundDark,
+        alignItems: "center",
+        justifyContent: "center",
     },
     iconMarginRight: {
         marginRight: 8,
@@ -358,6 +397,9 @@ export default StyleSheet.create({
     },
     marginTopSm: {
         marginTop: 8,
+    },
+    marginTopMd: {
+        marginTop: 12,
     },
     gapMdRow: {
         flexDirection: 'row',
@@ -480,4 +522,50 @@ export default StyleSheet.create({
         fontWeight: '700',
         fontFamily: FONTS.heading,
     },
+
+    // Danger Zone (account deletion)
+    dangerSectionTitle: {
+        color: COLORS.error,
+    },
+    dangerZone: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.lg,
+        padding: SPACING.lg,
+        borderWidth: 1,
+        borderColor: COLORS.error + '40',
+        marginBottom: SPACING.xl,
+    },
+    dangerTitle: {
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.bold,
+        marginBottom: SPACING.xs,
+    },
+    dangerSubtext: {
+        color: COLORS.muted,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+        marginBottom: SPACING.md,
+    },
+    deleteAccountButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.error,
+        backgroundColor: COLORS.error + '14',
+        paddingVertical: 14,
+    },
+    deleteAccountButtonDisabled: {
+        opacity: 0.6,
+    },
+    deleteAccountButtonText: {
+        color: COLORS.error,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: '600',
+    },
 });
+

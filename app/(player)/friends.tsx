@@ -1,10 +1,9 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
+import { useQuery } from "convex/react";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   Text,
@@ -12,111 +11,101 @@ import {
   View,
 } from "react-native";
 
+import { api } from "../../convex/_generated/api";
 import AppHeader from "../../src/components/AppHeader";
+import { AppIcon } from "../../src/components/AppIcon";
+import { AppImage } from "../../src/components/AppImage";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserFriends, getUserProfile } from "../../src/services/userService";
-import type { UserProfile } from "../../src/services/userService";
+import { isChatUserOnline, useRelativeNow } from "../../src/features/chat/utils";
+import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { COLORS } from "../../src/theme";
-import Logger from "../../src/utils/logger";
 import styles from "./friends.styles";
 
 type FriendListItem = {
   uid: string;
   username: string;
   isOnline: boolean;
+  lastActiveAt?: number | null;
   games: string[];
   avatarUri: string;
 };
 
 type FriendFilter = "all" | "online" | "offline";
 
-const getGamesFromProfile = (profile?: UserProfile) => {
-  if (!profile) return [];
+const getGamesFromFriend = (friend?: {
+  playsCs2?: boolean;
+  playsFc?: boolean;
+  playsTekken?: boolean;
+  playsFutsal?: boolean;
+  playsIndoorCricket?: boolean;
+  playsPadel?: boolean;
+  playsPickleball?: boolean;
+}) => {
+  if (!friend) return [];
   const labels: string[] = [];
-  if (profile.playsCs2) labels.push("CS2");
-  if (profile.playsFc) labels.push("FC26");
-  if (profile.playsTekken) labels.push("Tekken 8");
-  if (profile.playsFutsal) labels.push("Futsal");
-  if (profile.playsIndoorCricket) labels.push("Indoor Cricket");
-  if (profile.playsPadel) labels.push("Padel");
-  if (profile.playsPickleball) labels.push("Pickleball");
+  if (friend.playsCs2) labels.push("CS2");
+  if (friend.playsFc) labels.push("FC26");
+  if (friend.playsTekken) labels.push("Tekken 8");
+  // Physical sports are temporarily disabled.
+  // if (friend.playsFutsal) labels.push("Futsal");
+  // if (friend.playsIndoorCricket) labels.push("Indoor Cricket");
+  // if (friend.playsPadel) labels.push("Padel");
+  // if (friend.playsPickleball) labels.push("Pickleball");
   return labels;
 };
 
 export default function FriendsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [friends, setFriends] = useState<FriendListItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FriendFilter>("all");
+  const nowMs = useRelativeNow(30_000);
+  useRouteLogger("FriendsScreen", {
+    activeFilter,
+    searchQueryLength: searchQuery.trim().length,
+    userId: user?._id,
+  });
 
-  const loadFriends = useCallback(
-    async (showRefresh = false) => {
-      if (!user?.uid) {
-        setFriends([]);
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
-      if (showRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      try {
-        const friendsResult = await getUserFriends(user.uid);
-        if (!friendsResult.ok || !friendsResult.data) {
-          setFriends([]);
-          return;
-        }
+  // Real-time unread counts per friend DM
+  const dmUnreadCounts = useQuery(
+    api.friendChat.getUnreadCounts,
+    user?._id ? {} : "skip"
+  ) || {};
 
-        const detailedFriends = await Promise.all(
-          friendsResult.data.map(async (friend) => {
-            const profileResult = await getUserProfile(friend.uid);
-            const profile = profileResult.ok ? profileResult.data : undefined;
-            const username =
-              profile?.username ||
-              profile?.displayName ||
-              friend.username ||
-              "Unknown";
-            const avatarUri =
-              `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=42a5f5&color=fff&size=128`;
-            return {
-              uid: friend.uid,
-              username,
-              isOnline: !!profile?.isOnline,
-              games: getGamesFromProfile(profile),
-              avatarUri,
-            };
-          }),
-        );
-
-        detailedFriends.sort((a, b) => {
-          if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
-          return a.username.localeCompare(b.username);
-        });
-
-        setFriends(detailedFriends);
-      } catch (error) {
-        Logger.error("Friends", "Failed to load friends", error);
-        setFriends([]);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [user?.uid],
+  const rawFriends = useQuery(
+    api.social.listFriends,
+    user?._id ? { userId: user._id } : "skip",
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      loadFriends();
-    }, [loadFriends]),
-  );
+  const friends = useMemo<FriendListItem[]>(() => {
+    const detailedFriends = (rawFriends || []).map((friend: any) => {
+      const username = friend.fullName || friend.username || "Unknown";
+      const lastActiveAt = typeof friend.lastActiveAt === "number" ? friend.lastActiveAt : null;
+      const avatarUri =
+        friend.photoURL ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=42a5f5&color=fff&size=128`;
+      return {
+        uid: String(friend.friendId),
+        username,
+        isOnline: isChatUserOnline(lastActiveAt, friend.isOnline, nowMs),
+        lastActiveAt,
+        games: getGamesFromFriend(friend),
+        avatarUri,
+      };
+    });
+
+    detailedFriends.sort((a, b) => {
+      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+      return a.username.localeCompare(b.username);
+    });
+
+    return detailedFriends;
+  }, [nowMs, rawFriends]);
+
+  const loading = Boolean(user?._id) && rawFriends === undefined;
 
   const onlineCount = useMemo(
     () => friends.filter((friend) => friend.isOnline).length,
@@ -137,6 +126,123 @@ export default function FriendsScreen() {
     });
   }, [friends, activeFilter, normalizedSearch]);
 
+  const openFriendProfile = useCallback((uid: string) => {
+    router.push(`/(player)/profile/${uid}` as any);
+  }, [router]);
+
+  const openFriendChat = useCallback((uid: string) => {
+    router.push(`/(player)/friend-chat/${uid}` as any);
+  }, [router]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 250);
+  }, []);
+
+  const keyExtractor = useCallback((item: FriendListItem) => item.uid, []);
+
+  const renderFriendItem = useCallback(({ item }: { item: FriendListItem }) => {
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.friendCard,
+          pressed && styles.friendCardPressed,
+        ]}
+        onPress={() => openFriendProfile(item.uid)}
+      >
+        <View style={styles.avatarWrap}>
+          <AppImage source={{ uri: item.avatarUri }} containerStyle={styles.avatar} />
+          <View
+            style={[
+              styles.statusDot,
+              item.isOnline ? styles.statusDotOnline : styles.statusDotOffline,
+            ]}
+          />
+        </View>
+
+        <View style={styles.friendInfo}>
+          <Text style={styles.friendName} numberOfLines={1}>
+            {item.username}
+          </Text>
+          <Text
+            style={[
+              styles.friendStatus,
+              item.isOnline ? styles.onlineText : styles.offlineText,
+            ]}
+          >
+            {item.isOnline ? "Online" : "Offline"}
+          </Text>
+          <Text style={styles.gamesText} numberOfLines={1}>
+            {item.games.length > 0
+              ? item.games.slice(0, 3).join(" | ")
+              : "Games listed on profile"}
+          </Text>
+        </View>
+
+        <Pressable
+          style={styles.chatButton}
+          onPress={(e) => { e.stopPropagation(); openFriendChat(item.uid); }}
+          hitSlop={8}
+        >
+          <AppIcon name="chat" size={20} color={COLORS.accent} />
+          {(dmUnreadCounts[item.uid] || 0) > 0 ? (
+            <View style={styles.chatBadge}>
+              <Text style={styles.chatBadgeText}>
+                {dmUnreadCounts[item.uid] > 99 ? "99+" : dmUnreadCounts[item.uid]}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
+        <AppIcon name="chevron-right" size={22} tone="muted" />
+      </Pressable>
+    );
+  }, [dmUnreadCounts, openFriendChat, openFriendProfile]);
+
+  const listHeader = useMemo(() => {
+    return (
+      <View>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryCol}>
+            <Text style={styles.summaryLabel}>Total Friends</Text>
+            <Text style={styles.summaryValue}>{friends.length}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryCol}>
+            <Text style={styles.summaryLabel}>Online</Text>
+            <Text style={[styles.summaryValue, styles.summaryValueOnline]}>
+              {onlineCount}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.searchWrap}>
+          <AppIcon name="search" size={18} tone="muted" />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search friends by username"
+            placeholderTextColor={COLORS.textSecondary}
+            style={styles.searchInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        <SegmentedTabs<FriendFilter>
+          items={[
+            { key: "all", label: "All", badge: friends.length },
+            { key: "online", label: "Online", badge: onlineCount },
+            { key: "offline", label: "Offline", badge: offlineCount },
+          ]}
+          value={activeFilter}
+          onChange={setActiveFilter}
+          style={styles.filterTabs}
+          compact
+        />
+      </View>
+    );
+  }, [activeFilter, friends.length, offlineCount, onlineCount, searchQuery]);
+
   return (
     <Screen style={styles.screen} scroll={false}>
       <AppHeader title="My Friends" onBack={() => router.back()} inlineTitle />
@@ -148,97 +254,13 @@ export default function FriendsScreen() {
       ) : (
         <FlatList
           data={filteredFriends}
-          keyExtractor={(item) => item.uid}
+          keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => loadFriends(true)} tintColor={COLORS.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
           }
-          ListHeaderComponent={
-            <View>
-              <View style={styles.summaryCard}>
-                <View style={styles.summaryCol}>
-                  <Text style={styles.summaryLabel}>Total Friends</Text>
-                  <Text style={styles.summaryValue}>{friends.length}</Text>
-                </View>
-                <View style={styles.summaryDivider} />
-                <View style={styles.summaryCol}>
-                  <Text style={styles.summaryLabel}>Online</Text>
-                  <Text style={[styles.summaryValue, { color: COLORS.successBright }]}>
-                    {onlineCount}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.searchWrap}>
-                <MaterialIcons name="search" size={18} color={COLORS.textSecondary} />
-                <TextInput
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  placeholder="Search friends by username"
-                  placeholderTextColor={COLORS.textSecondary}
-                  style={styles.searchInput}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              <SegmentedTabs<FriendFilter>
-                items={[
-                  { key: "all", label: "All", badge: friends.length },
-                  { key: "online", label: "Online", badge: onlineCount },
-                  { key: "offline", label: "Offline", badge: offlineCount },
-                ]}
-                value={activeFilter}
-                onChange={setActiveFilter}
-                style={styles.filterTabs}
-                compact
-              />
-            </View>
-          }
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [
-                styles.friendCard,
-                pressed && styles.friendCardPressed,
-              ]}
-              onPress={() => router.push(`/(player)/profile/${item.uid}` as any)}
-            >
-              <View style={styles.avatarWrap}>
-                <Image source={{ uri: item.avatarUri }} style={styles.avatar} />
-                <View
-                  style={[
-                    styles.statusDot,
-                    item.isOnline ? styles.statusDotOnline : styles.statusDotOffline,
-                  ]}
-                />
-              </View>
-
-              <View style={styles.friendInfo}>
-                <Text style={styles.friendName} numberOfLines={1}>
-                  {item.username}
-                </Text>
-                <Text
-                  style={[
-                    styles.friendStatus,
-                    item.isOnline ? styles.onlineText : styles.offlineText,
-                  ]}
-                >
-                  {item.isOnline ? "Online" : "Offline"}
-                </Text>
-                <Text style={styles.gamesText} numberOfLines={1}>
-                  {item.games.length > 0
-                    ? item.games.slice(0, 3).join(" • ")
-                    : "Games listed on profile"}
-                </Text>
-              </View>
-
-              <MaterialIcons
-                name="chevron-right"
-                size={22}
-                color={COLORS.textSecondary}
-              />
-            </Pressable>
-          )}
+          ListHeaderComponent={listHeader}
+          renderItem={renderFriendItem}
           ListEmptyComponent={
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>

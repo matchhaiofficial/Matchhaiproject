@@ -1,0 +1,75 @@
+appId: ${E2E_APP_ID}
+name: 07 - Booking intent (select slot)
+tags:
+  - core
+env:
+  E2E_USER_EMAIL: ${E2E_USER_EMAIL}
+  E2E_USER_PASSWORD: ${E2E_USER_PASSWORD}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+# Sign in as the booking user (host/captain who reserves a venue slot).
+- launchApp:
+    clearState: true
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_USER_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_USER_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+- assertVisible: "Player dashboard"
+
+# Open the matchroom, then its booking screen (app/matchrooms/book/[id].tsx).
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# Enter the booking flow. Entry affordance varies (Book / Reserve / Book Slot).
+# TODO testID: add `matchroom-book-button` to the booking entry point in
+# app/matchrooms/[id].tsx.
+- tapOn:
+    text: "Book"
+    optional: true
+- tapOn:
+    text: "Book Slot"
+    optional: true
+- tapOn:
+    text: "Reserve"
+    optional: true
+
+# Pick an available time slot on the booking screen.
+# TODO testID: add `booking-slot-option` (per slot) and
+# `booking-confirm-button` in app/matchrooms/book/[id].tsx.
+- assertVisible:
+    text: "Select a slot|Available slots|Pick a time"
+- tapOn:
+    text: "Available"
+    optional: true
+
+# Create the booking intent.
+- tapOn:
+    text: "Confirm Booking"
+    optional: true
+- tapOn:
+    text: "Create Booking"
+    optional: true
+- tapOn:
+    text: "Continue"
+    optional: true
+
+# A booking intent moves the room into a pending / awaiting-payment /
+# awaiting-approval state.
+- assertVisible:
+    text: "Pending|Awaiting approval|Awaiting payment|Booking requested|Reserved"

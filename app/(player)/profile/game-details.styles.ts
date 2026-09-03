@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
@@ -14,7 +14,7 @@ export default StyleSheet.create({
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -28,6 +28,13 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
+    },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+        marginBottom: 0,
+        backgroundColor: COLORS.backgroundDark,
     },
     saveButton: {
         minHeight: 38,
@@ -56,7 +63,10 @@ export default StyleSheet.create({
 
     scrollContent: {
         padding: SPACING.screenPadding,
-        paddingBottom: 100,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
+    },
+    scrollContentInsideScreen: {
+        paddingHorizontal: 0,
     },
 
     sectionTitle: {
@@ -75,10 +85,16 @@ export default StyleSheet.create({
         marginBottom: SPACING.xl,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 16,
+        elevation: 5,
     },
     statsHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: SPACING.md,
     },
     statsLabel: {
@@ -107,6 +123,25 @@ export default StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
         fontFamily: FONTS.body,
+    },
+    refreshStatsButton: {
+        minHeight: 34,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: SPACING.md,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.accent + '55',
+        backgroundColor: COLORS.accent + '12',
+    },
+    refreshStatsButtonDisabled: {
+        opacity: 0.65,
+    },
+    refreshStatsText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.bold,
+        fontSize: TEXT_SIZES.caption,
     },
     faceitLevelIcon: {
         width: 48,
@@ -153,24 +188,24 @@ export default StyleSheet.create({
         marginTop: SPACING.xs,
     },
     chip: {
-        backgroundColor: COLORS.surface,
+        backgroundColor: COLORS.cardBackground,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         borderRadius: RADII.pill,
-        paddingHorizontal: SPACING.lg,
+        paddingHorizontal: SPACING.md,
         paddingVertical: SPACING.sm,
     },
     chipActive: {
-        backgroundColor: 'rgba(66, 165, 245, 0.15)', // transparent accent
+        backgroundColor: '#1e2a38',
         borderColor: COLORS.accent,
     },
     chipText: {
-        color: COLORS.textSecondary,
-        fontSize: TEXT_SIZES.body,
+        color: COLORS.muted,
+        fontSize: TEXT_SIZES.label - 1,
         fontFamily: FONTS.body,
     },
     chipTextActive: {
-        color: COLORS.accent,
+        color: COLORS.text,
         fontFamily: FONTS.bold,
     },
 
@@ -207,7 +242,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     verifiedCaption: {
         color: COLORS.muted,
@@ -216,3 +251,4 @@ export default StyleSheet.create({
         marginTop: 12,
     },
 });
+

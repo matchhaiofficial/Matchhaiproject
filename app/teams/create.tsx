@@ -1,4 +1,4 @@
-import { MaterialIcons } from "@expo/vector-icons";
+import { useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
@@ -8,122 +8,239 @@ import {
     Platform,
     Pressable,
     ScrollView,
+    StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
-import { GAME_FORMATS } from "../../src/constants/gameRules";
+import AppHeader from "../../src/components/AppHeader";
+import BottomActionBar from "../../src/components/BottomActionBar";
+import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
+import { AppIcon } from "../../src/components/AppIcon";
+import Screen from "../../src/components/Screen";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../../src/context/AuthContext";
-import { createTeam } from "../../src/services/functions";
+import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
+import { useToast } from "../../src/hooks/useToast";
+import { createTeamAction, inviteToTeamAction } from "../../src/services/convex/teamActionService";
 import { COLORS } from "../../src/theme";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import Logger from "../../src/utils/logger";
 import styles from "./create.styles";
 
 const GAMES = [
     { key: 'cs2', label: 'CS2' },
+    { key: 'cs16', label: 'CS 1.6' },
+    { key: 'valorant', label: 'Valorant' },
     { key: 'fc26', label: 'FC26' },
     { key: 'tekken8', label: 'Tekken 8' },
-    { key: 'futsal', label: 'Futsal' },
-    { key: 'indoor_cricket', label: 'Cricket' },
-    { key: 'padel', label: 'Padel' },
-    { key: 'pickleball', label: 'Pickleball' },
+    // Physical sports are temporarily disabled.
+    // { key: 'futsal', label: 'Futsal' },
+    // { key: 'indoor_cricket', label: 'Cricket' },
+    // { key: 'padel', label: 'Padel' },
+    // { key: 'pickleball', label: 'Pickleball' },
 ];
 
+const localStyles = StyleSheet.create({
+    flexOne: {
+        flex: 1,
+    },
+    keyboardShell: {
+        flex: 1,
+    },
+    chipPressed: {
+        opacity: 0.88,
+    },
+    friendCardPressed: {
+        opacity: 0.92,
+    },
+});
+
 export default function CreateTeam() {
-    const { user } = useAuth();
+    const { user, authUser } = useAuth();
     const router = useRouter();
-    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const { showToast } = useToast();
+    const touchDebugEnabled = false;
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
-    const [selectedSize, setSelectedSize] = useState<number | null>(null);
+    const [substituteSlots, setSubstituteSlots] = useState(0);
+    const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
+    const mainRosterSize = selectedGame ? getTeamMainRosterSize(selectedGame) : 0;
+    const maxSubstituteSlots = selectedGame ? getTeamMaxSubstitutes(selectedGame) : 0;
+    useRouteLogger("CreateTeamScreen", {
+        selectedGame,
+        selectedSize: selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : null,
+        invitedCount: selectedFriendIds.length,
+    });
 
-    // Get available sizes for selected game
-    const availableFormats = useMemo(() => {
-        if (!selectedGame) return [];
-        return GAME_FORMATS[selectedGame] || [];
-    }, [selectedGame]);
+    const eligibleFriendsRaw = useQuery(
+        api.social.listFriendsForGame,
+        user?._id && selectedGame
+            ? { userId: user._id as Id<"users">, game: selectedGame }
+            : "skip"
+    );
+
+    const effectiveTeamSize = selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : null;
+    const substituteOptions = useMemo(
+        () => Array.from({ length: maxSubstituteSlots + 1 }, (_, index) => index),
+        [maxSubstituteSlots]
+    );
+
+    const eligibleFriends = useMemo(
+        () => (eligibleFriendsRaw ?? []).map((friend: any) => ({
+            uid: friend.friendId as string,
+            username: friend.username as string,
+            fullName: friend.fullName as string | undefined,
+            isOnline: !!friend.isOnline,
+        })),
+        [eligibleFriendsRaw]
+    );
+
+    const maxInviteCount = Math.max(0, (effectiveTeamSize ?? 1) - 1);
+    const selectedGameLabel = useMemo(
+        () => GAMES.find((game) => game.key === selectedGame)?.label ?? "this game",
+        [selectedGame]
+    );
 
     // Reset size when game changes
     const handleGameSelect = (gameKey: string) => {
         setSelectedGame(gameKey);
-        const formats = GAME_FORMATS[gameKey] || [];
-        // Default to first format if available
-        setSelectedSize(formats.length > 0 ? formats[0].size : null);
+        setSubstituteSlots(0);
+        setSelectedFriendIds([]);
+    };
+
+    const handleSubstituteSlotsSelect = (slotCount: number) => {
+        const safeSlotCount = Math.max(0, Math.min(maxSubstituteSlots, slotCount));
+        setSubstituteSlots(safeSlotCount);
+        const nextMaxInviteCount = Math.max(
+            0,
+            getTeamTotalRosterCapacity(selectedGame, safeSlotCount) - 1,
+        );
+        setSelectedFriendIds((prev) => prev.slice(0, nextMaxInviteCount));
+    };
+
+    const toggleFriendSelection = (friendId: string) => {
+        setSelectedFriendIds((prev) => {
+            if (prev.includes(friendId)) {
+                return prev.filter((id) => id !== friendId);
+            }
+            if (prev.length >= maxInviteCount) {
+                showToast({
+                    type: "warning",
+                    title: "Invite limit reached",
+                    message: `You can invite up to ${maxInviteCount} friend${maxInviteCount === 1 ? "" : "s"} for this team size.`,
+                });
+                return prev;
+            }
+            return [...prev, friendId];
+        });
     };
 
     const handleSubmit = async () => {
         Keyboard.dismiss();
-        Logger.info("CreateTeam", "handleSubmit called", { name, selectedGame, selectedSize, uid: user?.uid });
+        logFlowEvent("CreateTeam", "Submitting team creation", {
+            nameLength: name.trim().length,
+            selectedGame,
+            selectedSize: effectiveTeamSize,
+            invitedCount: selectedFriendIds.length,
+            uid: user?._id
+        });
 
         if (!user) {
-            alert("You must be logged in");
+            showToast({ type: "error", title: "Login required", message: "You must be logged in." });
             return;
         }
         if (!name.trim()) {
-            alert("Please enter a team name");
+            showToast({ type: "warning", title: "Team name required", message: "Please enter a team name." });
             return;
         }
         if (!selectedGame) {
-            alert("Please select a game");
+            showToast({ type: "warning", title: "Game required", message: "Please select a game." });
             return;
         }
-        if (!selectedSize) {
-            alert("Please select a team size");
+        if (!effectiveTeamSize) {
+            showToast({ type: "warning", title: "Team size required", message: "Please select a team size." });
+            return;
+        }
+        if (!isUserFullyVerified(authUser, user)) {
+            showKycVerificationRequiredAlert();
             return;
         }
 
         setSubmitting(true);
         try {
-            const result = await createTeam({
+            const result = await createTeamAction({
                 name: name.trim(),
                 description: description.trim(),
                 game: selectedGame,
                 visibility: 'public',
-                maxMembers: selectedSize
+                maxMembers: effectiveTeamSize,
+                substituteSlots,
             });
 
             if (result.ok) {
+                if (result.teamId && selectedFriendIds.length > 0) {
+                    await Promise.allSettled(
+                        selectedFriendIds.map((friendId) =>
+                            inviteToTeamAction({
+                                teamId: result.teamId,
+                                toUid: friendId,
+                            })
+                        )
+                    );
+                }
+
                 router.replace({
                     pathname: `/teams/${result.teamId}`,
-                    params: { showInvite: 'true' }
+                    params:
+                        selectedFriendIds.length === 0
+                            ? { showInvite: "true" }
+                            : {},
                 } as any);
             } else {
-                alert(result.message || "Failed to create team");
+                showToast({
+                    type: "error",
+                    title: "Create team failed",
+                    message: result.message || "Failed to create team.",
+                });
             }
         } catch (error) {
             Logger.error("CreateTeam", "Error creating team", error);
-            alert("An error occurred");
+            showToast({
+                type: "error",
+                title: "Create team failed",
+                message: "An error occurred.",
+            });
         } finally {
             setSubmitting(false);
         }
     };
 
-    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!selectedSize && !submitting;
+    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!effectiveTeamSize && !submitting;
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-                style={{ flex: 1 }}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                style={localStyles.keyboardShell}
+                keyboardVerticalOffset={0}
             >
-                {/* Header */}
-                <View style={styles.header}>
-                    <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </Pressable>
-                    <Text style={styles.headerTitle}>Create Team</Text>
-                </View>
+                <AppHeader title="Create Team" onBack={() => router.back()} inlineTitle />
 
                 <ScrollView
-                    style={{ flex: 1 }}
-                    contentContainerStyle={styles.scrollContent}
+                    style={localStyles.flexOne}
+                    contentContainerStyle={[
+                        styles.scrollContent,
+                        styles.scrollContentInsideScreen,
+                        styles.scrollContentWithBottomAction,
+                    ]}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                    showsVerticalScrollIndicator={false}
                 >
                     {/* Team Name */}
                     <View style={styles.section}>
@@ -152,12 +269,13 @@ export default function CreateTeam() {
                         </Text>
                         <View style={styles.chipRow}>
                             {GAMES.map(game => (
-                                <TouchableOpacity
+                                <Pressable
                                     key={game.key}
                                     onPress={() => handleGameSelect(game.key)}
-                                    style={[
+                                    style={({ pressed }) => [
                                         styles.optionChip,
-                                        selectedGame === game.key && styles.optionChipActive
+                                        selectedGame === game.key && styles.optionChipActive,
+                                        pressed && localStyles.chipPressed,
                                     ]}
                                 >
                                     <Text style={[
@@ -166,34 +284,46 @@ export default function CreateTeam() {
                                     ]}>
                                         {game.label}
                                     </Text>
-                                </TouchableOpacity>
+                                </Pressable>
                             ))}
                         </View>
                     </View>
 
-                    {/* Team Size Selection (only if game has multiple formats) */}
-                    {selectedGame && availableFormats.length > 1 && (
+                    {selectedGame && (
                         <View style={styles.section}>
                             <Text style={styles.sectionLabel}>
-                                Team Size *
+                                Roster Size
                             </Text>
+                            <View style={styles.infoBox}>
+                                <Text style={styles.infoBoxText}>
+                                    {mainRosterSize} main player{mainRosterSize === 1 ? "" : "s"} required for {selectedGameLabel}.
+                                </Text>
+                                <Text style={styles.infoBoxSmall}>
+                                    Optional substitutes: {substituteSlots}/{maxSubstituteSlots}. Total roster slots: {effectiveTeamSize}.
+                                </Text>
+                            </View>
                             <View style={styles.chipRow}>
-                                {availableFormats.map(format => (
-                                    <TouchableOpacity
-                                        key={format.size}
-                                        onPress={() => setSelectedSize(format.size)}
-                                        style={[
+                                {substituteOptions.map((slotCount) => (
+                                    <Pressable
+                                        key={`subs-${slotCount}`}
+                                        onPress={() => handleSubstituteSlotsSelect(slotCount)}
+                                        style={({ pressed }) => [
                                             styles.optionChip,
-                                            selectedSize === format.size && styles.optionChipActive
+                                            substituteSlots === slotCount && styles.optionChipActive,
+                                            pressed && localStyles.chipPressed,
                                         ]}
                                     >
-                                        <Text style={[
-                                            styles.optionChipText,
-                                            selectedSize === format.size && styles.optionChipTextActive
-                                        ]}>
-                                            {format.label}
+                                        <Text
+                                            style={[
+                                                styles.optionChipText,
+                                                substituteSlots === slotCount && styles.optionChipTextActive,
+                                            ]}
+                                        >
+                                            {slotCount === 0
+                                                ? "No subs"
+                                                : `${slotCount} sub${slotCount === 1 ? "" : "s"}`}
                                         </Text>
-                                    </TouchableOpacity>
+                                    </Pressable>
                                 ))}
                             </View>
                         </View>
@@ -219,10 +349,79 @@ export default function CreateTeam() {
                             {description.length}/200 characters
                         </Text>
                     </View>
+
+                    {selectedGame && (
+                        <View style={styles.section}>
+                            <View style={styles.inviteHeaderRow}>
+                                <Text style={styles.sectionLabel}>
+                                    Invite Friends (Optional)
+                                </Text>
+                                <Text style={styles.inviteCountText}>
+                                    {selectedFriendIds.length}/{maxInviteCount}
+                                </Text>
+                            </View>
+
+                            {eligibleFriendsRaw === undefined ? (
+                                <View style={styles.inviteLoadingRow}>
+                                    <ActivityIndicator size="small" color={COLORS.accent} />
+                                    <Text style={styles.inviteHelperText}>Loading eligible friends...</Text>
+                                </View>
+                            ) : eligibleFriends.length > 0 && maxInviteCount > 0 ? (
+                                <>
+                                    <Text style={styles.helperText}>
+                                        Only friends who play {selectedGameLabel} are shown here.
+                                    </Text>
+                                    <View style={styles.inviteList}>
+                                        {eligibleFriends.map((friend) => {
+                                            const selected = selectedFriendIds.includes(friend.uid);
+                                            return (
+                                                <Pressable
+                                                    key={friend.uid}
+                                                    onPress={() => toggleFriendSelection(friend.uid)}
+                                                    style={({ pressed }) => [
+                                                        styles.friendCard,
+                                                        selected && styles.friendCardSelected,
+                                                        pressed && localStyles.friendCardPressed,
+                                                    ]}
+                                                >
+                                                    <View style={styles.friendCardInfo}>
+                                                        <View style={styles.friendAvatar}>
+                                                            <Text style={styles.friendAvatarText}>
+                                                                {friend.username.charAt(0).toUpperCase()}
+                                                            </Text>
+                                                        </View>
+                                                        <View style={styles.friendMeta}>
+                                                            <Text style={styles.friendName}>{friend.username}</Text>
+                                                            <Text style={styles.friendSubtext}>
+                                                                {friend.fullName || (friend.isOnline ? "Online" : "Available to invite")}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+                                                    <AppIcon
+                                                        name={selected ? "check-circle" : "radio-button-unchecked"}
+                                                        size={20}
+                                                        color={selected ? COLORS.accent : COLORS.muted}
+                                                    />
+                                                </Pressable>
+                                            );
+                                        })}
+                                    </View>
+                                </>
+                            ) : (
+                                <View style={styles.inviteEmptyCard}>
+                                    <Text style={styles.inviteEmptyTitle}>No eligible friends found</Text>
+                                    <Text style={styles.inviteEmptyText}>
+                                        {maxInviteCount === 0
+                                            ? "This team size does not allow additional invites."
+                                            : `Only friends who play ${selectedGameLabel} can be invited here.`}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+                    )}
                 </ScrollView>
 
-                {/* Submit Button */}
-                <View style={styles.buttonWrapper}>
+                <BottomActionBar>
                     <Pressable
                         onPressIn={() => {
                             if (touchDebugEnabled) {
@@ -250,8 +449,8 @@ export default function CreateTeam() {
                             </Text>
                         )}
                     </Pressable>
-                </View>
+                </BottomActionBar>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

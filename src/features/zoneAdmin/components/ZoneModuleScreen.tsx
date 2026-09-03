@@ -1,11 +1,10 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../components/AppHeader";
+import { AppIcon } from "../../../components/AppIcon";
 import Screen from "../../../components/Screen";
-import { COLORS } from "../../../theme";
 import styles from "./ZoneModuleScreen.styles";
 
 type ModuleBlock = {
@@ -43,7 +42,7 @@ export default function ZoneModuleScreen({
                         <Text style={styles.blockTitle}>{block.title}</Text>
                         {block.points.map((point) => (
                             <View key={point} style={styles.blockPointRow}>
-                                <MaterialIcons name="check-circle" size={16} color={COLORS.accent} />
+                                <AppIcon name="check-circle" size="sm" tone="accent" />
                                 <Text style={styles.blockPointText}>{point}</Text>
                             </View>
                         ))}
@@ -52,7 +51,7 @@ export default function ZoneModuleScreen({
 
                 {footerHint ? (
                     <Pressable style={styles.footerHintCard}>
-                        <MaterialIcons name="tips-and-updates" size={18} color={COLORS.accent} />
+                        <AppIcon name="tips-and-updates" size={18} tone="accent" />
                         <Text style={styles.footerHintText}>{footerHint}</Text>
                     </Pressable>
                 ) : null}

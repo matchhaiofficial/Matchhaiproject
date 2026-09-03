@@ -1,24 +1,38 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useAction, useQuery } from "convex/react";
 
 import AppHeader from "../../src/components/AppHeader";
+import BottomActionBar from "../../src/components/BottomActionBar";
+import { AppIcon } from "../../src/components/AppIcon";
+import { AppButton } from "../../src/components/AppPrimitives";
+import { GameImageIcon } from "../../src/components/GameImageIcon";
+import { AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
-import { getCaptainedTeams, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
-import type { Team } from "../../src/services/teamService";
-import { deriveZoneRate, type Zone } from "../../src/services/zoneService";
+import { useToast } from "../../src/hooks/useToast";
+import { TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY, TEAM_CHALLENGE_PAYMENTS_ENABLED, getCaptainedTeams, payTeamChallengeWithWallet, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
+import { Team, getTeamById } from "../../src/services/convex/teamService";
+import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
+import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
+import { APP_ROUTES } from "../../src/navigation/routes";
 import BasicFields from "../matchrooms/create/components/BasicFields";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
+import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
 import styles from "../matchrooms/create/create.styles";
+import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 
-const SERIES_OPTIONS = ["BO1", "BO3", "BO5"] as const;
+type SeriesType = "BO1" | "BO3" | "BO5" | "BO7" | "BO10" | "BO20" | "BO40";
 const GAME_ICONS: Record<string, string> = {
     cs2: "sports-esports",
+    cs16: "sports-esports",
+    valorant: "sports-esports",
     fc26: "sports-soccer",
     fc25: "sports-soccer",
     tekken8: "sports-kabaddi",
@@ -28,20 +42,126 @@ const GAME_ICONS: Record<string, string> = {
     pickleball: "sports-tennis",
 };
 
-const getSeriesHours = (gameKey: string, seriesType: "BO1" | "BO3" | "BO5") => {
+const localStyles = StyleSheet.create({
+    keyboardShell: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingBottom: 140,
+    },
+    matchupCard: {
+        backgroundColor: COLORS.cardBackground,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        marginBottom: SPACING.lg,
+        gap: SPACING.sm,
+    },
+    matchupTopRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+    },
+    gamePill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.xs,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: `${COLORS.accent}44`,
+        backgroundColor: `${COLORS.accent}14`,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 6,
+    },
+    gamePillText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+    },
+    matchupTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body + 1,
+        lineHeight: 22,
+    },
+    teamFillRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: SPACING.sm,
+    },
+    teamFillPill: {
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardDark,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 6,
+    },
+    teamFillText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+});
+
+const isCsStyleGame = (gameKey: string) => {
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2") return seriesType === "BO3" ? 3 : seriesType === "BO5" ? 5 : 1;
-    if (game === "fc26" || game === "fc25") return seriesType === "BO3" ? 1 : seriesType === "BO5" ? 2 : 0.5;
-    if (game === "tekken8") return seriesType === "BO3" ? 2 : seriesType === "BO5" ? 3 : 1;
-    if (game === "padel" || game === "pickleball") return seriesType === "BO3" ? 1 : seriesType === "BO5" ? 2 : 1;
-    return seriesType === "BO3" ? 2 : seriesType === "BO5" ? 3 : 1;
+    return game === "cs2" || game === "cs16" || game === "valorant";
+};
+
+const getSeriesOptionsForGame = (gameKey: string): readonly SeriesType[] => {
+    const game = String(gameKey || "").toLowerCase();
+    if (isCsStyleGame(game)) return ["BO1", "BO3", "BO5"] as const;
+    if (game === "tekken8") return ["BO7", "BO20", "BO40"] as const;
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") return ["BO3", "BO5", "BO10"] as const;
+    return ["BO1", "BO3", "BO5"] as const;
+};
+
+const getDefaultSeriesForGame = (gameKey: string): SeriesType => {
+    const game = String(gameKey || "").toLowerCase();
+    if (isCsStyleGame(game)) return "BO1";
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") return "BO3";
+    if (game === "tekken8") return "BO7";
+    return "BO1";
+};
+
+const formatSeriesLabel = (series: SeriesType) => {
+    if (series === "BO1") return "Best of 1";
+    if (series === "BO3") return "Best of 3";
+    if (series === "BO5") return "Best of 5";
+    if (series === "BO10") return "Best of 10";
+    if (series === "BO7") return "Best of 7";
+    if (series === "BO20") return "Best of 20";
+    return "Best of 40";
+};
+
+const getEasypaisaStatus = (value: any) => String(value?.status || "").trim().toLowerCase();
+const isEasypaisaPaid = (value: any) => getEasypaisaStatus(value) === "paid";
+const isEasypaisaStopped = (value: any) => ["failed", "cancelled", "expired"].includes(getEasypaisaStatus(value));
+
+const getSeriesHours = (gameKey: string, seriesType: SeriesType) => {
+    const game = String(gameKey || "").toLowerCase();
+    const series = String(seriesType || "BO1").toUpperCase() as SeriesType;
+    if (isCsStyleGame(game)) return series === "BO3" ? 3 : series === "BO5" ? 5 : 1;
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") return series === "BO3" ? 1 : series === "BO5" ? 2 : 3;
+    if (game === "tekken8") return series === "BO7" ? 1 : series === "BO20" ? 2 : 3;
+    return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;
 };
 
 const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent?: Team | null) => {
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2") return 10;
+    if (game === "cs2" || game === "cs16" || game === "valorant") return 10;
     if (game === "fc26" || game === "fc25" || game === "tekken8") {
-        const teamSize = Math.max(Number(challenger?.maxMembers || 0), Number(opponent?.maxMembers || 0), 1);
+        const teamSize = Math.max(
+            Number(challenger?.mainRosterSize || getTeamMainRosterSize(game)),
+            Number(opponent?.mainRosterSize || getTeamMainRosterSize(game)),
+            1,
+        );
         return teamSize <= 1 ? 2 : 4;
     }
     if (game === "padel") return 4;
@@ -53,27 +173,111 @@ const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent
     return Math.max(2, Number(challenger?.maxMembers || 0) + Number(opponent?.maxMembers || 0));
 };
 
-const getBaseZoneRate = (zone: Zone | null, gameKey: string) => {
+type ZoneRateOption = {
+    key: string;
+    label: string;
+    price: number;
+};
+
+const toPositiveNumber = (value: any) => {
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getZonePricingSources = (zone: Zone | null) => {
+    if (!zone) return [];
+    const sources = [
+        ...(Array.isArray(zone.branches) ? zone.branches.map((branch: any) => branch?.pricing) : []),
+        zone.pricing,
+    ];
+    return sources.filter(Boolean);
+};
+
+const getPreferredConsolePrice = (tier: any, estimatedPlayers: number) => {
+    const preferred = estimatedPlayers > 2 ? tier?.price2v2 : tier?.price1v1;
+    return toPositiveNumber(preferred) || toPositiveNumber(tier?.price1v1) || toPositiveNumber(tier?.price2v2) || toPositiveNumber(tier?.price);
+};
+
+const formatCategoryLabel = (value: string) =>
+    String(value || "")
+        .split(/[_-]/g)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+
+const buildZoneRateOptions = (zone: Zone | null, gameKey: string, estimatedPlayers: number): ZoneRateOption[] => {
+    const game = String(gameKey || "").toLowerCase();
+    const pricingSources = getZonePricingSources(zone);
+    const options = new Map<string, ZoneRateOption>();
+
+    const addOption = (key: string, label: string, price: number) => {
+        if (price > 0 && !options.has(key)) {
+            options.set(key, { key, label, price });
+        }
+    };
+
+    for (const pricing of pricingSources) {
+        if (isCsStyleGame(game)) {
+            addOption("pc:regular", "Regular", toPositiveNumber(pricing?.pc?.regular?.price));
+            addOption("pc:premium", "Premium", toPositiveNumber(pricing?.pc?.premium?.price));
+            addOption("pc:elite", "Elite", toPositiveNumber(pricing?.pc?.elite?.price));
+        }
+
+        if (game === "fc26" || game === "fc25" || game === "tekken8") {
+            const formatLabel = estimatedPlayers > 2 ? "2v2" : "1v1";
+            addOption("console:regular", `Regular (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.regular, estimatedPlayers));
+            addOption("console:premium", `Premium (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.premium, estimatedPlayers));
+            addOption("console:elite", `Elite (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.elite, estimatedPlayers));
+            addOption("console:ps5", `PS5 (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.ps5, estimatedPlayers));
+            addOption("console:xbox", `Xbox (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.xbox, estimatedPlayers));
+        }
+
+        if (game === "futsal") {
+            const futsal = pricing?.futsal || {};
+            Object.entries(futsal || {}).forEach(([key, val]: any) => {
+                addOption(`futsal:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+
+        if (game === "indoor_cricket") {
+            const cricket = pricing?.indoorCricket || pricing?.indoor_cricket || {};
+            Object.entries(cricket || {}).forEach(([key, val]: any) => {
+                addOption(`cricket:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+
+        if (game === "padel") {
+            const padel = pricing?.padel || {};
+            Object.entries(padel || {}).forEach(([key, val]: any) => {
+                addOption(`padel:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+
+        if (game === "pickleball") {
+            const pickleball = pricing?.pickleball || {};
+            Object.entries(pickleball || {}).forEach(([key, val]: any) => {
+                addOption(`pickleball:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+    }
+
+    return Array.from(options.values());
+};
+
+const getBaseZoneRate = (zone: Zone | null, gameKey: string, estimatedPlayers = 2) => {
     if (!zone) return 0;
-    const pricing: any = zone.pricing || zone.branches?.[0]?.pricing || {};
+    if (typeof zone.effectiveRate === "number" && zone.effectiveRate > 0) {
+        return zone.effectiveRate;
+    }
     const game = String(gameKey || "").toLowerCase();
 
-    if (game === "cs2") {
-        const rates = [
-            pricing?.pc?.regular?.price,
-            pricing?.pc?.premium?.price,
-            pricing?.pc?.elite?.price,
-        ].filter((value: any) => typeof value === "number" && value > 0);
+    if (game === "cs2" || game === "cs16" || game === "valorant") {
+        const rates = buildZoneRateOptions(zone, game, estimatedPlayers).map((option) => option.price);
         return rates.length > 0 ? Math.min(...rates) : 0;
     }
 
     if (game === "fc26" || game === "fc25" || game === "tekken8") {
-        const rates = [
-            pricing?.console?.ps5?.price2v2,
-            pricing?.console?.ps5?.price1v1,
-            pricing?.console?.xbox?.price2v2,
-            pricing?.console?.xbox?.price1v1,
-        ].filter((value: any) => typeof value === "number" && value > 0);
+        const rates = buildZoneRateOptions(zone, game, estimatedPlayers).map((option) => option.price);
         return rates.length > 0 ? Math.min(...rates) : 0;
     }
 
@@ -85,7 +289,10 @@ export default function TeamChallengeCreateScreen() {
     const params = useLocalSearchParams<{ opponentTeamId?: string | string[] }>();
     const opponentTeamId = Array.isArray(params.opponentTeamId) ? params.opponentTeamId[0] : params.opponentTeamId;
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, authUser } = useAuth();
+    const { showToast } = useToast();
+    const startCheckout = useAction((api as any).easypaisa.startCheckout);
+    const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -93,8 +300,40 @@ export default function TeamChallengeCreateScreen() {
     const [captainedTeams, setCaptainedTeams] = useState<Team[]>([]);
     const [challengerTeamId, setChallengerTeamId] = useState<string>("");
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
-    const [seriesType, setSeriesType] = useState<(typeof SERIES_OPTIONS)[number]>("BO1");
+    const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
+    const [seriesType, setSeriesType] = useState<SeriesType>("BO1");
     const [pricePerPlayer, setPricePerPlayer] = useState(0);
+
+    const [easypaisaModalVisible, setEasypaisaModalVisible] = useState(false);
+    const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
+    const [startingEasypaisa, setStartingEasypaisa] = useState(false);
+    const [finishingEasypaisa, setFinishingEasypaisa] = useState(false);
+    const [activeEasypaisaOrderRef, setActiveEasypaisaOrderRef] = useState<string | null>(null);
+    const [pendingCreateAfterPayment, setPendingCreateAfterPayment] = useState<{
+        captainPaymentAmount: number;
+        walletReference: string;
+        challengeArgs: Parameters<typeof sendTeamMatchChallenge>[0];
+        challengerTeamName: string;
+        opponentTeamName: string;
+    } | null>(null);
+    const resumedOrderRef = React.useRef<string | null>(null);
+
+    const checkoutStatus = useQuery(
+        api.easypaisa.getCheckoutStatus,
+        user?._id && activeEasypaisaOrderRef
+            ? { userId: user._id as Id<"users">, orderRefNum: activeEasypaisaOrderRef }
+            : "skip",
+    );
+    const pendingChallengeForSelection = useQuery(
+        api.teamChallenges.getPendingForOpponentByCaptain,
+        user?._id && opponentTeamId && challengerTeamId
+            ? {
+                actorUid: user._id as Id<"users">,
+                opponentTeamId: opponentTeamId as Id<"teams">,
+                challengerTeamId: challengerTeamId as Id<"teams">,
+            }
+            : "skip",
+    );
     const [formData, setFormData] = useState({
         title: "",
         description: "",
@@ -105,24 +344,25 @@ export default function TeamChallengeCreateScreen() {
 
     useEffect(() => {
         const load = async () => {
-            if (!opponentTeamId || !user?.uid) {
+            if (!opponentTeamId || !user?._id) {
                 setLoading(false);
                 return;
             }
 
-            const [opponentSnap, captained] = await Promise.all([
-                getDoc(doc(db, "teams", opponentTeamId)),
-                getCaptainedTeams(user.uid),
+            const [opponentResult, captained] = await Promise.all([
+                getTeamById(opponentTeamId),
+                getCaptainedTeams(user._id),
             ]);
 
-            if (!opponentSnap.exists()) {
-                Alert.alert("Not found", "Opponent team not found.");
+            if (!opponentResult.ok || !opponentResult.data) {
+                showToast({ type: "error", title: "Not found", message: "Opponent team not found." });
                 router.back();
                 return;
             }
 
-            const opponent = { id: opponentSnap.id, ...opponentSnap.data() } as Team;
+            const opponent = opponentResult.data;
             setOpponentTeam(opponent);
+            setSeriesType(getDefaultSeriesForGame(String(opponent.game || "")));
             setFormData((prev) => ({
                 ...prev,
                 title: prev.title || `Challenge: ${opponent.name}`,
@@ -139,7 +379,7 @@ export default function TeamChallengeCreateScreen() {
         };
 
         load();
-    }, [opponentTeamId, router, user?.uid]);
+    }, [opponentTeamId, router, showToast, user?._id]);
 
     const challengerTeam = useMemo(
         () => captainedTeams.find((item) => item.id === challengerTeamId) || null,
@@ -148,7 +388,7 @@ export default function TeamChallengeCreateScreen() {
 
     const isTeamFilled = (team: Team | null) => {
         if (!team) return false;
-        const maxMembers = Number(team.maxMembers || 0);
+    const maxMembers = Number(team.mainRosterSize || getTeamMainRosterSize(team.game));
         const memberCount = Math.max(
             Number(team.memberCount || 0),
             Array.isArray(team.memberUids) ? team.memberUids.length : 0,
@@ -160,7 +400,7 @@ export default function TeamChallengeCreateScreen() {
 
     const getTeamCountLabel = (team: Team | null) => {
         if (!team) return "0/0";
-        const maxMembers = Number(team.maxMembers || 0);
+        const maxMembers = Number(team.mainRosterSize || getTeamMainRosterSize(team.game));
         const memberCount = Math.max(
             Number(team.memberCount || 0),
             Array.isArray(team.memberUids) ? team.memberUids.length : 0,
@@ -171,24 +411,56 @@ export default function TeamChallengeCreateScreen() {
     };
 
     const areBothTeamsFilled = isTeamFilled(challengerTeam) && isTeamFilled(opponentTeam);
+    const challengeGameKey = String(opponentTeam?.game || "").toLowerCase();
+    const seriesOptions = useMemo(() => getSeriesOptionsForGame(challengeGameKey), [challengeGameKey]);
 
     const estimatedPlayers = useMemo(
-        () => getEstimatedPlayers(String(opponentTeam?.game || ""), challengerTeam, opponentTeam),
-        [challengerTeam, opponentTeam],
+        () => getEstimatedPlayers(challengeGameKey, challengerTeam, opponentTeam),
+        [challengeGameKey, challengerTeam, opponentTeam],
+    );
+    const challengerActivePlayers = useMemo(
+        () => Math.max(1, Number(challengerTeam?.mainRosterSize || getTeamMainRosterSize(challengerTeam?.game || challengeGameKey))),
+        [challengeGameKey, challengerTeam],
+    );
+
+    const zoneRateOptions = useMemo(
+        () => buildZoneRateOptions(selectedZone, challengeGameKey, estimatedPlayers),
+        [selectedZone, challengeGameKey, estimatedPlayers],
+    );
+
+    const selectedZoneRate = useMemo(
+        () => zoneRateOptions.find((option) => option.key === selectedZoneRateKey) || zoneRateOptions[0] || null,
+        [zoneRateOptions, selectedZoneRateKey],
     );
 
     useEffect(() => {
-        const game = String(opponentTeam?.game || "");
-        const baseRate = getBaseZoneRate(selectedZone, game);
+        if (zoneRateOptions.length === 0) {
+            setSelectedZoneRateKey(null);
+            return;
+        }
+        if (!selectedZoneRateKey || !zoneRateOptions.some((option) => option.key === selectedZoneRateKey)) {
+            setSelectedZoneRateKey(zoneRateOptions[0].key);
+        }
+    }, [selectedZoneRateKey, zoneRateOptions]);
+
+    useEffect(() => {
+        setSelectedZoneRateKey(null);
+    }, [selectedZone?.id, challengeGameKey, estimatedPlayers]);
+
+    useEffect(() => {
+        const baseRate = selectedZoneRate?.price || getBaseZoneRate(selectedZone, challengeGameKey, estimatedPlayers);
         if (!baseRate) {
             setPricePerPlayer(0);
             return;
         }
-        const hours = getSeriesHours(game, seriesType);
-        const totalCost = baseRate * hours;
-        const perPlayer = estimatedPlayers > 0 ? Math.ceil(totalCost / estimatedPlayers) : 0;
-        setPricePerPlayer(perPlayer);
-    }, [opponentTeam?.game, selectedZone, seriesType, estimatedPlayers]);
+        const hours = getSeriesHours(challengeGameKey, seriesType);
+        setPricePerPlayer(Math.ceil(baseRate * hours));
+    }, [challengeGameKey, selectedZone, selectedZoneRate, seriesType, estimatedPlayers]);
+
+    const captainPaymentAmount = useMemo(
+        () => Math.max(0, Math.ceil(pricePerPlayer * challengerActivePlayers)),
+        [challengerActivePlayers, pricePerPlayer],
+    );
 
     const canSubmit = !!challengerTeam &&
         !!opponentTeam &&
@@ -196,6 +468,7 @@ export default function TeamChallengeCreateScreen() {
         !!formData.date &&
         !!formData.time &&
         pricePerPlayer > 0 &&
+        pendingChallengeForSelection !== undefined &&
         !submitting;
 
     const handleFieldChange = (field: string, value: any) => {
@@ -204,30 +477,57 @@ export default function TeamChallengeCreateScreen() {
 
     const handleCreateChallenge = async () => {
         if (submitting) return;
-        if (!challengerTeam || !opponentTeam || !selectedZone || !formData.date || !formData.time || pricePerPlayer <= 0) {
-            Alert.alert("Missing details", "Select captain team, date/time, preferred zone, and valid pricing before sending challenge.");
+        if (!challengerTeam || !opponentTeam || !selectedZone || !formData.date || !formData.time) {
+            showToast({ type: "warning", title: "Missing details", message: "Select captain team, date/time, and preferred zone before sending challenge." });
             return;
         }
         if (!areBothTeamsFilled) {
-            Alert.alert(
-                "Teams not filled",
-                `${challengerTeam.name}: ${getTeamCountLabel(challengerTeam)}\n${opponentTeam.name}: ${getTeamCountLabel(opponentTeam)}\n\nBoth teams must be full to send a challenge.`,
-            );
+            showToast({
+                type: "warning",
+                title: "Teams not filled",
+                message: `${challengerTeam.name}: ${getTeamCountLabel(challengerTeam)} | ${opponentTeam.name}: ${getTeamCountLabel(opponentTeam)}. Both teams must be full to send a challenge.`,
+            });
+            return;
+        }
+        if (pricePerPlayer <= 0) {
+            showToast({ type: "warning", title: "Missing pricing", message: "Selected zone pricing is missing for this game/series." });
             return;
         }
 
         const scheduledAt = parseScheduledDateTime(formData.date, formData.time);
         if (!scheduledAt) {
-            Alert.alert("Invalid date/time", "Select valid date and time.");
+            showToast({ type: "warning", title: "Invalid date/time", message: "Select valid date and time." });
             return;
         }
         if (scheduledAt.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
-            Alert.alert("Invalid schedule", "Challenge match must be at least 24 hours from now.");
+            showToast({ type: "warning", title: "Invalid schedule", message: "Challenge match must be at least 24 hours from now." });
+            return;
+        }
+
+        if (!isUserFullyVerified(authUser, user)) {
+            showKycVerificationRequiredAlert();
+            return;
+        }
+        if (pendingChallengeForSelection === undefined) {
+            showToast({
+                type: "info",
+                title: "Checking challenge",
+                message: "Please try again in a moment.",
+            });
+            return;
+        }
+        if (pendingChallengeForSelection?.challengeId) {
+            showToast({
+                type: "warning",
+                title: "Challenge already sent",
+                message: "You already have a pending challenge for this team.",
+            });
+            router.replace(`/teams/challenge?id=${String(pendingChallengeForSelection.challengeId)}` as any);
             return;
         }
 
         setSubmitting(true);
-        const result = await sendTeamMatchChallenge({
+        const challengeArgs: Parameters<typeof sendTeamMatchChallenge>[0] = {
             challengerTeamId: challengerTeam.id!,
             opponentTeamId: opponentTeam.id!,
             scheduledDate: formData.date,
@@ -235,25 +535,232 @@ export default function TeamChallengeCreateScreen() {
             pricePerPlayer,
             seriesType,
             message: formData.description.trim(),
+            zoneRateKey: selectedZoneRate?.key || null,
+            zoneRateLabel: selectedZoneRate?.label || null,
+            zoneRatePrice: selectedZoneRate?.price || null,
+            teamAPaymentAmount: captainPaymentAmount,
             proposedVenueByCaptainA: {
                 zoneId: selectedZone.id,
                 venueName: selectedZone.venueBrandName,
                 areaLabel: selectedZone.primaryBranch?.areaLabel || null,
             },
             maxPlayers: estimatedPlayers,
-        });
+        };
+        // Create the challenge first (no money moves at create). For PAID
+        // challenges the challenging captain (Team A) then pays their team's full
+        // amount as a server-side escrow hold on the challenge detail screen
+        // (wallet or Easypaisa). This avoids charging before a challenge exists and
+        // keeps payment state server-owned.
+        const result = await sendTeamMatchChallenge(challengeArgs);
         setSubmitting(false);
 
         if (!result.ok) {
-            Alert.alert("Challenge failed", result.message || "Unable to send challenge.");
+            showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
             return;
         }
 
-        Alert.alert("Challenge sent", `${challengerTeam.name} challenged ${opponentTeam.name}.`, [
-            { text: "Open Challenge", onPress: () => router.replace(`/teams/challenge?id=${result.challengeId}` as any) },
-            { text: "OK" },
-        ]);
+        const newChallengeId = (result as any).challengeId ? String((result as any).challengeId) : null;
+        if (TEAM_CHALLENGE_PAYMENTS_ENABLED && pricePerPlayer > 0 && newChallengeId) {
+            showToast({
+                type: "success",
+                title: "Challenge created",
+                message: `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} to hold your team's spot.`,
+            });
+            router.replace(`/teams/challenge?id=${newChallengeId}` as any);
+            return;
+        }
+
+        showToast({
+            type: "success",
+            title: "Challenge sent",
+            message: `${challengerTeam.name} challenged ${opponentTeam.name}.`,
+        });
+        router.replace(APP_ROUTES.playerHome as any);
     };
+
+    const handleStoppedEasypaisaPayment = React.useCallback((statusLike: any) => {
+        const status = getEasypaisaStatus(statusLike);
+        setActiveEasypaisaOrderRef(null);
+        resumedOrderRef.current = null;
+        showToast({
+            type: status === "expired" ? "warning" : "error",
+            title: status === "expired" ? "Payment expired" : "Payment failed",
+            message: status === "expired"
+                ? "This Easypaisa payment expired before confirmation."
+                : "Easypaisa did not confirm this payment.",
+        });
+    }, [showToast]);
+
+    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string) => {
+        if (!pendingCreateAfterPayment) return;
+        if (resumedOrderRef.current === orderRefNum) return;
+        resumedOrderRef.current = orderRefNum;
+        setFinishingEasypaisa(true);
+
+        try {
+            const walletPayment = await payTeamChallengeWithWallet({
+                amount: pendingCreateAfterPayment.captainPaymentAmount,
+                side: "teamA",
+                reference: pendingCreateAfterPayment.walletReference,
+            });
+            if (!walletPayment.ok) {
+                setActiveEasypaisaOrderRef(null);
+                setEasypaisaModalVisible(false);
+                setPendingCreateAfterPayment(null);
+                showToast({
+                    type: "warning",
+                    title: "Payment received",
+                    message: walletPayment.message || "Funds were added to your wallet, but MatchHai could not send the challenge automatically. Try again using Wallet.",
+                });
+                return;
+            }
+            const result = await sendTeamMatchChallenge(pendingCreateAfterPayment.challengeArgs);
+            if (!result.ok) {
+                setActiveEasypaisaOrderRef(null);
+                setEasypaisaModalVisible(false);
+                setPendingCreateAfterPayment(null);
+                showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
+                return;
+            }
+
+            setEasypaisaModalVisible(false);
+            setPendingCreateAfterPayment(null);
+            setActiveEasypaisaOrderRef(null);
+
+            showToast({
+                type: "success",
+                title: "Challenge sent",
+                message: `${pendingCreateAfterPayment.challengerTeamName} challenged ${pendingCreateAfterPayment.opponentTeamName}.`,
+            });
+            router.replace(APP_ROUTES.playerHome as any);
+        } catch (error: any) {
+            setActiveEasypaisaOrderRef(null);
+            setEasypaisaModalVisible(false);
+            setPendingCreateAfterPayment(null);
+            showToast({
+                type: "warning",
+                title: "Payment received",
+                message: error?.message || "Funds were added to your wallet, but MatchHai could not finish the challenge automatically.",
+            });
+        } finally {
+            setFinishingEasypaisa(false);
+        }
+    }, [pendingCreateAfterPayment, router, showToast]);
+
+    const refreshEasypaisaPaymentStatus = React.useCallback(async (orderRefNum: string) => {
+        if (!user?._id || !orderRefNum) return;
+        try {
+            const result = await syncCheckoutStatus({ orderRefNum, userId: user._id as Id<"users"> } as any);
+            if (isEasypaisaPaid(result)) {
+                await finishAfterEasypaisaPayment(orderRefNum);
+                return;
+            }
+            if (isEasypaisaStopped(result)) {
+                handleStoppedEasypaisaPayment(result);
+            }
+        } catch {
+            // Keep polling; transient gateway inquiry errors should not strand the modal.
+        }
+    }, [finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, syncCheckoutStatus, user?._id]);
+
+    const handleStartEasypaisaTopup = async () => {
+        if (!user?._id || !pendingCreateAfterPayment) return;
+        const amount = Math.max(0, Math.ceil(Number(pendingCreateAfterPayment.captainPaymentAmount || 0)));
+        if (amount <= 0) return;
+        if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {
+            showToast({ type: "warning", title: "Invalid number", message: "Enter a valid Pakistani mobile number for Easypaisa." });
+            return;
+        }
+
+        setStartingEasypaisa(true);
+        try {
+            const normalized = normalizePakistaniPhone(easypaisaCheckoutPhone);
+            let checkout: any;
+            try {
+                checkout = await startCheckout({
+                    kind: "wallet_topup",
+                    amount,
+                    userId: user._id as Id<"users">,
+                    phone: normalized.phoneE164 || easypaisaCheckoutPhone,
+                    transactionType: "MA",
+                });
+            } catch (error: any) {
+                const message = String(error?.message || error || "");
+                if (!/ACCOUNT DOES N[O']?T? EXIST/i.test(message) && !/ACCOUNT DOES NO EXIST/i.test(message)) {
+                    throw error;
+                }
+                checkout = await startCheckout({
+                    kind: "wallet_topup",
+                    amount,
+                    userId: user._id as Id<"users">,
+                    phone: normalized.phoneE164 || easypaisaCheckoutPhone,
+                    transactionType: "OTC",
+                });
+            }
+
+            const orderRefNum = String(checkout.orderRefNum || "");
+            setActiveEasypaisaOrderRef(orderRefNum || null);
+            const paidImmediately = isEasypaisaPaid(checkout);
+            const attemptMessage = String(checkout.attemptMessage || "Starting a new payment attempt.");
+            showToast({
+                type: paidImmediately ? "success" : "info",
+                title: paidImmediately ? "Payment confirmed" : "Payment started",
+                message: paidImmediately
+                    ? "Payment received. Sending the challenge now."
+                    : checkout.transactionType === "OTC"
+                    ? `${attemptMessage} Use token ${checkout.paymentToken || "generated by Easypaisa"} before it expires.`
+                    : `${attemptMessage} Approve the payment in Easypaisa. MatchHai will keep checking the status.`,
+            });
+            if (paidImmediately && orderRefNum) {
+                await finishAfterEasypaisaPayment(orderRefNum);
+                return;
+            }
+            if (orderRefNum) {
+                setTimeout(() => {
+                    void refreshEasypaisaPaymentStatus(orderRefNum);
+                }, 1200);
+            }
+        } catch (error: any) {
+            showToast({ type: "error", title: "Payment failed", message: error?.message || "Could not start the Easypaisa payment." });
+        } finally {
+            setStartingEasypaisa(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef || !checkoutStatus || !pendingCreateAfterPayment) return;
+        if (isEasypaisaPaid(checkoutStatus)) {
+            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef);
+            return;
+        }
+        if (isEasypaisaStopped(checkoutStatus)) {
+            handleStoppedEasypaisaPayment(checkoutStatus);
+        }
+    }, [activeEasypaisaOrderRef, checkoutStatus, finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, pendingCreateAfterPayment]);
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef || !user?._id) return;
+        const timer = setInterval(() => {
+            void refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef);
+        }, 2000);
+        return () => clearInterval(timer);
+    }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus, user?._id]);
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef) return;
+        const subscription = AppState.addEventListener("change", (state) => {
+            if (state === "active") {
+                void refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef);
+            }
+        });
+        return () => subscription.remove();
+    }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus]);
+
+    const easypaisaStatusMessage = activeEasypaisaOrderRef
+        ? finishingEasypaisa || isEasypaisaPaid(checkoutStatus)
+            ? "Payment confirmed. Sending challenge..."
+            : "Waiting for payment confirmation..."
+        : null;
 
     if (loading) {
         return (
@@ -276,56 +783,142 @@ export default function TeamChallengeCreateScreen() {
         );
     }
 
-    const gameKey = String(opponentTeam.game || "").toLowerCase();
-    const gameLabel = String(opponentTeam.game || "").toUpperCase();
+    const gameKey = challengeGameKey;
+    const gameLabel = getCanonicalGameLabel(opponentTeam.game);
+    const submitDisabled = !canSubmit || !areBothTeamsFilled || !isUserFullyVerified(authUser, user);
 
     return (
-        <Screen style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "padding"}
+                keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+                style={localStyles.keyboardShell}
+            >
             <AppHeader title="Challenge Team" onBack={() => router.back()} inlineTitle />
+            <AppDialog
+                visible={easypaisaModalVisible}
+                onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
+                dismissDisabled={startingEasypaisa || finishingEasypaisa}
+                keyboardAware={true}
+            >
+                <AppModalHeader
+                    title="Confirm Easypaisa Number"
+                    subtitle={`Pay PKR ${Math.max(0, Math.ceil(Number(pendingCreateAfterPayment?.captainPaymentAmount || 0)))} then MatchHai will send the challenge automatically.`}
+                    onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
+                    closeDisabled={startingEasypaisa || finishingEasypaisa}
+                />
+                <AppModalBody scroll>
+                    <Text style={{ color: COLORS.textSecondary, marginBottom: 10 }}>
+                        Mobile Account Number
+                    </Text>
+                    <TextInput
+                        style={[
+                            styles.input,
+                            {
+                                backgroundColor: COLORS.inputBackground,
+                                borderRadius: RADII.md,
+                                paddingHorizontal: SPACING.md,
+                                paddingVertical: SPACING.sm,
+                            },
+                        ]}
+                        keyboardType="phone-pad"
+                        value={easypaisaCheckoutPhone}
+                        onChangeText={(value) => setEasypaisaCheckoutPhone(formatPakistaniPhone(value))}
+                        placeholder="03XX XXX XXXX"
+                        placeholderTextColor={COLORS.textSecondary}
+                        editable={!startingEasypaisa && !finishingEasypaisa && !activeEasypaisaOrderRef}
+                    />
+                    {easypaisaStatusMessage ? (
+                        <Text style={{ color: COLORS.warning, marginTop: 12 }}>
+                            {easypaisaStatusMessage}
+                        </Text>
+                    ) : null}
+                </AppModalBody>
+                <AppModalFooter>
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                        {activeEasypaisaOrderRef ? (
+                            <>
+                                <AppButton
+                                    variant="secondary"
+                                    style={{ flex: 1 }}
+                                    onPress={() => setEasypaisaModalVisible(false)}
+                                >
+                                    Do this later
+                                </AppButton>
+                                <AppButton
+                                    style={{ flex: 1 }}
+                                    onPress={() => refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef)}
+                                    loading={finishingEasypaisa}
+                                    disabled={startingEasypaisa || finishingEasypaisa}
+                                >
+                                    I've paid / Continue
+                                </AppButton>
+                            </>
+                        ) : (
+                            <>
+                                <AppButton
+                                    variant="secondary"
+                                    style={{ flex: 1 }}
+                                    onPress={() => setEasypaisaModalVisible(false)}
+                                    disabled={startingEasypaisa || finishingEasypaisa}
+                                >
+                                    Cancel
+                                </AppButton>
+                                <AppButton
+                                    style={{ flex: 1 }}
+                                    onPress={handleStartEasypaisaTopup}
+                                    loading={startingEasypaisa || finishingEasypaisa}
+                                    disabled={startingEasypaisa || finishingEasypaisa}
+                                >
+                                    Continue to Pay
+                                </AppButton>
+                            </>
+                        )}
+                    </View>
+                </AppModalFooter>
+            </AppDialog>
             {loading ? (
                 <View style={styles.centered}>
                     <ActivityIndicator color={styles.accentText.color as string} />
                 </View>
             ) : (
-                <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                    <View style={styles.header}>
-                        <Text style={styles.headerTitle}>Create Team Challenge</Text>
-                        <Text style={styles.headerSubtitle}>Reuse matchroom flow with challenge approval.</Text>
-                    </View>
-
-                    <View style={styles.section}>
-                        <Text style={styles.sectionLabel}>Selected Game / Sport</Text>
-                        <View style={styles.gameGrid}>
-                            <View style={[styles.gameCard, styles.gameCardActive]}>
-                                <MaterialIcons
-                                    name={(GAME_ICONS[gameKey] as any) || "sports-esports"}
-                                    size={32}
-                                    color={styles.accentText.color as string}
-                                    style={styles.gameIcon}
+                <>
+                <ScrollView
+                    style={localStyles.scroll}
+                    contentContainerStyle={[styles.createScrollContent, localStyles.scrollContent]}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={localStyles.matchupCard}>
+                        <View style={localStyles.matchupTopRow}>
+                            <View style={localStyles.gamePill}>
+                                <GameImageIcon
+                                    game={gameKey}
+                                    size={34}
+                                    fallbackIconName={(GAME_ICONS[gameKey] as any) || "sports-esports"}
+                                    fallbackIconColor={styles.accentText.color as string}
                                 />
-                                <Text style={[styles.gameName, styles.gameNameActive]}>{gameLabel}</Text>
+                                <Text style={localStyles.gamePillText}>{gameLabel}</Text>
                             </View>
                         </View>
-                    </View>
-
-                    <View style={styles.section}>
-                        <Text style={styles.sectionLabel}>Match Setup</Text>
-                        <View style={styles.infoBox}>
-                            <Text style={styles.infoBoxText}>
-                                {challengerTeam?.name || "Your Team"} vs {opponentTeam.name} - {String(opponentTeam.game || "").toUpperCase()}
-                            </Text>
-                            <Text style={styles.infoBoxSmall}>Team B will review your date, time, series, zone and pricing context.</Text>
-                            <Text style={styles.infoBoxSmall}>
-                                Team A filled: {isTeamFilled(challengerTeam) ? "Yes" : "No"} | Team B filled: {isTeamFilled(opponentTeam) ? "Yes" : "No"}
-                            </Text>
+                        <Text style={localStyles.matchupTitle} numberOfLines={2}>
+                            {challengerTeam?.name || "Select your team"} vs {opponentTeam.name}
+                        </Text>
+                        <View style={localStyles.teamFillRow}>
+                            <View style={localStyles.teamFillPill}>
+                                <Text style={localStyles.teamFillText}>Your team: {getTeamCountLabel(challengerTeam)}</Text>
+                            </View>
+                            <View style={localStyles.teamFillPill}>
+                                <Text style={localStyles.teamFillText}>Opponent: {getTeamCountLabel(opponentTeam)}</Text>
+                            </View>
                         </View>
                         {!areBothTeamsFilled ? (
-                            <Text style={styles.submitHintText}>Team challenge can only be sent when both teams are full.</Text>
+                            <Text style={styles.submitHintText}>Both teams must be full before a challenge can be sent.</Text>
                         ) : null}
                     </View>
 
                     <View style={styles.section}>
-                        <Text style={styles.sectionLabel}>Select Your Captain Team<Text style={styles.requiredAsterisk}>*</Text></Text>
+                        <Text style={styles.sectionLabel}>Captain Team<Text style={styles.requiredAsterisk}>*</Text></Text>
                         <View style={styles.chipRow}>
                             {captainedTeams.map((team) => (
                                 <Pressable
@@ -341,7 +934,7 @@ export default function TeamChallengeCreateScreen() {
                         </View>
                         {captainedTeams.length === 0 ? (
                             <Text style={styles.submitHintText}>
-                                You must captain another {String(opponentTeam.game || "").toUpperCase()} team to challenge.
+                                You must captain another {gameLabel} team to challenge.
                             </Text>
                         ) : null}
                     </View>
@@ -353,23 +946,23 @@ export default function TeamChallengeCreateScreen() {
                         minimumDate={(() => {
                             const d = new Date();
                             d.setHours(0, 0, 0, 0);
-                            d.setDate(d.getDate() + 1);
+                            d.setDate(d.getDate() + 2);
                             return d;
                         })()}
-                        dateHelperText="Challenge matches must be at least 24 hours from now."
+                        dateHelperText="Challenge matches must be at least 2 days from now and within 2 months."
                     />
 
                     <View style={styles.section}>
                         <Text style={styles.sectionLabel}>Series Type<Text style={styles.requiredAsterisk}>*</Text></Text>
                         <View style={styles.chipRow}>
-                            {SERIES_OPTIONS.map((type) => (
+                            {seriesOptions.map((type) => (
                                 <Pressable
                                     key={type}
                                     style={[styles.optionChip, seriesType === type && styles.optionChipActive]}
                                     onPress={() => setSeriesType(type)}
                                 >
                                     <Text style={[styles.optionChipText, seriesType === type && styles.optionChipTextActive]}>
-                                        {type === "BO1" ? "Best of 1" : type === "BO3" ? "Best of 3" : "Best of 5"}
+                                        {formatSeriesLabel(type)}
                                     </Text>
                                 </Pressable>
                             ))}
@@ -385,45 +978,84 @@ export default function TeamChallengeCreateScreen() {
                         onZoneSelect={setSelectedZone}
                     />
 
+                    {selectedZone && zoneRateOptions.length > 0 ? (
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>Category<Text style={styles.requiredAsterisk}>*</Text></Text>
+                            <View style={styles.chipRow}>
+                                {zoneRateOptions.map((option) => (
+                                    <Pressable
+                                        key={option.key}
+                                        style={[styles.optionChip, selectedZoneRate?.key === option.key && styles.optionChipActive]}
+                                        onPress={() => setSelectedZoneRateKey(option.key)}
+                                    >
+                                        <Text style={[styles.optionChipText, selectedZoneRate?.key === option.key && styles.optionChipTextActive]}>
+                                            {option.label} | PKR {option.price}/hr
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+                        </View>
+                    ) : null}
+
                     <View style={styles.section}>
                         <Text style={styles.sectionLabel}>Price Per Player (PKR)</Text>
                         <View style={[styles.inputBox, styles.row, { alignItems: "center" }]}>
                             <TextInput
                                 style={[styles.input, styles.flex1, styles.mutedText]}
                                 value={pricePerPlayer > 0 ? String(pricePerPlayer) : ""}
-                                placeholder="Calculated from zone rate & series"
+                                placeholder="Calculated from zone rate and series"
                                 placeholderTextColor="#757575"
                                 editable={false}
                             />
-                            <MaterialIcons name="lock" size={16} color="#6B7380" style={styles.marginLeft8} />
+                            <AppIcon name="lock" size={16} color="#6B7380" style={styles.marginLeft8} />
                         </View>
                         <Text style={styles.helperTextTiny}>
-                            Computed using selected zone hourly rate, series duration, and expected players ({estimatedPlayers}).
+                            {TEAM_CHALLENGE_PAYMENTS_ENABLED
+                                ? `Based on selected zone rate and series duration. Captain pays PKR ${captainPaymentAmount} for ${challengerActivePlayers} players.`
+                                : "Based on selected zone rate and series duration. Shown for reference only."}
                         </Text>
+                        {!TEAM_CHALLENGE_PAYMENTS_ENABLED ? (
+                            <Text style={styles.submitHintText}>{TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY}</Text>
+                        ) : null}
+                        {selectedZoneRate ? (
+                            <Text style={styles.helperTextTiny}>
+                                Resource type: {selectedZoneRate.label} at PKR {selectedZoneRate.price}/hr.
+                            </Text>
+                        ) : null}
                         {pricePerPlayer <= 0 ? (
                             <Text style={styles.submitHintText}>Selected zone pricing is missing for this game/series.</Text>
                         ) : null}
                     </View>
 
-                    <View style={styles.buttonWrapper}>
-                        <Pressable
-                            style={({ pressed }) => [
-                                styles.primaryButton,
-                                submitting && styles.primaryButtonDisabled,
-                                pressed && canSubmit && !submitting && styles.primaryButtonPressed,
-                            ]}
-                            onPress={handleCreateChallenge}
-                            disabled={submitting}
-                        >
-                            {submitting ? (
-                                <ActivityIndicator color="#FFF" />
-                            ) : (
-                                <Text style={styles.primaryButtonText}>Send Challenge</Text>
-                            )}
-                        </Pressable>
-                    </View>
                 </ScrollView>
+
+                <BottomActionBar>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.primaryButton,
+                            submitDisabled && styles.primaryButtonDisabled,
+                            pressed && !submitDisabled && styles.primaryButtonPressed,
+                        ]}
+                        onPress={() => {
+                            if (!isUserFullyVerified(authUser, user)) {
+                                showKycVerificationRequiredAlert();
+                                return;
+                            }
+                            handleCreateChallenge();
+                        }}
+                        disabled={submitting}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        {submitting ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <Text style={styles.primaryButtonText}>Send Challenge</Text>
+                        )}
+                    </Pressable>
+                </BottomActionBar>
+                </>
             )}
+            </KeyboardAvoidingView>
         </Screen>
     );
 }

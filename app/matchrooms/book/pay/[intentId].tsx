@@ -1,39 +1,71 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
+import { useAction } from "convex/react";
 import {
     ActivityIndicator,
-    Alert,
     ScrollView,
     Text,
-    TouchableOpacity,
+    TextInput,
+    Pressable,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
+import AppHeader from "../../../../src/components/AppHeader";
+import { AppIcon } from "../../../../src/components/AppIcon";
+import BottomActionBar from "../../../../src/components/BottomActionBar";
+import {
+    AppDialog,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+} from "../../../../src/components/AppModalPrimitives";
+import { AppButton, AppCard, StatusPill } from "../../../../src/components/AppPrimitives";
+import { DetailKeyValueRow, DetailSectionCard } from "../../../../src/components/DetailSurface";
+import Screen from "../../../../src/components/Screen";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { db } from "../../../../src/config/firebaseConfig";
+import { useToast } from "../../../../src/hooks/useToast";
+import { convex } from "../../../../src/lib/convex";
+import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
 import {
     BookingIntent,
     confirmBookingTransaction,
     getBookingIntent
-} from "../../../../src/services/bookingService";
+} from "../../../../src/services/convex/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
+import {
+    formatPakistaniPhone,
+    isValidPakistaniPhone,
+    normalizePakistaniPhone,
+} from "../../../../src/utils/phoneUtils";
+import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
+import { getUserFacingErrorMessage } from "../../../../src/utils/userFacingErrors";
 import styles from "./pay.styles";
+
+const shouldFallbackToOtc = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || "");
+    return /ACCOUNT DOES N[O']?T? EXIST|ACCOUNT DOES NO EXIST|PAYMENT METHOD NOT ENABLED/i.test(message);
+};
+
+const getEasypaisaStartErrorMessage = (error: unknown) =>
+    getUserFacingErrorMessage(error, "Could not start the Easypaisa payment. Please try again.");
 
 export default function MockPaymentScreen() {
     const { intentId } = useLocalSearchParams() as { intentId: string };
     const router = useRouter();
     const { user } = useAuth();
+    const { showToast } = useToast();
+    const startCheckout = useAction((api as any).easypaisa.startCheckout);
 
     const [intent, setIntent] = useState<BookingIntent | null>(null);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
     const [walletBalance, setWalletBalance] = useState(0);
-    const [paymentMethod, setPaymentMethod] = useState<"wallet" | "card">("wallet");
-    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const [paymentMethod, setPaymentMethod] = useState<"wallet" | "easypaisa">("wallet");
+    const [easypaisaPhoneVisible, setEasypaisaPhoneVisible] = useState(false);
+    const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
+    const [nowMs, setNowMs] = useState(Date.now());
 
     useEffect(() => {
         const fetchIntent = async () => {
@@ -43,7 +75,7 @@ export default function MockPaymentScreen() {
                 if (res.ok && res.data) {
                     setIntent(res.data);
                 } else {
-                    Alert.alert("Error", "Booking request not found.");
+                    showToast({ type: "error", title: "Error", message: "Booking request not found." });
                     router.back();
                 }
             } catch (e) {
@@ -53,32 +85,130 @@ export default function MockPaymentScreen() {
             }
         };
         fetchIntent();
-    }, [intentId]);
+    }, [intentId, router, showToast]);
 
     useEffect(() => {
         const loadWallet = async () => {
-            if (!user?.uid) return;
+            if (!user?._id) return;
             try {
-                const snap = await getDoc(doc(db, "users", user.uid));
-                setWalletBalance(snap.exists() ? Number(snap.data()?.walletBalance || 0) : 0);
+                const balance = await convex.query(api.wallet.getBalance, {
+                    userId: user._id as Id<"users">,
+                });
+                setWalletBalance(Number(balance || 0));
             } catch {
                 setWalletBalance(0);
             }
         };
         loadWallet();
-    }, [user?.uid]);
+    }, [user?._id]);
+
+    useEffect(() => {
+        if (!intent?.expiresAt) return;
+        const timer = setInterval(() => setNowMs(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, [intent?.expiresAt]);
+
+    useEffect(() => {
+        if (!easypaisaPhoneVisible) {
+            setEasypaisaCheckoutPhone(
+                user?.phone ? formatPakistaniPhone(String(user.phone)) : "",
+            );
+        }
+    }, [easypaisaPhoneVisible, user?.phone]);
+
+    const startEasypaisaBookingCheckout = async () => {
+        if (!intentId || !user?._id || processing) return;
+        if (intent?.expiresAt && intent.expiresAt <= Date.now()) {
+            showToast({
+                type: "warning",
+                title: "Slot hold expired",
+                message: "Please request the slot again to continue.",
+            });
+            return;
+        }
+        if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {
+            showToast({
+                type: "warning",
+                title: "Invalid number",
+                message: "Enter a valid Pakistani mobile number for Easypaisa.",
+            });
+            return;
+        }
+
+        const normalizedPhone = normalizePakistaniPhone(easypaisaCheckoutPhone);
+        const checkoutArgs = {
+            kind: "booking_intent" as const,
+            bookingIntentId: intentId as Id<"bookingIntents">,
+            userId: user._id as Id<"users">,
+            phone: normalizedPhone.phoneE164 || easypaisaCheckoutPhone,
+            forceNew: true,
+        };
+
+        setProcessing(true);
+        try {
+            let checkout: any;
+            try {
+                checkout = await startCheckout({
+                    ...checkoutArgs,
+                    transactionType: "MA",
+                });
+            } catch (error) {
+                if (!shouldFallbackToOtc(error)) {
+                    throw error;
+                }
+
+                Logger.warn("ReviewPay", "Easypaisa mobile account checkout unavailable, falling back to OTC", {
+                    intentId,
+                });
+                checkout = await startCheckout({
+                    ...checkoutArgs,
+                    transactionType: "OTC",
+                });
+            }
+
+            const message = checkout.transactionType === "OTC"
+                ? `Use the Easypaisa OTC token ${checkout.paymentToken || ""}`.trim()
+                : "Approve the payment in Easypaisa. MatchHai will keep checking the status.";
+            const attemptMessage = String(checkout.attemptMessage || "Starting a new payment attempt.");
+            showToast({ type: "info", title: "Payment started", message: `${attemptMessage} ${message}` });
+            setEasypaisaPhoneVisible(false);
+            router.replace({
+                pathname: "/matchrooms/book/status/[intentId]",
+                params: {
+                    intentId,
+                    gateway: "easypaisa",
+                    paymentStatus: "pending",
+                    orderRefNum: String(checkout.orderRefNum),
+                },
+            } as any);
+        } catch (error) {
+            const message = getEasypaisaStartErrorMessage(error);
+            Logger.warn("ReviewPay", "Easypaisa checkout unavailable", { message });
+            showToast({ type: "error", title: "Payment unavailable", message });
+        } finally {
+            setProcessing(false);
+        }
+    };
 
     const handleMockPayment = async () => {
         if (!intentId || !user) return;
-        if (paymentMethod !== "wallet") {
-            Alert.alert("Coming soon", "Card payments are not available yet. Please pay via wallet.");
+        if (intent?.expiresAt && intent.expiresAt <= Date.now()) {
+            showToast({
+                type: "warning",
+                title: "Slot hold expired",
+                message: "Please request the slot again to continue.",
+            });
+            return;
+        }
+        if (paymentMethod === "easypaisa") {
+            setEasypaisaPhoneVisible(true);
             return;
         }
 
         setProcessing(true);
 
         try {
-            const res = await confirmBookingTransaction(intentId, user.uid, paymentMethod);
+            const res = await confirmBookingTransaction(intentId, user._id, paymentMethod);
             if (res.ok) {
                 // Navigate to status screen
                 router.replace({
@@ -86,12 +216,13 @@ export default function MockPaymentScreen() {
                     params: { intentId: intentId }
                 } as any);
             } else {
-                Alert.alert("Payment Failed", res.message);
+                showToast({ type: "error", title: "Payment Failed", message: res.message });
                 setProcessing(false);
             }
         } catch (e) {
-            Logger.error("MockPayment", "Transaction error", e);
-            Alert.alert("Error", "An unexpected error occurred.");
+            const message = e instanceof Error ? e.message : String(e || "Payment could not be started.");
+            Logger.warn("MockPayment", "Transaction unavailable", { message });
+            showToast({ type: "error", title: "Payment unavailable", message });
             setProcessing(false);
         }
     };
@@ -105,117 +236,206 @@ export default function MockPaymentScreen() {
     }
 
     if (!intent) return null;
-    const hasEnoughWallet = walletBalance >= Number(intent.pricing?.total || 0);
+    const currency = (intent.pricing as any)?.currency || "PKR";
+    const seatCount = intent.selectedSlots.length;
+    const pricePerSeat = Number(intent.pricing?.perPlayerCost || 0);
+    const totalCost = Number(intent.pricing?.totalCost || 0);
+    const hasEnoughWallet = walletBalance >= totalCost;
+    const isPaymentWindowExpired = Boolean(intent.expiresAt && intent.expiresAt <= nowMs);
+    const payDisabled = processing || !intent || isPaymentWindowExpired || (paymentMethod === "wallet" && !hasEnoughWallet);
+    const paymentStateMessage =
+        paymentMethod === "wallet"
+            ? "Wallet funds reserve your seat now and are captured when the match starts or is confirmed."
+            : "After Easypaisa confirms payment, MatchHai reserves your seat and captures funds when the match starts or is confirmed.";
 
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="close" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Review & Pay</Text>
-            </View>
+        <Screen
+            style={styles.container}
+            variant="stack"
+            scroll={false}
+            edges={["top", "bottom"]}
+            contentStyle={styles.screenContent}
+        >
+            <AppHeader
+                title="Review & Pay"
+                onBack={() => router.back()}
+                inlineTitle
+            />
 
-            <ScrollView contentContainerStyle={styles.content}>
-                <View style={styles.amountCard}>
-                    <Text style={styles.amountLabel}>TOTAL AMOUNT</Text>
+            <View style={styles.body}>
+            <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={styles.content}
+            >
+                <AppCard variant="elevated" style={styles.amountCard}>
+                    <Text style={styles.amountLabel}>TOTAL DUE</Text>
                     <Text style={styles.amountValue}>
-                        {intent.pricing.currency} {intent.pricing.total}
+                        {currency} {totalCost}
                     </Text>
                     <Text style={styles.seatCount}>
-                        For {intent.selectedSlots.length} Reserved Seats
+                        Reserve {seatCount} seat{seatCount === 1 ? "" : "s"} after payment confirms
                     </Text>
-                </View>
-
-                {/* Secure Payment Info */}
-                <View style={styles.infoBox}>
-                    <MaterialIcons name="security" size={20} color={COLORS.success} />
-                    <Text style={styles.infoText}>Wallet payment is active. Card payment is coming soon.</Text>
-                </View>
+                </AppCard>
 
                 {/* Summary */}
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>BOOKING SUMMARY</Text>
-                    <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Lobby</Text>
-                        <Text style={styles.detailValue}>{intent.game}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Price per seat</Text>
-                        <Text style={styles.detailValue}>{intent.pricing.currency}{intent.pricing.perPlayer}</Text>
-                    </View>
-                </View>
+                <DetailSectionCard title="Amount Breakdown" style={styles.sectionCardSpacing}>
+                    <DetailKeyValueRow label="Lobby" value={intent.game} />
+                    <DetailKeyValueRow label="Seats" value={seatCount} />
+                    <DetailKeyValueRow
+                        label="Price per seat"
+                        value={`${currency} ${pricePerSeat}`}
+                    />
+                    <DetailKeyValueRow
+                        label="Total due"
+                        value={`${currency} ${totalCost}`}
+                        valueTone="accent"
+                        valueStyle={styles.totalAmount}
+                        last
+                    />
+                </DetailSectionCard>
 
                 {/* Payment Methods (Mock) */}
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>PAYMENT METHOD</Text>
-                    <TouchableOpacity
+                <DetailSectionCard
+                    title="Payment Method"
+                    subtitle="Choose how to reserve your seat."
+                    style={styles.sectionCardSpacing}
+                >
+                    <Pressable
                         style={[
                             styles.methodOption,
                             paymentMethod === "wallet" && styles.methodOptionActive,
                         ]}
-                        activeOpacity={0.7}
                         onPress={() => setPaymentMethod("wallet")}
                     >
                         <View style={styles.methodIcon}>
-                            <MaterialIcons name="account-balance-wallet" size={24} color={COLORS.accent} />
+                            <AppIcon name="account-balance-wallet" size={24} color={COLORS.accent} />
                         </View>
-                        <View style={{ flex: 1 }}>
+                        <View style={styles.methodCopy}>
                             <Text style={styles.methodName}>MatchHai Wallet</Text>
-                            <Text style={styles.methodDetail}>Balance: {intent.pricing.currency} {Math.round(walletBalance)}</Text>
+                            <Text style={styles.methodDetail}>Balance: {currency} {Math.round(walletBalance)}</Text>
                         </View>
-                        <MaterialIcons
-                            name={paymentMethod === "wallet" ? "radio-button-checked" : "radio-button-unchecked"}
-                            size={20}
-                            color={COLORS.accent}
+                        <StatusPill
+                            tone={paymentMethod === "wallet" ? "info" : "neutral"}
+                            label={paymentMethod === "wallet" ? "Selected" : "Available"}
                         />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.methodOption, styles.methodOptionDisabled]}
-                        activeOpacity={0.7}
-                        onPress={() => Alert.alert("Coming soon", "Card payments are not available yet.")}
+                    </Pressable>
+                    <Pressable
+                        style={[
+                            styles.methodOption,
+                            paymentMethod === "easypaisa" && styles.methodOptionActive,
+                        ]}
+                        onPress={() => setPaymentMethod("easypaisa")}
                     >
                         <View style={styles.methodIcon}>
-                            <MaterialIcons name="credit-card" size={24} color={COLORS.textSecondary} />
+                            <AppIcon name="payments" size={24} color={COLORS.accent} />
                         </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.methodName}>Credit / Debit Card</Text>
-                            <Text style={styles.methodDetail}>Coming soon</Text>
+                        <View style={styles.methodCopy}>
+                            <Text style={styles.methodName}>{FEATURE_READINESS.payments.easypaisa.label}</Text>
+                            <Text style={styles.methodDetail}>{FEATURE_READINESS.payments.easypaisa.description}</Text>
                         </View>
-                        <MaterialIcons name="lock" size={18} color={COLORS.textSecondary} />
-                    </TouchableOpacity>
-                    {!hasEnoughWallet ? (
-                        <Text style={[styles.methodDetail, { marginTop: 10, color: COLORS.warning }]}>
+                        <StatusPill
+                            tone={paymentMethod === "easypaisa" ? "info" : "neutral"}
+                            label={paymentMethod === "easypaisa" ? "Selected" : "Available"}
+                        />
+                    </Pressable>
+                    {!hasEnoughWallet && paymentMethod === "wallet" ? (
+                        <Text style={styles.walletWarning}>
                             Insufficient wallet balance. Please add funds from Wallet.
                         </Text>
                     ) : null}
-                </View>
+                    {isPaymentWindowExpired ? (
+                        <Text style={styles.expiredText}>
+                            This slot hold expired. Please request the slot again to continue.
+                        </Text>
+                    ) : null}
+                    {!isPaymentWindowExpired ? (
+                        <View style={styles.paymentStateRow}>
+                            <AppIcon name="security" size={18} color={COLORS.success} />
+                            <Text style={styles.paymentStateText}>{paymentStateMessage}</Text>
+                        </View>
+                    ) : null}
+                </DetailSectionCard>
             </ScrollView>
+            </View>
 
-            <View style={styles.footer}>
-                <TouchableOpacity
-                    style={[styles.payBtn, (processing || !intent || !hasEnoughWallet) && styles.payBtnDisabled]}
-                    onPressIn={() => {
-                        if (touchDebugEnabled) {
-                            Logger.debug("TouchDebug", "pressIn", { tag: "booking_pay_now" });
-                        }
-                    }}
+            <BottomActionBar contentStyle={styles.bottomActionContent}>
+                <AppButton
+                    size="lg"
                     onPress={handleMockPayment}
-                    disabled={processing || !intent || !hasEnoughWallet}
-                    activeOpacity={0.85}
+                    disabled={payDisabled}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={payDisabled ? styles.payBtnDisabled : undefined}
                 >
                     {processing ? (
                         <ActivityIndicator color="#FFF" />
                     ) : (
                         <>
-                            <Text style={styles.payBtnText}>Pay with Wallet</Text>
-                            <MaterialIcons name="lock" size={18} color="#FFF" />
+                            <Text style={styles.payBtnText}>
+                                {isPaymentWindowExpired
+                                    ? "Slot Hold Expired"
+                                    : paymentMethod === "wallet" ? "Reserve with Wallet" : "Continue to Easypaisa"}
+                            </Text>
+                            {!isPaymentWindowExpired ? (
+                                <AppIcon
+                                    name={paymentMethod === "wallet" ? "lock" : "open-in-new"}
+                                    size={18}
+                                    color="#FFF"
+                                />
+                            ) : null}
                         </>
                     )}
-                </TouchableOpacity>
-                <Text style={styles.cancelHint}>Card payments will be enabled after gateway integration.</Text>
-            </View>
-        </SafeAreaView>
+                </AppButton>
+            </BottomActionBar>
+
+            <AppDialog
+                visible={easypaisaPhoneVisible}
+                onClose={() => !processing && setEasypaisaPhoneVisible(false)}
+                dismissDisabled={processing}
+                cardStyle={styles.easypaisaDialogCard}
+                keyboardAware
+            >
+                <AppModalHeader
+                    title="Confirm Easypaisa Number"
+                    subtitle="Use the number you want to pay with for this seat reservation."
+                    onClose={() => !processing && setEasypaisaPhoneVisible(false)}
+                    closeDisabled={processing}
+                />
+                <AppModalBody scroll contentContainerStyle={styles.easypaisaDialogContent}>
+                    <Text style={styles.easypaisaAmountLabel}>
+                        Amount: {currency} {totalCost}
+                    </Text>
+                    <Text style={styles.easypaisaPhoneLabel}>Mobile Account Number</Text>
+                    <TextInput
+                        style={styles.easypaisaPhoneInput}
+                        keyboardType="phone-pad"
+                        value={easypaisaCheckoutPhone}
+                        onChangeText={(value) => setEasypaisaCheckoutPhone(formatPakistaniPhone(value))}
+                        placeholder="03XX XXX XXXX"
+                        placeholderTextColor={COLORS.textSecondary}
+                        editable={!processing}
+                    />
+                </AppModalBody>
+                <AppModalFooter style={styles.easypaisaDialogFooter}>
+                    <View style={styles.easypaisaActions}>
+                        <AppButton
+                            variant="secondary"
+                            style={styles.easypaisaActionButton}
+                            onPress={() => setEasypaisaPhoneVisible(false)}
+                            disabled={processing}
+                        >
+                            Cancel
+                        </AppButton>
+                        <AppButton
+                            style={styles.easypaisaActionButton}
+                            onPress={() => void startEasypaisaBookingCheckout()}
+                            loading={processing}
+                            disabled={processing}
+                        >
+                            Continue to Pay
+                        </AppButton>
+                    </View>
+                </AppModalFooter>
+            </AppDialog>
+        </Screen>
     );
 }

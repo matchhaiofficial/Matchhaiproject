@@ -1,0 +1,98 @@
+appId: ${E2E_APP_ID}
+name: 03 - Create matchroom
+tags:
+  - core
+env:
+  E2E_GAME_LABEL: ${E2E_GAME_LABEL}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+- launchApp
+
+# From the dashboard Quick Actions there is a "Create" tile that routes to
+# /matchrooms/create. (app/(player)/(tabs)/index.tsx)
+- assertVisible: "Quick Actions"
+- tapOn: "Create"
+
+# Create screen header.
+- assertVisible: "Create Matchroom"
+
+# Select the game. The grid label must match a game the seeded user has added
+# to their profile (see flow 02), otherwise it will not render.
+# TODO testID: add `game-select-<gameKey>` to the cards in
+# app/matchrooms/create/components/GameSelector.tsx for stable targeting.
+- assertVisible: "Select Game"
+- tapOn: ${E2E_GAME_LABEL}
+
+# Title field. BasicFields renders a title TextInput.
+# TODO testID: add `matchroom-title-input` to the title TextInput in
+# app/matchrooms/create/components/BasicFields.tsx.
+- tapOn:
+    text: "Title"
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+
+# Pick a date — BasicFields opens a custom calendar modal on tap.
+# TODO testID: add `matchroom-date-field` + `matchroom-date-confirm` and
+# `matchroom-time-field` + `matchroom-time-confirm` to BasicFields. Until then
+# we drive the calendar by visible text. Solo matchrooms require a date >= 3
+# days out, so the calendar should default to a selectable month.
+- tapOn:
+    text: "Select Date"
+    optional: true
+- tapOn:
+    text: "Date"
+    optional: true
+# Tap a day in the future (the calendar disables too-soon days automatically).
+# Adjust the day number to one your seed window allows.
+- tapOn:
+    text: "15"
+    optional: true
+- tapOn:
+    text: "Confirm"
+    optional: true
+- tapOn:
+    text: "Done"
+    optional: true
+
+# Pick a time.
+- tapOn:
+    text: "Select Time"
+    optional: true
+- tapOn:
+    text: "Time"
+    optional: true
+- tapOn:
+    text: "Confirm"
+    optional: true
+- tapOn:
+    text: "Done"
+    optional: true
+
+# Choose a zone/venue. The create screen uses a ZonePicker.
+# TODO testID: add `zone-picker-open` and `zone-picker-option` to
+# app/matchrooms/create/components/ZonePicker.tsx.
+- tapOn:
+    text: "Select Zone"
+    optional: true
+- tapOn:
+    text: "Select Venue"
+    optional: true
+# Pick the first listed zone option (text varies by seed). If your seed has a
+# known venue name, replace the index tap with that text.
+- tapOn:
+    text: "Choose"
+    optional: true
+
+- hideKeyboard
+
+# Submit. Confirmed testID added to the player-mode submit button.
+# Label is "Send Booking Request" (zone mode) or "Send Broadcast".
+- tapOn:
+    id: "matchroom-create-submit"
+
+# A matchroom that needs payment opens an Easypaisa dialog or routes to the
+# detail/status screen. Assert we left the form into a created/pending state.
+# Accept any of the expected post-submit surfaces.
+- assertVisible:
+    text: "Confirm Easypaisa Number|Payment pending|Matchroom created|Waiting for kickoff|${E2E_MATCHROOM_TITLE}"

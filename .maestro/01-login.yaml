@@ -1,0 +1,38 @@
+appId: ${E2E_APP_ID}
+name: 01 - Login (seeded player)
+tags:
+  - smoke
+  - core
+env:
+  E2E_USER_EMAIL: ${E2E_USER_EMAIL}
+  E2E_USER_PASSWORD: ${E2E_USER_PASSWORD}
+---
+# Cold launch. clearState ensures we start signed-out at the login screen.
+- launchApp:
+    clearState: true
+
+# The index gate shows a launch splash, then redirects to /auth/login when
+# signed out. Wait for the login screen to settle.
+- assertVisible: "Welcome back"
+- assertVisible: "Sign in to MatchHai"
+
+# Make sure we are in Player mode (role toggle defaults to Player but be safe).
+- tapOn: "Player"
+
+# Credentials come from .env.e2e — NEVER hardcode them here.
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_USER_EMAIL}
+
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_USER_PASSWORD}
+
+- hideKeyboard
+
+- tapOn:
+    id: "login-submit-button"
+
+# After login the player lands on the dashboard (app/(player)/(tabs)/index.tsx).
+- assertVisible: "Player dashboard"
+- assertVisible: "Quick Actions"

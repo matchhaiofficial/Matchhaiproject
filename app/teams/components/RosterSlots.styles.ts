@@ -4,6 +4,20 @@ import { COLORS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme'
 export default StyleSheet.create({
     container: {
         width: '100%',
+        gap: SPACING.md,
+    },
+    group: {
+        gap: SPACING.sm,
+    },
+    groupLabel: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.xs,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.7,
+    },
+    grid: {
+        width: '100%',
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: SPACING.md,
@@ -24,6 +38,10 @@ export default StyleSheet.create({
         borderColor: `${COLORS.warning}80`,
         backgroundColor: `${COLORS.warning}08`,
     },
+    substituteCard: {
+        borderColor: `${COLORS.successBright}55`,
+        backgroundColor: `${COLORS.successBright}08`,
+    },
     pressed: {
         opacity: 0.8,
     },
@@ -39,6 +57,9 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
         borderStyle: 'dashed',
         opacity: 0.5,
+    },
+    substituteEmptySlot: {
+        borderColor: `${COLORS.successBright}35`,
     },
     avatar: {
         width: 44,
@@ -101,6 +122,18 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.xs,
         fontWeight: '700',
         color: COLORS.success,
+    },
+    substituteBadge: {
+        alignSelf: 'flex-start',
+        backgroundColor: `${COLORS.successBright}15`,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: RADII.xs,
+    },
+    substituteBadgeText: {
+        fontSize: TEXT_SIZES.xs,
+        fontWeight: '700',
+        color: COLORS.successBright,
     },
     emptyIcon: {
         width: 44,

@@ -5,15 +5,24 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/th
 export default StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
 
     scrollContent: {
         padding: SPACING.screenPadding,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
+    },
+    scrollContentInsideScreen: {
+        paddingHorizontal: 0,
+        paddingTop: 0,
     },
 
     header: {
-        marginBottom: SPACING.xxl,
+        marginBottom: SPACING.xl,
+    },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        marginBottom: 0,
     },
 
     title: {
@@ -96,6 +105,9 @@ export default StyleSheet.create({
         borderWidth: 2,
         borderColor: COLORS.cardBorder,
     },
+    voteOptionPressed: {
+        opacity: 0.92,
+    },
 
     voteOptionSelected: {
         borderColor: COLORS.accent,
@@ -110,6 +122,14 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+    },
+    voteTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    selectedIcon: {
+        marginLeft: 8,
+        color: COLORS.accent,
     },
 
     voteTeamName: {
@@ -139,6 +159,9 @@ export default StyleSheet.create({
         marginTop: SPACING.xl,
         ...SHADOWS.accentSoft,
     },
+    submitButtonPressed: {
+        opacity: 0.9,
+    },
 
     submitButtonDisabled: {
         backgroundColor: COLORS.muted,
@@ -148,7 +171,7 @@ export default StyleSheet.create({
     submitButtonText: {
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
-        color: COLORS.background,
+        color: COLORS.backgroundDark,
     },
 
     alreadyVotedCard: {
@@ -251,3 +274,4 @@ export default StyleSheet.create({
         textAlign: 'center',
     },
 });
+

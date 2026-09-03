@@ -1,310 +1,273 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import {
-    ActivityIndicator,
-    FlatList,
-    RefreshControl,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View
-} from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, RefreshControl, Text, View } from "react-native";
 
-import { getActiveZones, Zone } from "../../../../src/services/zoneService";
+import { api } from "../../../../convex/_generated/api";
+import { AppIcon } from "../../../../src/components/AppIcon";
+import { convex } from "../../../../src/lib/convex";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
-import { GameKey } from "../types";
-import styles, { filterStyles } from "../styles/zones.styles";
+import { recordPayloadMetric } from "../../../../src/utils/perfInstrumentation";
+import {
+  deriveZoneRate,
+  formatBranchAddress,
+  formatSupportedGameLabels,
+  Zone,
+} from "../../../services/convex/zoneService";
+import type { ZoneFilters } from "../filterConfig";
+import {
+  DiscoverEmptyState,
+  DiscoverPressableCard,
+  DiscoverResultsCount,
+  DiscoverTag,
+  discoverSharedStyles,
+} from "./DiscoverShared";
+import styles from "../styles/zones.styles";
 
-interface DiscoverZoneListProps {
-    selectedGame: GameKey;
-    searchQuery: string;
-    selectedVenueType: 'all' | 'zones' | 'courts';
-    edgePadding?: number;
-    bottomPadding?: number;
+function getPreferredZoneBranch(zone: Zone) {
+  const branches = Array.isArray(zone.branches) ? zone.branches : [];
+  return branches[0] || zone.primaryBranch || {};
 }
 
-export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQuery, selectedVenueType, edgePadding, bottomPadding }: DiscoverZoneListProps) {
-    const router = useRouter();
-    const [zones, setZones] = useState<Zone[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
+const ZoneRow = React.memo(function ZoneRow({
+  zone,
+  selectedGameOrSport,
+  onPressZone,
+}: {
+  zone: Zone;
+  selectedGameOrSport: string;
+  onPressZone: (zoneId: string) => void;
+}) {
+  const branch = getPreferredZoneBranch(zone);
+  const address =
+    formatBranchAddress({
+      addressLine1: branch?.addressLine1 || branch?.address,
+      areaLabel: branch?.areaLabel,
+      city: branch?.city || (zone as any).city,
+    }) ||
+    [branch?.areaLabel, branch?.city || (zone as any).city]
+      .filter(Boolean)
+      .join(", ");
+  const isSportsCourt = zone.type === "sports";
+  const isHybrid = zone.type === "hybrid";
+  const supportedGames = formatSupportedGameLabels(zone.games);
+  const visibleGames =
+    selectedGameOrSport === "all"
+      ? supportedGames
+      : supportedGames.filter((game) => game.key === selectedGameOrSport);
+  const gameTags = visibleGames.length > 0 ? visibleGames : supportedGames;
 
-    // Filter state
-    const [filtersExpanded, setFiltersExpanded] = useState(true);
-    const [selectedProximity, setSelectedProximity] = useState('Any');
-    const [internalSelectedGame, setInternalSelectedGame] = useState<string>('all');
+  const handlePress = useCallback(() => {
+    onPressZone(zone.id);
+  }, [onPressZone, zone.id]);
 
-    // User's area/city for proximity filtering (could be from context/profile)
-    const [userArea, setUserArea] = useState<string | null>(null);
-    const [userCity, setUserCity] = useState<string | null>('Karachi'); // Default to Karachi
-
-    // Game categorization
-    const ESPORTS_GAMES = [
-        { key: 'all', label: 'All' },
-        { key: 'cs2', label: 'CS2' },
-        { key: 'fc26', label: 'FC26' },
-        { key: 'tekken8', label: 'Tekken 8' },
-    ];
-    const SPORTS_GAMES = [
-        { key: 'all', label: 'All' },
-        { key: 'futsal', label: 'Futsal' },
-        { key: 'indoor_cricket', label: 'Cricket' },
-        { key: 'padel', label: 'Padel' },
-        { key: 'pickleball', label: 'Pickleball' },
-    ];
-
-    // Get available games based on venue type
-    const getGamesForVenueType = () => {
-        if (selectedVenueType === 'zones') return ESPORTS_GAMES;
-        if (selectedVenueType === 'courts') return SPORTS_GAMES;
-        return [];
-    };
-
-    const fetchZones = async () => {
-        try {
-            // Use internal game filter if venue type is selected, otherwise fetch all
-            const gameParam = internalSelectedGame === 'all' ? undefined : internalSelectedGame;
-
-            const res = await getActiveZones(gameParam);
-            if (res.ok && res.data) {
-                setZones(res.data);
-            }
-        } catch (e) {
-            Logger.error("DiscoverZones", "Failed to fetch zones", e);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
-
-    useEffect(() => {
-        setInternalSelectedGame('all');
-    }, [selectedVenueType]);
-
-    useEffect(() => {
-        setLoading(true);
-        setSelectedProximity('Any');
-        fetchZones();
-    }, [internalSelectedGame]);
-
-    const onRefresh = () => {
-        setRefreshing(true);
-        fetchZones();
-    };
-
-    // Filter zones based on venue type and other filters
-    const filteredZones = zones.filter(zone => {
-        // Venue type filter
-        if (selectedVenueType !== 'all') {
-            const zoneType = zone.type || 'gaming'; // Default to gaming
-            if (selectedVenueType === 'zones' && zoneType === 'sports') return false;
-            if (selectedVenueType === 'courts' && zoneType === 'gaming') return false;
-            // Hybrid zones show in both
-        }
-
-        if (searchQuery) {
-            const query = searchQuery.toLowerCase();
-            const matchesName = zone.venueBrandName?.toLowerCase().includes(query);
-            const matchesCity = zone.primaryBranch?.city?.toLowerCase().includes(query);
-            const matchesArea = zone.primaryBranch?.areaLabel?.toLowerCase().includes(query);
-
-            if (!matchesName && !matchesCity && !matchesArea) return false;
-        }
-
-        // Proximity filter
-        if (selectedProximity !== 'Any') {
-            const zoneArea = zone.primaryBranch?.areaLabel?.toLowerCase();
-            const zoneCity = zone.primaryBranch?.city?.toLowerCase();
-
-            if (selectedProximity === 'Same Area') {
-                // Match area if user has set their area
-                if (userArea && zoneArea && !zoneArea.includes(userArea.toLowerCase())) return false;
-            } else if (selectedProximity === 'Same City') {
-                // Match city
-                if (userCity && zoneCity && !zoneCity.includes(userCity.toLowerCase())) return false;
-            }
-        }
-
-        return true;
-    });
-
-    const renderZoneItem = ({ item }: { item: Zone }) => {
-        const address = [item.primaryBranch?.areaLabel, item.primaryBranch?.city].filter(Boolean).join(", ");
-        const isGamingZone = item.type === 'gaming' || !item.type; // Default to gaming
-        const isSportsCourt = item.type === 'sports';
-        const isHybrid = item.type === 'hybrid';
-
-        return (
-            <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => router.push(`/(player)/zones/${item.id}` as any)}
-                style={styles.card}
-            >
-                <View style={styles.cardHeader}>
-                    <View style={[styles.cardIcon, isSportsCourt && { backgroundColor: 'rgba(0, 230, 118, 0.1)' }]}>
-                        <MaterialIcons
-                            name={isSportsCourt ? "sports-soccer" : "sports-esports"}
-                            size={24}
-                            color={isSportsCourt ? COLORS.success : COLORS.accent}
-                        />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle}>{item.venueBrandName}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                            <MaterialIcons name="location-on" size={12} color={COLORS.muted} />
-                            <Text style={styles.cardSubtitle} numberOfLines={1}>
-                                {address || "Location unavailable"}
-                            </Text>
-                        </View>
-                    </View>
-                    {item.effectiveRateLabel && (
-                        <View style={styles.priceTag}>
-                            <Text style={styles.priceText}>{item.effectiveRateLabel}</Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* Tags */}
-                <View style={styles.tagsRow}>
-                    {/* Venue type badge */}
-                    <View style={[styles.tag, isSportsCourt && { borderColor: 'rgba(0, 230, 118, 0.3)', backgroundColor: 'rgba(0, 230, 118, 0.05)' }]}>
-                        <Text style={[styles.tagText, isSportsCourt && { color: COLORS.success }]}>
-                            {isHybrid ? 'Hybrid' : isSportsCourt ? 'Court' : 'Zone'}
-                        </Text>
-                    </View>
-                    {/* Show selected game if filtered */}
-                    {internalSelectedGame !== 'all' && (
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>{internalSelectedGame.toUpperCase()}</Text>
-                        </View>
-                    )}
-                </View>
-            </TouchableOpacity>
-        );
-    };
-
-    if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.accent} />
+  return (
+    <DiscoverPressableCard onPress={handlePress} style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={isSportsCourt ? styles.cardIconSports : styles.cardIcon}>
+          <AppIcon
+            name={isSportsCourt ? "sports-soccer" : "sports-esports"}
+            size={24}
+            color={isSportsCourt ? COLORS.success : COLORS.accent}
+          />
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardTitle} numberOfLines={1} ellipsizeMode="tail">
+            {zone.venueBrandName}
+          </Text>
+          {gameTags.length > 0 ? (
+            <View style={styles.gameTags}>
+              {gameTags.slice(0, 2).map((game) => (
+                <DiscoverTag key={game.key} label={game.label.toUpperCase()} tone="accent" />
+              ))}
+              {gameTags.length > 2 ? (
+                <DiscoverTag label={`+${gameTags.length - 2}`} tone="ghost" />
+              ) : null}
             </View>
-        );
+          ) : null}
+          <View style={styles.cardSubtitleRow}>
+            <AppIcon name="location-on" size={12} tone="muted" />
+            <Text style={styles.cardSubtitle} numberOfLines={1}>
+              {address || "Location unavailable"}
+            </Text>
+          </View>
+        </View>
+        {zone.effectiveRateLabel ? (
+          <DiscoverTag label={zone.effectiveRateLabel} tone="success" style={styles.priceTag} />
+        ) : null}
+      </View>
+
+      <View style={styles.tagsRow}>
+        <DiscoverTag
+          label={isHybrid ? "Hybrid" : isSportsCourt ? "Court" : "Zone"}
+          tone={isSportsCourt ? "success" : "neutral"}
+        />
+      </View>
+    </DiscoverPressableCard>
+  );
+});
+
+interface DiscoverZoneListProps {
+  filters: ZoneFilters;
+  searchQuery: string;
+  bottomPadding?: number;
+}
+
+const PAGE_SIZE = 40;
+const MAX_DISCOVER_LIMIT = 1000;
+
+export default function DiscoverZoneList({
+  filters,
+  searchQuery,
+  bottomPadding,
+}: DiscoverZoneListProps) {
+  const router = useRouter();
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(true);
+
+  const userArea = null;
+  const userCity = "Karachi";
+
+  const fetchZones = useCallback(async (nextLimit = PAGE_SIZE, silent = false) => {
+    try {
+      if (!silent) setLoading(true);
+      const rows = await convex.query(api.discover.listDiscoverZones, {
+        selectedVenueType: filters.venueType,
+        selectedGame: filters.gameOrSport,
+        searchQuery,
+        selectedProximity: filters.proximity,
+        selectedArea: filters.area,
+        selectedPriceRange: filters.priceRange,
+        selectedPlatform: filters.platform,
+        userArea: userArea || undefined,
+        userCity: userCity || undefined,
+        limit: nextLimit,
+      });
+
+      const mapped = (rows as Zone[]).map((zone) => {
+        if (filters.gameOrSport !== "all") {
+          const derivation = deriveZoneRate(zone, filters.gameOrSport);
+          return {
+            ...zone,
+            effectiveRate: derivation.rate,
+            effectiveRateLabel: derivation.label,
+          };
+        }
+        return zone;
+      });
+
+      setZones(mapped);
+      setLimit(nextLimit);
+      setHasMore(mapped.length >= nextLimit && nextLimit < MAX_DISCOVER_LIMIT);
+      recordPayloadMetric("discover.zones_payload", mapped, {
+        venueType: filters.venueType,
+        game: filters.gameOrSport,
+        query: searchQuery,
+      });
+    } catch (error) {
+      Logger.error("DiscoverZones", "Failed to fetch zones", error);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+      setRefreshing(false);
     }
+  }, [filters, searchQuery]);
 
-    // Filter options
-    const PROXIMITY_OPTIONS = ['Any', 'Same Area', 'Same City'];
-    const filterBleedStyle = edgePadding ? { marginHorizontal: -edgePadding, paddingHorizontal: edgePadding } : null;
-    const filterScrollStyle = edgePadding ? { marginHorizontal: -edgePadding } : null;
-    const filterContentStyle = edgePadding ? { paddingHorizontal: edgePadding } : null;
+  useEffect(() => {
+    setLoading(true);
+    fetchZones(PAGE_SIZE);
+  }, [fetchZones]);
 
-    // Render filter row helper (consistent with other tabs)
-    const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
-        <View style={filterStyles.filterSection}>
-            <Text style={filterStyles.filterLabel}>{label}</Text>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={filterStyles.filterOptionsScroll}
-                contentContainerStyle={filterStyles.filterOptionsContent}
-            >
-                {options.map(opt => (
-                    <TouchableOpacity
-                        key={opt}
-                        onPress={() => onSelect(opt)}
-                        style={[filterStyles.optionChip, selected === opt && filterStyles.optionChipActive]}
-                    >
-                        <Text style={[filterStyles.optionChipText, selected === opt && filterStyles.optionChipTextActive]}>
-                            {opt}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
-        </View>
-    );
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchZones(PAGE_SIZE);
+  }, [fetchZones]);
 
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || refreshing || !hasMore) return;
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_DISCOVER_LIMIT);
+    if (nextLimit <= limit) return;
+    setLoadingMore(true);
+    fetchZones(nextLimit, true);
+  }, [fetchZones, hasMore, limit, loading, loadingMore, refreshing]);
+
+  const contentContainerStyle = useMemo(
+    () => [styles.listContent, { paddingBottom: bottomPadding ?? 24 }],
+    [bottomPadding],
+  );
+
+  const onPressZone = useCallback(
+    (zoneId: string) => {
+      router.push(`/(player)/zones/${zoneId}` as any);
+    },
+    [router],
+  );
+
+  const renderZoneItem = useCallback(
+    ({ item }: { item: Zone }) => {
+      return (
+        <ZoneRow
+          zone={item}
+          selectedGameOrSport={filters.gameOrSport}
+          onPressZone={onPressZone}
+        />
+      );
+    },
+    [filters.gameOrSport, onPressZone],
+  );
+
+  if (loading) {
     return (
-        <View style={{ flex: 1 }}>
-            {/* Collapsible Filters - Always show venue type filter */}
-            <View>
-                <TouchableOpacity
-                    onPress={() => setFiltersExpanded(!filtersExpanded)}
-                    activeOpacity={0.7}
-                    style={[filterStyles.filterToggleRow, filterBleedStyle]}
-                >
-                    <Text style={filterStyles.filterToggleText}>Filters</Text>
-                    <MaterialIcons
-                        name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
-                        size={20}
-                        color={COLORS.muted}
-                    />
-                </TouchableOpacity>
-
-                {filtersExpanded && (
-                    <View style={{ maxHeight: 350 }}>
-                        <ScrollView
-                            showsVerticalScrollIndicator={true}
-                            style={filterScrollStyle || undefined}
-                            contentContainerStyle={[filterStyles.filtersPanel, filterContentStyle || undefined]}
-                        >
-                            {renderFilterRow('Location', PROXIMITY_OPTIONS, selectedProximity, setSelectedProximity)}
-
-                            {selectedVenueType !== 'all' && (
-                                <View style={filterStyles.filterSection}>
-                                    <Text style={filterStyles.filterLabel}>
-                                        {selectedVenueType === 'zones' ? 'Game' : 'Sport'}
-                                    </Text>
-                                    <ScrollView
-                                        horizontal
-                                        showsHorizontalScrollIndicator={false}
-                                        style={filterStyles.filterOptionsScroll}
-                                        contentContainerStyle={filterStyles.filterOptionsContent}
-                                    >
-                                        {getGamesForVenueType().map(game => (
-                                            <TouchableOpacity
-                                                key={game.key}
-                                                onPress={() => setInternalSelectedGame(game.key)}
-                                                style={[filterStyles.optionChip, internalSelectedGame === game.key && filterStyles.optionChipActive]}
-                                            >
-                                                <Text style={[filterStyles.optionChipText, internalSelectedGame === game.key && filterStyles.optionChipTextActive]}>
-                                                    {game.label}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </ScrollView>
-                                </View>
-                            )}
-                        </ScrollView>
-                    </View>
-                )}
-            </View>
-
-            <View style={styles.resultsCount}>
-                <Text style={styles.resultsCountText}>
-                    {filteredZones.length} venue{filteredZones.length !== 1 ? 's' : ''} found
-                </Text>
-            </View>
-
-            <FlatList
-                data={filteredZones}
-                renderItem={renderZoneItem}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={[styles.listContent, { paddingBottom: bottomPadding ?? 24 }]}
-                showsVerticalScrollIndicator={false}
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyState}>
-                        <MaterialIcons name="store-mall-directory" size={48} color={COLORS.muted} style={styles.emptyIcon} />
-                        <Text style={styles.emptyTitle}>No Venues Found</Text>
-                        <Text style={styles.emptySubtitle}>
-                            Try adjusting your filters or search query.
-                        </Text>
-                    </View>
-                }
-            />
-        </View>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.accent} />
+      </View>
     );
+  }
+
+  return (
+    <View style={discoverSharedStyles.shell}>
+      <DiscoverResultsCount
+        label={`${zones.length} venue${zones.length !== 1 ? "s" : ""} found`}
+      />
+
+      <FlatList
+        data={zones}
+        renderItem={renderZoneItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={contentContainerStyle}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.accent}
+          />
+        }
+        ListEmptyComponent={
+          <DiscoverEmptyState
+            icon="store-mall-directory"
+            title="No Venues Found"
+            description="Try adjusting your search or filters."
+          />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: 16 }}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+            </View>
+          ) : null
+        }
+      />
+    </View>
+  );
 }

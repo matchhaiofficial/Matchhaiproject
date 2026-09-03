@@ -1,5 +1,4 @@
 // app/auth/login.tsx
-import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -13,11 +12,23 @@ import {
   View,
 } from "react-native";
 
+import { AppIcon } from "../../src/components/AppIcon";
 import LogoHalo from "../../src/components/LogoHalo";
+import { useAuth } from "../../src/context/AuthContext";
+import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
-import { signInWithEmail, signOutUser } from "../../src/services/authService";
-import { getUserProfile } from "../../src/services/userService";
+import {
+  recoverMissingProfileAfterLogin,
+  signInWithEmail,
+  signOutUser,
+} from "../../src/services/convex/authService";
+import { getUserProfile } from "../../src/services/convex/userService";
+import { useLoginFormStore } from "../../src/store/loginFormStore";
+import { getLoginButtonState } from "../../src/utils/loginButtonState";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
+import Logger from "../../src/utils/logger";
+import { APP_ROUTES } from "../../src/navigation/routes";
+import { isSuperAdminProfile } from "../../src/utils/accountRouting";
 import styles from "./login.styles";
 
 // 📱 Pakistani phone formatter
@@ -89,10 +100,36 @@ const COMMON_EMAIL_DOMAINS = [
 
 const MAX_ATTEMPTS = 5; // (7)
 const LOCKOUT_SECONDS = 30; // (7)
+const LOGIN_REQUEST_TIMEOUT_MS = 20000;
+const LOGIN_CLEANUP_TIMEOUT_MS = 5000;
+
+async function withLoginTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export default function Login() {
-  const [emailOrPhone, setEmailOrPhone] = useState("");
-  const [password, setPassword] = useState("");
+  useRouteLogger("LoginScreen");
+  const emailOrPhone = useLoginFormStore((state) => state.emailOrPhone);
+  const password = useLoginFormStore((state) => state.password);
+  const userType = useLoginFormStore((state) => state.userType);
+  const setEmailOrPhone = useLoginFormStore((state) => state.setEmailOrPhone);
+  const setPassword = useLoginFormStore((state) => state.setPassword);
+  const setUserType = useLoginFormStore((state) => state.setUserType);
+  const [loading, setLoading] = useState(false);
 
   const [emailFocused, setEmailFocused] = useState(false);
   const [passFocused, setPassFocused] = useState(false);
@@ -101,9 +138,15 @@ export default function Login() {
   const [passwordTouched, setPasswordTouched] = useState(false);
 
   const [emailServerError, setEmailServerError] = useState("");
+  const [passwordServerError, setPasswordServerError] = useState("");
 
-  const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [modeHelper, setModeHelper] = useState<null | {
+    message: string;
+    targetMode: "player" | "zone";
+    cta: string;
+  }>(null);
+  const [recoveryHelper, setRecoveryHelper] = useState<string | null>(null);
 
   // brute-force UI state (7)
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -111,30 +154,38 @@ export default function Login() {
 
   const emailRef = useRef<TextInput | null>(null);
   const passwordRef = useRef<TextInput | null>(null);
+  const loginAttemptRef = useRef(0);
 
-  const { showToast } = useToast();
+  const { showToast, hideToast } = useToast();
+  const { refreshSession } = useAuth();
 
-  // NEW: user type (player vs zone admin)
-  const [userType, setUserType] = useState<"player" | "zone">("player");
+  const handleUserTypeChange = (nextType: "player" | "zone") => {
+    setUserType(nextType);
+    setModeHelper(null);
+    setRecoveryHelper(null);
+    setEmailServerError("");
+    setPasswordServerError("");
+    hideToast();
+  };
 
   // DEBUG: log mount and userType changes
   useEffect(() => {
-    console.log("[Login] screen mounted");
+    Logger.info("Login", "Screen mounted");
   }, []);
 
   useEffect(() => {
-    console.log("[Login] userType changed →", userType);
+    Logger.info("Login", "User type changed", { userType });
   }, [userType]);
 
   // Lockout countdown (7)
   useEffect(() => {
     if (lockoutSecondsLeft <= 0) return;
-    console.log("[Login] lockout started, seconds left:", lockoutSecondsLeft);
+    Logger.info("Login", "Lockout countdown started", { lockoutSecondsLeft });
     const timer = setInterval(() => {
       setLockoutSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          console.log("[Login] lockout finished");
+          Logger.info("Login", "Lockout countdown finished");
           return 0;
         }
         return prev - 1;
@@ -288,6 +339,8 @@ export default function Login() {
   const isLockedOut = lockoutSecondsLeft > 0;
   const emailErrorToShow =
     emailServerError || (emailTouched && !emailFocused ? emailFormatError : "");
+  const passwordErrorToShow =
+    passwordServerError || (passwordTouched && !passFocused ? passwordError : "");
 
   // Keyboard handling
   const Container = KeyboardAvoidingView;
@@ -298,10 +351,15 @@ export default function Login() {
   };
 
   const handleLogin = async () => {
-    console.log("[Login] handleLogin called, userType=", userType);
+    if (loading) return;
+
+    logFlowEvent("Login", "Login attempt started", {
+      userType,
+      identifierType: emailOrPhone.includes("@") ? "email" : "phone",
+    });
 
     if (isLockedOut) {
-      console.log("[Login] blocked by lockout");
+      Logger.warn("Login", "Blocked by lockout", { lockoutSecondsLeft });
       showToast({
         type: "warning",
         title: "Too many attempts",
@@ -311,7 +369,7 @@ export default function Login() {
     }
 
     if (!isEmailValid || !password) {
-      console.log("[Login] invalid form", {
+      Logger.info("Login", "Blocked by invalid form", {
         isEmailValid,
         hasPassword: !!password,
       });
@@ -325,17 +383,41 @@ export default function Login() {
       });
       return;
     }
+    const attemptId = loginAttemptRef.current + 1;
+    loginAttemptRef.current = attemptId;
+    let handoffStarted = false;
+    const finishAttempt = () => {
+      if (loginAttemptRef.current === attemptId) {
+        setLoading(false);
+      }
+    };
+
+    setLoading(true);
+    const timeout = setTimeout(() => {
+      if (loginAttemptRef.current !== attemptId) return;
+      loginAttemptRef.current = attemptId + 1;
+      setLoading(false);
+      showToast({ type: "error", title: "Timed out", message: "Request took too long. Please try again." });
+    }, LOGIN_REQUEST_TIMEOUT_MS);
 
     try {
-      setLoading(true);
       setEmailServerError("");
-      console.log("[Login] calling signInWithEmail", { emailOrPhone });
+      setPasswordServerError("");
+      setModeHelper(null);
+      setRecoveryHelper(null);
+      Logger.info("Login", "Calling signInWithEmail", {
+        identifierType: emailOrPhone.includes("@") ? "email" : "phone",
+      });
 
       const res = await signInWithEmail(emailOrPhone, password /*, userType */);
+      if (loginAttemptRef.current !== attemptId) return;
 
       if (!res.ok) {
-        setLoading(false);
-        console.log("[Login] signInWithEmail FAILED", res);
+        finishAttempt();
+        Logger.warn("Login", "signInWithEmail failed", {
+          code: res.code,
+          message: res.message,
+        });
         const nextAttempts = failedAttempts + 1;
         if (nextAttempts >= MAX_ATTEMPTS) {
           setLockoutSecondsLeft(LOCKOUT_SECONDS);
@@ -355,20 +437,24 @@ export default function Login() {
         const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
 
         if (res.code === "auth/user-not-found") {
+          setPasswordServerError("");
           if (phoneRegex.test(normalizedPhone) && !trimmed.includes("@")) {
             setEmailServerError("No account found for this phone number.");
           } else {
             setEmailServerError("This email is not registered.");
           }
         } else if (res.code === "auth/invalid-email") {
+          setPasswordServerError("");
           if (phoneRegex.test(normalizedPhone) && !trimmed.includes("@")) {
             setEmailServerError("Enter a valid Pakistani mobile number.");
           } else {
             setEmailServerError("Enter a valid email address.");
           }
         } else if (res.code === "auth/wrong-password") {
-          setEmailServerError("Incorrect password. Please try again.");
+          setEmailServerError("");
+          setPasswordServerError("Incorrect password. Please try again.");
         } else {
+          setPasswordServerError("");
           setEmailServerError(res.message || "Sign in failed.");
         }
 
@@ -381,100 +467,188 @@ export default function Login() {
       }
 
       // ✅ Role Validation
-      console.log("[Login] Validating role for user:", res.user.uid);
-      const profileRes = await getUserProfile(res.user.uid);
+      Logger.info("Login", "Validating account role", {
+        userId: res.userId,
+        userType,
+      });
+      const profileRes = await getUserProfile(res.userId);
+      if (loginAttemptRef.current !== attemptId) return;
 
       if (!profileRes.ok) {
-        console.error("[Login] Failed to fetch user profile for role check:", profileRes.message);
-        await signOutUser();
-        setLoading(false);
-
+        Logger.error("Login", "Failed to fetch user profile for role check", {
+          message: profileRes.message,
+        });
         const isMissing = profileRes.message === "User profile not found.";
+        if (isMissing) {
+          const recovered = await recoverMissingProfileAfterLogin(
+            res.user,
+            userType === "zone" ? "zone" : "player",
+          );
+          if (loginAttemptRef.current !== attemptId) return;
+
+          if (recovered.ok) {
+            await refreshSession();
+            if (loginAttemptRef.current !== attemptId) return;
+            handoffStarted = true;
+            setLoading(false);
+            showToast({
+              type: "success",
+              title: "Profile restored",
+              message: "We rebuilt your MatchHai profile and signed you in.",
+            });
+            router.replace(userType === "zone" ? APP_ROUTES.zoneHome as any : APP_ROUTES.playerHome as any);
+            return;
+          }
+
+          setRecoveryHelper("We authenticated your account, but your MatchHai profile is missing. Please retry once or contact support.");
+        } else {
+          setRecoveryHelper("We signed you in, but could not verify your MatchHai profile yet. Please try again.");
+        }
+
+        finishAttempt();
+        await withLoginTimeout(
+          signOutUser(),
+          LOGIN_CLEANUP_TIMEOUT_MS,
+          "Sign-out cleanup timed out.",
+        ).catch((cleanupError) => {
+          Logger.warn("Login", "Profile verification cleanup failed", cleanupError);
+        });
         showToast({
           type: "error",
           title: isMissing ? "Profile Missing" : "Login Error",
           message: isMissing
-            ? "Your account profile was not found. Please contact support."
+            ? "Your account authenticated but the app profile could not be loaded."
             : "Could not verify your account type. Please try again.",
         });
         return;
       }
 
-      const accountType = profileRes.data.role;
+      const accountType = profileRes.data.accountType;
       const inputEmail = emailOrPhone.trim().toLowerCase();
       const userEmail = (res.user.email || inputEmail).toLowerCase();
-      const SUPER_ADMIN_UID = "jM2JZrPNNNahPb844rHmr0MQKYo1";
-      const SUPER_ADMIN_EMAIL = "superadmin@matchhai.com";
+      const isSuperAdmin = isSuperAdminProfile({
+        _id: profileRes.data._id,
+        email: userEmail || profileRes.data.email,
+        role: profileRes.data.role,
+      } as any);
 
-      // ✅ Robust Super Admin Check
-      const isSuperAdmin = accountType === "super-admin" ||
-        userEmail === SUPER_ADMIN_EMAIL ||
-        res.user.uid === SUPER_ADMIN_UID;
-
-      console.log("[Login] accountType:", accountType, "isSuperAdmin:", isSuperAdmin, "uid:", res.user.uid);
+      Logger.info("Login", "Resolved account role", {
+        accountType,
+        isSuperAdmin,
+        userId: res.userId,
+      });
 
       if (!isSuperAdmin) {
-        if (userType === "zone" && accountType !== "zone-admin") {
-          console.log("[Login] Role mismatch: Player trying to login as Zone Admin");
-          await signOutUser();
-          setLoading(false);
-          setEmailServerError("Please sign in as user.");
+        if (userType === "zone" && accountType !== "zone") {
+          Logger.warn("Login", "Zone login blocked by account type mismatch", {
+            accountType,
+            userId: res.userId,
+          });
+          finishAttempt();
+          await withLoginTimeout(
+            signOutUser(),
+            LOGIN_CLEANUP_TIMEOUT_MS,
+            "Sign-out cleanup timed out.",
+          ).catch((cleanupError) => {
+            Logger.warn("Login", "Zone mismatch cleanup failed", cleanupError);
+          });
+          setEmailServerError("This account is registered as a player account.");
+          setModeHelper({
+            message: "This email is registered as a Player account. Use Player mode to continue.",
+            targetMode: "player",
+            cta: "Use Player",
+          });
           showToast({
             type: "error",
-            title: "Access Denied",
-            message: "Please sign in as user.",
+            title: "Player Account Detected",
+            message: "Switch to Player mode and try again.",
           });
           return;
         }
 
-        if (userType === "player" && accountType === "zone-admin") {
-          console.log("[Login] Role mismatch: Zone Admin trying to login as Player");
-          await signOutUser();
-          setLoading(false);
-          setEmailServerError("Please sign in as zone admin.");
+        if (userType === "player" && accountType === "zone") {
+          Logger.warn("Login", "Player login blocked by account type mismatch", {
+            accountType,
+            userId: res.userId,
+          });
+          finishAttempt();
+          await withLoginTimeout(
+            signOutUser(),
+            LOGIN_CLEANUP_TIMEOUT_MS,
+            "Sign-out cleanup timed out.",
+          ).catch((cleanupError) => {
+            Logger.warn("Login", "Player mismatch cleanup failed", cleanupError);
+          });
+          setEmailServerError("This account is registered as a zone account.");
+          setModeHelper({
+            message: "This email is registered as a Zone Admin account. Use Zone Admin mode to continue.",
+            targetMode: "zone",
+            cta: "Use Zone Admin",
+          });
           showToast({
             type: "error",
-            title: "Access Denied",
-            message: "Please sign in as zone admin.",
+            title: "Zone Account Detected",
+            message: "Switch to Zone Admin mode and try again.",
           });
           return;
         }
       }
 
-      setLoading(false);
-      console.log("[Login] signInWithEmail OK, navigations target logic start");
+      Logger.info("Login", "Sign in succeeded, refreshing session", {
+        userId: res.userId,
+      });
 
       setFailedAttempts(0);
       setLockoutSecondsLeft(0);
 
+      // Refresh the auth session to ensure AuthContext is updated
+      await refreshSession();
+      if (loginAttemptRef.current !== attemptId) return;
+
+      handoffStarted = true;
+      setLoading(false);
+
       showToast({
         type: "success",
         title: "Welcome back",
-        message: isSuperAdmin ? "Signed in as Super Admin" : "You’re now signed in.",
+        message: isSuperAdmin ? "Signed in as Super Admin" : "You're now signed in.",
       });
 
       // ✅ Redirect based on user type or role
       if (isSuperAdmin) {
-        console.log("[Login] Redirecting to Super Admin Dashboard");
-        router.replace("/super-admin" as any);
-      } else if (userType === "zone") {
-        router.replace("/zone");
+        Logger.info("Login", "Redirecting to super admin dashboard", {
+          userId: res.userId,
+        });
+        router.replace(APP_ROUTES.superAdminHome as any);
+      } else if (accountType === "zone") {
+        Logger.info("Login", "Redirecting to zone dashboard", {
+          userId: res.userId,
+        });
+        router.replace(APP_ROUTES.zoneHome as any);
       } else {
-        router.replace("/home");
+        Logger.info("Login", "Redirecting to player home", {
+          userId: res.userId,
+        });
+        router.replace(APP_ROUTES.playerHome as any);
       }
     } catch (e) {
-      console.error("[Login] signInWithEmail threw error", e);
-      setLoading(false);
+      Logger.error("Login", "signInWithEmail threw error", e);
+      finishAttempt();
       showToast({
         type: "error",
         title: "Sign In Failed",
         message: "Something went wrong. Please try again.",
       });
+    } finally {
+      clearTimeout(timeout);
+      if (!handoffStarted) {
+        finishAttempt();
+      }
     }
   };
 
   const handleForgotPassword = () => {
-    console.log("[Login] Forgot Password pressed");
+    Logger.info("Login", "Forgot password pressed");
     router.push("/auth/forgot-password");
   };
 
@@ -508,7 +682,13 @@ export default function Login() {
     </View>
   );
 
-  const isSubmitDisabled = loading || !isEmailValid || !password || isLockedOut;
+  const { canSubmit, showActiveStyle } = getLoginButtonState({
+    isIdentifierValid: isEmailValid,
+    hasPassword: password.length > 0,
+    loading,
+    isLockedOut,
+  });
+  const isSubmitDisabled = !canSubmit;
 
   // Bottom CTA text + href based on role
   const bottomLabel =
@@ -518,7 +698,7 @@ export default function Login() {
     userType === "zone" ? "/auth/zone-register" : "/auth/register";
 
   useEffect(() => {
-    console.log("[Login] bottomHref changed →", bottomHref);
+    Logger.info("Login", "Footer CTA updated", { bottomHref });
   }, [bottomHref]);
 
   return (
@@ -538,7 +718,7 @@ export default function Login() {
         {/* Role toggle (Player / Zone Admin) */}
         <View style={styles.roleToggleRow}>
           <Pressable
-            onPress={() => setUserType("player")}
+            onPress={() => handleUserTypeChange("player")}
             style={[
               styles.roleChip,
               userType === "player" && styles.roleChipActive,
@@ -555,7 +735,7 @@ export default function Login() {
           </Pressable>
 
           <Pressable
-            onPress={() => setUserType("zone")}
+            onPress={() => handleUserTypeChange("zone")}
             style={[
               styles.roleChip,
               userType === "zone" && styles.roleChipActive,
@@ -572,13 +752,45 @@ export default function Login() {
           </Pressable>
         </View>
 
+        {modeHelper ? (
+          <View style={styles.modeHelperCard}>
+            <View style={styles.modeHelperHeader}>
+              <View style={styles.modeHelperIcon}>
+                <AppIcon name="swap-horiz" size={20} color={COLORS.warning} />
+              </View>
+              <View style={styles.modeHelperCopy}>
+                <Text style={styles.modeHelperTitle}>Wrong login mode</Text>
+                <Text style={styles.modeHelperMessage}>{modeHelper.message}</Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={() => {
+                handleUserTypeChange(modeHelper.targetMode);
+              }}
+              style={({ pressed }) => [
+                styles.modeHelperButton,
+                pressed && styles.modeHelperButtonPressed,
+              ]}
+            >
+              <Text style={styles.modeHelperButtonText}>{modeHelper.cta}</Text>
+              <AppIcon name="arrow-forward" size={18} color={COLORS.text} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {recoveryHelper ? (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, styles.helperWarning]}>{recoveryHelper}</Text>
+          </View>
+        ) : null}
+
         {/* Email / Phone */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email or Phone</Text>
 
           <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
-              <MaterialIcons
+              <AppIcon
                 name="email"
                 size={22}
                 style={styles.prefixIcon}
@@ -591,6 +803,7 @@ export default function Login() {
 
               <TextInput
                 ref={emailRef}
+                testID="login-email-input"
                 placeholder="Email or phone"
                 placeholderTextColor={COLORS.muted}
                 style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
@@ -605,7 +818,9 @@ export default function Login() {
                     next = formatPakistaniPhone(text);
                   }
                   setEmailOrPhone(next);
+                  hideToast();
                   if (emailServerError) setEmailServerError("");
+                  if (passwordServerError) setPasswordServerError("");
                 }}
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => {
@@ -619,7 +834,7 @@ export default function Login() {
               />
 
               {emailOrPhone.trim().length > 0 && (
-                <MaterialIcons
+                <AppIcon
                   name={isEmailValid ? "check-circle" : "error-outline"}
                   size={20}
                   style={styles.suffixIcon}
@@ -655,7 +870,7 @@ export default function Login() {
 
           <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
-              <MaterialIcons
+              <AppIcon
                 name="lock"
                 size={22}
                 style={styles.prefixIcon}
@@ -668,6 +883,7 @@ export default function Login() {
 
               <TextInput
                 ref={passwordRef}
+                testID="login-password-input"
                 placeholder="Password"
                 placeholderTextColor={COLORS.muted}
                 style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
@@ -678,6 +894,8 @@ export default function Login() {
                 value={password}
                 onChangeText={(text) => {
                   setPassword(text);
+                  hideToast();
+                  if (passwordServerError) setPasswordServerError("");
                   if (!passwordTouched) setPasswordTouched(true);
                 }}
                 onFocus={() => setPassFocused(true)}
@@ -697,7 +915,7 @@ export default function Login() {
                 }}
                 hitSlop={10}
               >
-                <MaterialIcons
+                <AppIcon
                   name={passwordVisible ? "visibility" : "visibility-off"}
                   size={20}
                   style={styles.suffixIcon}
@@ -707,8 +925,8 @@ export default function Login() {
             </View>
           </View>
 
-          {passwordTouched && passwordError ? (
-            <Text style={styles.errorText}>{passwordError}</Text>
+          {passwordErrorToShow ? (
+            <Text style={styles.errorText}>{passwordErrorToShow}</Text>
           ) : null}
 
 
@@ -732,11 +950,14 @@ export default function Login() {
         {/* Primary Login button + brute-force UI */}
         <View style={styles.buttonShadowWrapper}>
           <Pressable
+            testID="login-submit-button"
             onPress={handleLogin}
             disabled={isSubmitDisabled}
             style={({ pressed }) => [
               styles.primaryBtn,
-              isSubmitDisabled ? styles.primaryBtnDisabled : null,
+              {
+                backgroundColor: showActiveStyle ? COLORS.accent : COLORS.disabled,
+              },
               pressed && !isSubmitDisabled && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.12)" }}
@@ -744,7 +965,7 @@ export default function Login() {
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.primaryBtnText}>Login</Text>
+              <Text style={[styles.primaryBtnText, isSubmitDisabled && styles.primaryBtnTextDisabled]}>Login</Text>
             )}
           </Pressable>
 

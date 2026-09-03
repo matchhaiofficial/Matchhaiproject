@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     flex1: {
         flex: 1,
@@ -89,3 +89,4 @@ export default StyleSheet.create({
         opacity: 0.5,
     },
 });
+

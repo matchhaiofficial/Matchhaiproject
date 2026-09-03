@@ -1,128 +1,421 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery } from "convex/react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    Pressable,
-    ScrollView,
     Text,
-    TextInput,
-    TouchableWithoutFeedback,
     View,
 } from "react-native";
-import { collection, doc, getDocs, limit, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { db } from "../../../src/config/firebaseConfig";
-import { type Matchroom } from "../../../src/services/matchService";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+import { type Matchroom } from "../../../src/services/convex/matchService";
 import {
-    acceptZoneBookingRequest,
-    rejectZoneBookingRequest,
-    sendZoneCounterOffer,
-    subscribeZoneBookingQueue,
-    subscribeZoneMatchrooms,
-    type ZoneBookingAssetType,
+    fetchZoneBookingQueuePage,
+    fetchZoneMatchroomsPage,
     type ZoneBookingQueueItem,
     type ZoneMatchroomListItem,
-} from "../../../src/services/zoneAdminBookingService";
+} from "../../../src/services/convex/zoneAdminBookingService";
+import {
+    releaseStaleHeldBranchResources,
+    subscribeBranchResources,
+    subscribeZoneBranches,
+    type ZoneBranch,
+    type ZoneBranchResource,
+} from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import { toLocalDateString } from "../../../src/utils/scheduleTime";
+import {
+    ZoneBookingsAllocationSheet,
+    type ZoneBookingAllocationResourceOption,
+} from "./components/ZoneBookingsAllocationSheet";
+import { ZoneBookingsCounterOfferSheets } from "./components/ZoneBookingsCounterOfferSheets";
+import { ZoneBookingsHistorySection } from "./components/ZoneBookingsHistorySection";
+import { ZoneBookingsMatchroomsSection } from "./components/ZoneBookingsMatchroomsSection";
+import { ZoneBookingsRequestsSection } from "./components/ZoneBookingsRequestsSection";
+import { ZoneBookingsWalkinsSection } from "./components/ZoneBookingsWalkinsSection";
+import { useZoneBookingsActions } from "./hooks/useZoneBookingsActions";
+import {
+    getRequestMatchroomId,
+    toDateString,
+    toScheduleMillis,
+    useZoneBookingsViewModel,
+} from "./hooks/useZoneBookingsViewModel";
 import styles from "./bookings.styles";
 
-type Segment = "requests" | "matchrooms" | "walkins";
-type RequestFilter = "all" | "open" | "pending_payment" | "accepted";
-type AssetFilter = "all" | ZoneBookingAssetType;
-
-const REQUEST_FILTERS: RequestFilter[] = ["all", "open", "pending_payment", "accepted"];
-const ASSET_FILTERS: AssetFilter[] = ["all", "pc", "court", "mixed", "unknown"];
-const ACTIVE_QUEUE_STATUSES = new Set(["open", "pending_payment", "accepted"]);
-
-const toMillis = (value: any) => {
-    if (!value) return 0;
-    if (typeof value?.toMillis === "function") return value.toMillis();
-    if (typeof value?.seconds === "number") return value.seconds * 1000;
-    if (value instanceof Date) return value.getTime();
-    if (typeof value === "number") return value;
-    return 0;
+type Segment = "requests" | "pending" | "matchrooms" | "walkins" | "history";
+type MatchroomFilter = "all" | "open" | "locked" | "cancelled";
+type GameFilter = "all" | "cs2" | "cs16" | "valorant" | "fc26" | "tekken8" | "futsal" | "indoor_cricket" | "padel" | "pickleball";
+type TimeOfDayFilter = "all" | "day" | "night";
+type DateRangeFilter = "all" | "today" | "next7";
+type RequestTypeFilter = "all" | "direct" | "broadcast";
+type RequestStatusFilter = "all" | "open" | "pending_payment";
+type PaymentFilter = "all" | "paid" | "unpaid";
+type SourceFilter = "all" | "online" | "walkin" | "admin";
+type FilterOption = { key: string; label: string };
+type BookingFilterGroup = {
+    key: string;
+    label: string;
+    options: readonly FilterOption[];
+    value: string;
+    onSelect: (value: string) => void;
 };
 
-const chunk = <T,>(items: T[], size: number) => {
-    const result: T[][] = [];
-    for (let i = 0; i < items.length; i += size) {
-        result.push(items.slice(i, i + size));
+const HISTORY_PAGE_SIZE = 20;
+const HISTORY_MAX_LIMIT = 100;
+
+const MATCHROOM_STATUS_OPTIONS: FilterOption[] = [
+    { key: "all", label: "All" },
+    { key: "open", label: "Open" },
+    { key: "locked", label: "Locked" },
+    { key: "cancelled", label: "Cancelled" },
+];
+const GAME_FILTERS: Array<{ key: GameFilter; label: string }> = [
+    { key: "all", label: "All games" },
+    { key: "cs2", label: "CS2" },
+    { key: "cs16", label: "CS 1.6" },
+    { key: "valorant", label: "Valorant" },
+    { key: "fc26", label: "FC26" },
+    { key: "tekken8", label: "Tekken 8" },
+    { key: "futsal", label: "Futsal" },
+    { key: "indoor_cricket", label: "Cricket" },
+    { key: "padel", label: "Padel" },
+    { key: "pickleball", label: "Pickleball" },
+];
+const TIME_OF_DAY_FILTERS: Array<{ key: TimeOfDayFilter; label: string }> = [
+    { key: "all", label: "Any time" },
+    { key: "day", label: "Day (6am-6pm)" },
+    { key: "night", label: "Night (6pm-6am)" },
+];
+const DATE_RANGE_FILTERS: FilterOption[] = [
+    { key: "all", label: "Any date" },
+    { key: "today", label: "Today" },
+    { key: "next7", label: "Next 7 Days" },
+];
+const REQUEST_TYPE_FILTERS: FilterOption[] = [
+    { key: "all", label: "Any type" },
+    { key: "direct", label: "Direct" },
+    { key: "broadcast", label: "Broadcast" },
+];
+const REQUEST_STATUS_FILTERS: FilterOption[] = [
+    { key: "all", label: "Any status" },
+    { key: "open", label: "Open" },
+    { key: "pending_payment", label: "Pending Payment" },
+];
+const PAYMENT_STATUS_OPTIONS: FilterOption[] = [
+    { key: "all", label: "Any payment" },
+    { key: "paid", label: "Paid" },
+    { key: "unpaid", label: "Unpaid" },
+];
+const BOOKING_SOURCE_OPTIONS: FilterOption[] = [
+    { key: "all", label: "Any source" },
+    { key: "online", label: "Online" },
+    { key: "walkin", label: "Walk-in" },
+    { key: "admin", label: "Admin" },
+];
+const ZONE_PAGE_SIZE = 20;
+const ROUTABLE_SEGMENTS = new Set<Segment>(["requests", "pending", "matchrooms", "walkins", "history"]);
+
+const CS_STYLE_GAMES = new Set(["cs2", "cs16", "valorant"]);
+const CONSOLE_GAMES = new Set(["fc25", "fc26", "tekken8"]);
+const COURT_GAME_ASSETS: Record<string, string> = {
+    futsal: "futsal",
+    indoor_cricket: "indoor_cricket",
+    cricket: "indoor_cricket",
+    padel: "padel",
+    pickleball: "pickleball",
+};
+
+const normalizeGameKey = (value?: string | null) => {
+    const gameKey = String(value || "").trim().toLowerCase();
+    return gameKey === "fc25" ? "fc26" : gameKey;
+};
+
+const normalizeResourceToken = (value?: string | null) =>
+    String(value || "").trim().toLowerCase();
+
+const getTierFromRateKey = (value?: string | null) => {
+    const [, tier] = normalizeResourceToken(value).split(":");
+    return tier || "";
+};
+
+const formatEnumLabel = (value?: string | null) =>
+    String(value || "")
+        .replace(/[_-]/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase())
+        .trim();
+
+const inferResourceTier = (resource: ZoneBranchResource) => {
+    const explicit = normalizeResourceToken(resource.tier);
+    if (explicit) return explicit;
+    const label = normalizeResourceToken(`${resource.label} ${resource.roomLabel || ""}`);
+    if (label.includes("elite")) return "elite";
+    if (label.includes("premium")) return "premium";
+    if (label.includes("regular")) return "regular";
+    if (label.includes("ps5") || label.includes("playstation 5")) return "ps5";
+    if (label.includes("xbox")) return "xbox";
+    return "";
+};
+
+const getAllocationResourceProfile = (request?: ZoneBookingQueueItem | null) => {
+    const gameKey = normalizeGameKey(request?.gameKey);
+    const requestedTier =
+        normalizeResourceToken(request?.requestedResourceTier) ||
+        getTierFromRateKey(request?.selectedZoneRateKey);
+    const requestedSurface = normalizeResourceToken(request?.requestedResourceSurface);
+
+    if (CS_STYLE_GAMES.has(gameKey)) {
+        const tier = ["regular", "premium", "elite"].includes(requestedTier) ? requestedTier : "";
+        return {
+            assetType: "pc",
+            requiredCount: 2,
+            tier,
+            resourceLabel: tier ? `${formatEnumLabel(tier)} PC rooms` : "PC rooms",
+            roomSize: 5,
+            unit: "pc_room" as const,
+        };
     }
-    return result;
-};
 
-const normalizeGameKey = (value: unknown) => String(value || "").trim().toLowerCase();
-const computeAssetTypeFromGame = (gameKey: string): ZoneBookingAssetType => {
-    if (["cs2", "fc25", "fc26", "tekken8"].includes(gameKey)) return "pc";
-    if (["futsal", "indoor_cricket", "padel", "pickleball"].includes(gameKey)) return "court";
-    return "unknown";
-};
+    if (CONSOLE_GAMES.has(gameKey)) {
+        const tier = ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "";
+        return {
+            assetType: "console",
+            requiredCount: 1,
+            tier,
+            resourceLabel: tier ? formatEnumLabel(tier) : "Console",
+            unit: "resource" as const,
+        };
+    }
 
-const normalizeLinkedRequest = (id: string, data: Record<string, any>): ZoneBookingQueueItem => {
-    const gameKey = normalizeGameKey(data.gameKey);
+    const courtAssetType = COURT_GAME_ASSETS[gameKey];
+    if (courtAssetType) {
+        return {
+            assetType: courtAssetType,
+            requiredCount: 1,
+            surface: requestedSurface,
+            unit: "resource" as const,
+        };
+    }
+
     return {
-        id,
-        userId: data.userId || "",
-        userName: data.userName || "Player",
-        title: data.title || "Booking Request",
-        gameKey,
-        maxPlayers: Number(data.maxPlayers || 0),
-        reservedSlots: Number(data.reservedSlots || 0) || undefined,
-        teamMode: data.teamMode,
-        preferredDate: data.preferredDate,
-        preferredTime: data.preferredTime,
-        preferredAreas: Array.isArray(data.preferredAreas) ? data.preferredAreas : [],
-        budgetPerPlayer: Number(data.budgetPerPlayer || 0) || undefined,
-        currency: data.currency || "PKR",
-        status: data.status || "open",
-        paymentStatus: data.paymentStatus || "unpaid",
-        locationMode: data.locationMode,
-        zoneId: data.zoneId,
-        lifecycleStatus: data.lifecycleStatus,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-        assetType: computeAssetTypeFromGame(gameKey),
-        priorityFlags: [],
-        raw: data,
+        assetType: normalizeResourceToken(request?.requestedResourceAssetType) || request?.assetType || "unknown",
+        requiredCount: 1,
+        resourceLabel: "Resource",
+        unit: "resource" as const,
     };
 };
 
-const getRequestMatchroomId = (item?: ZoneBookingQueueItem | null) => {
-    if (!item) return null;
-    const raw = item.raw || {};
-    return raw.matchroomId || raw.matchroom?.id || raw.meta?.matchroomId || null;
+const resourceMatchesAllocationProfile = (
+    resource: ZoneBranchResource,
+    profile: ReturnType<typeof getAllocationResourceProfile>,
+    request?: ZoneBookingQueueItem | null,
+) => {
+    if (!resource.isActive) return false;
+    if (resource.lifecycleStatus === "held") {
+        const linkedRequestId = String(resource.holdRequestId || resource.bookingRequestId || "");
+        if (!linkedRequestId || linkedRequestId !== String(request?.id || "")) {
+            return false;
+        }
+    }
+    if (normalizeResourceToken(resource.assetType) !== profile.assetType) return false;
+    if ("tier" in profile && profile.tier && inferResourceTier(resource) !== profile.tier) {
+        return false;
+    }
+    if ("surface" in profile && profile.surface && normalizeResourceToken(resource.surface) !== profile.surface) {
+        return false;
+    }
+    return true;
+};
+
+const sortAllocationResources = (resources: ZoneBranchResource[]) =>
+    [...resources].sort((a, b) =>
+        `${a.roomLabel || ""} ${a.label}`.localeCompare(`${b.roomLabel || ""} ${b.label}`),
+    );
+
+const buildAllocationResourceOptions = (
+    request: ZoneBookingQueueItem | null,
+    resources: ZoneBranchResource[],
+): ZoneBookingAllocationResourceOption[] => {
+    const profile = getAllocationResourceProfile(request);
+    const matchingResources = sortAllocationResources(
+        resources.filter((resource) => resourceMatchesAllocationProfile(resource, profile, request)),
+    );
+
+    if (profile.unit === "pc_room") {
+        const grouped = new Map<string, ZoneBranchResource[]>();
+        matchingResources.forEach((resource) => {
+            const roomKey = `${inferResourceTier(resource) || "pc"}:${resource.roomLabel || "Room"}`;
+            const current = grouped.get(roomKey) || [];
+            current.push(resource);
+            grouped.set(roomKey, current);
+        });
+
+        const options: ZoneBookingAllocationResourceOption[] = [];
+        Array.from(grouped.entries()).forEach(([roomKey, roomResources]) => {
+            const sortedRoomResources = sortAllocationResources(roomResources);
+            const roomSize = profile.roomSize;
+            for (let index = 0; index < sortedRoomResources.length; index += roomSize) {
+                const chunk = sortedRoomResources.slice(index, index + roomSize);
+                if (chunk.length < roomSize) continue;
+                const baseLabel = chunk[0]?.roomLabel || "PC Room";
+                const label = sortedRoomResources.length > roomSize
+                    ? `${baseLabel} ${Math.floor(index / roomSize) + 1}`
+                    : baseLabel;
+                options.push({
+                    id: `${roomKey}:${index}`,
+                    label,
+                    meta: `${formatEnumLabel(inferResourceTier(chunk[0])) || "PC"} | ${roomSize} PCs available`,
+                    resourceIds: chunk.map((resource) => resource.id),
+                });
+            }
+        });
+        return options;
+    }
+
+    return matchingResources.map((resource) => ({
+        id: resource.id,
+        label: resource.roomLabel ? `${resource.label} | ${resource.roomLabel}` : resource.label,
+        meta: [resource.assetType, inferResourceTier(resource) || resource.surface, resource.lifecycleStatus]
+            .filter(Boolean)
+            .join(" | "),
+        resourceIds: [resource.id],
+    }));
+};
+
+const getRequestFixedBranch = (
+    request: ZoneBookingQueueItem | null,
+    branches: ZoneBranch[],
+    primaryBranch?: ZoneBranch | null,
+) => {
+    if (!request) return primaryBranch || branches[0] || null;
+
+    const raw = request.raw || {};
+    const explicitBranchId = String(
+        request.allocatedBranchId ||
+        raw.branchId ||
+        raw.selectedBranchId ||
+        raw.targetBranchId ||
+        raw.confirmedBranchId ||
+        "",
+    ).trim();
+    if (explicitBranchId) {
+        const explicit = branches.find((branch) => String(branch.id) === explicitBranchId);
+        if (explicit) return explicit;
+    }
+
+    const requestedArea = normalizeResourceToken(
+        request.targetAreaLabel ||
+        raw.targetAreaLabel ||
+        raw.branchAreaLabel ||
+        raw.areaLabel ||
+        request.preferredAreas?.[0],
+    );
+    if (requestedArea) {
+        const areaMatch = branches.find(
+            (branch) => normalizeResourceToken(branch.areaLabel) === requestedArea,
+        );
+        if (areaMatch) return areaMatch;
+    }
+
+    return primaryBranch || branches[0] || null;
+};
+
+const getRequiredResourceCount = (request?: ZoneBookingQueueItem | null) => {
+    return getAllocationResourceProfile(request).requiredCount;
+};
+
+const getAllocationValidationMessage = (
+    request: ZoneBookingQueueItem | null,
+    selectedCount: number,
+) => {
+    if (!request) return "Select a booking request first.";
+    const gameKey = normalizeGameKey(request.gameKey);
+    const requiredCount = getRequiredResourceCount(request);
+    if (CS_STYLE_GAMES.has(gameKey)) {
+        if (selectedCount !== requiredCount) {
+            return `CS/Valorant bookings require exactly ${requiredCount} PC rooms.`;
+        }
+        return null;
+    }
+    if (CONSOLE_GAMES.has(gameKey)) {
+        if (selectedCount !== 1) {
+            return "Console bookings require exactly 1 selected console.";
+        }
+        return null;
+    }
+    if (request.assetType === "court") {
+        if (selectedCount !== 1) {
+            return "Court bookings require exactly 1 selected resource.";
+        }
+        return null;
+    }
+    if (selectedCount < 1) {
+        return "Select at least 1 resource. Asset type is not fully classified, so verify the allocation before accepting.";
+    }
+    return "Asset type is not fully classified. Verify the selected resources before accepting.";
 };
 
 const formatDateTime = (value: Date) => ({
-    date: value.toISOString().slice(0, 10),
+    // Local calendar date (NOT UTC) so late-night times keep the correct day.
+    date: toLocalDateString(value),
     time: value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
 });
 
-const formatDate = (value: any) => {
-    const millis = toMillis(value);
-    if (!millis) return "N/A";
-    return new Date(millis).toLocaleString();
+const createDefaultScheduleOption = () => {
+    const suggested = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const start = formatDateTime(suggested);
+    const end = formatDateTime(new Date(suggested.getTime() + 60 * 60 * 1000));
+    return { ...start, endTime: end.time };
 };
 
-const toDateString = (value: any) => {
-    if (!value) return undefined;
-    if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (trimmed.length >= 8) return trimmed;
+const toClockMinutes = (value?: string | null) => {
+    const raw = String(value || "").trim();
+    const twelveHour = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (twelveHour) {
+        let hour = Number(twelveHour[1]) || 0;
+        const minute = Number(twelveHour[2]) || 0;
+        const period = twelveHour[3].toUpperCase();
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
+        return hour * 60 + minute;
     }
-    const millis = toMillis(value);
-    if (!millis) return undefined;
-    return new Date(millis).toISOString().slice(0, 10);
+    const twentyFourHour = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!twentyFourHour) return null;
+    const hour = Math.max(0, Math.min(23, Number(twentyFourHour[1]) || 0));
+    const minute = Math.max(0, Math.min(59, Number(twentyFourHour[2]) || 0));
+    return hour * 60 + minute;
+};
+
+const fromClockMinutes = (value: number) => {
+    const normalized = ((Math.round(value / 15) * 15) % 1440 + 1440) % 1440;
+    const hour24 = Math.floor(normalized / 60);
+    const minute = normalized % 60;
+    const period = hour24 >= 12 ? "PM" : "AM";
+    const hour12 = hour24 % 12 || 12;
+    return `${String(hour12).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`;
+};
+
+const parseTimeToDraft = (value?: string | null) => {
+    const minutes = toClockMinutes(value);
+    if (minutes === null) {
+        return { hour: 12, minute: 0, period: "PM" as const };
+    }
+    const hour24 = Math.floor(minutes / 60);
+    return {
+        hour: hour24 % 12 || 12,
+        minute: minutes % 60,
+        period: (hour24 >= 12 ? "PM" : "AM") as "AM" | "PM",
+    };
 };
 
 const requestToMatchroomCardData = (item: ZoneBookingQueueItem): Matchroom => ({
@@ -139,12 +432,17 @@ const requestToMatchroomCardData = (item: ZoneBookingQueueItem): Matchroom => ({
     playerUids: [],
     createdAt: item.createdAt || new Date(),
     location: item.preferredAreas?.[0] || "Zone Venue",
+    locationMode: item.locationMode as any,
+    broadcastAreas: item.preferredAreas || [],
+    broadcastRequestStatus:
+        item.locationMode === "broadcast" ? "waiting_for_zones" : undefined,
     pricing: {
         perPlayer: item.budgetPerPlayer || 0,
         currency: item.currency || "PKR",
     },
     scheduledDate: toDateString(item.preferredDate),
     scheduledTime: item.preferredTime,
+    expiresAt: item.responseExpiresAt,
     slotsA: [],
     slotsB: [],
     paymentStatus: (item.paymentStatus || "unpaid") as any,
@@ -188,228 +486,653 @@ export default function ZoneBookingsModule() {
         segment?: Segment | Segment[];
         requestId?: string | string[];
         matchroomId?: string | string[];
+        t?: string | string[];
     }>();
     const { user } = useAuth();
     const { zone } = useZoneData();
+    const { showToast } = useToast();
 
     const [segment, setSegment] = useState<Segment>("requests");
-    const [showFilters, setShowFilters] = useState(true);
-    const [requestFilter, setRequestFilter] = useState<RequestFilter>("all");
-    const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
+    const [showFilters, setShowFilters] = useState(false);
+    const [matchroomFilter, setMatchroomFilter] = useState<MatchroomFilter>("all");
+    const [gameFilter, setGameFilter] = useState<GameFilter>("all");
+    const [timeOfDayFilter, setTimeOfDayFilter] = useState<TimeOfDayFilter>("all");
+    const [requestDateRange, setRequestDateRange] = useState<DateRangeFilter>("all");
+    const [requestBranch, setRequestBranch] = useState<string>("all");
+    const [requestType, setRequestType] = useState<RequestTypeFilter>("all");
+    const [requestStatus, setRequestStatus] = useState<RequestStatusFilter>("all");
+    const [matchroomDateRange, setMatchroomDateRange] = useState<DateRangeFilter>("all");
+    const [matchroomBranch, setMatchroomBranch] = useState<string>("all");
+    const [matchroomPayment, setMatchroomPayment] = useState<PaymentFilter>("all");
+    const [matchroomSource, setMatchroomSource] = useState<SourceFilter>("all");
+    const [requestSearchQuery, setRequestSearchQuery] = useState("");
+    const [matchroomSearchQuery, setMatchroomSearchQuery] = useState("");
     const [showCounterModal, setShowCounterModal] = useState(false);
+    const [showAllocationSheet, setShowAllocationSheet] = useState(false);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
-    const [linkedRequests, setLinkedRequests] = useState<ZoneBookingQueueItem[]>([]);
     const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
+    const [walkInRooms, setWalkInRooms] = useState<ZoneMatchroomListItem[]>([]);
+    const [queueCursor, setQueueCursor] = useState<string | null>(null);
+    const [matchroomsCursor, setMatchroomsCursor] = useState<string | null>(null);
+    const [walkInsCursor, setWalkInsCursor] = useState<string | null>(null);
+    const [queueDone, setQueueDone] = useState(false);
+    const [matchroomsDone, setMatchroomsDone] = useState(false);
+    const [walkInsDone, setWalkInsDone] = useState(false);
+    const [loadingQueueMore, setLoadingQueueMore] = useState(false);
+    const [loadingMatchroomsMore, setLoadingMatchroomsMore] = useState(false);
+    const [loadingWalkInsMore, setLoadingWalkInsMore] = useState(false);
+    const [matchroomsTotal, setMatchroomsTotal] = useState(0);
+    const [walkInsTotal, setWalkInsTotal] = useState(0);
+    const [allocationBranches, setAllocationBranches] = useState<ZoneBranch[]>([]);
+    const [allocationBranchId, setAllocationBranchId] = useState<string | null>(null);
+    const [allocationResources, setAllocationResources] = useState<ZoneBranchResource[]>([]);
+    const [allocationSelectedResourceIds, setAllocationSelectedResourceIds] = useState<string[]>([]);
+    const [loadingAllocationBranches, setLoadingAllocationBranches] = useState(false);
+    const [loadingAllocationResources, setLoadingAllocationResources] = useState(false);
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
+    const [loadingWalkIns, setLoadingWalkIns] = useState(true);
+    const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
+    const [loadingHistoryMore, setLoadingHistoryMore] = useState(false);
     const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | null>(null);
     const [errorText, setErrorText] = useState<string | null>(null);
     const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
-    const [backfillInProgress, setBackfillInProgress] = useState(false);
+    useRouteLogger("ZoneBookingsModule", {
+        segment,
+        requestStatus,
+        gameFilter,
+        timeOfDayFilter,
+        zoneId: zone?.id,
+        userId: user?._id,
+    });
 
     const [rejectReason, setRejectReason] = useState("fully_booked");
     const [rejectNote, setRejectNote] = useState("");
     const [rejectAlternative, setRejectAlternative] = useState("");
 
-    const [counterPrice, setCounterPrice] = useState("");
-    const [counterMessage, setCounterMessage] = useState("");
-    const [counterExpiryMinutes, setCounterExpiryMinutes] = useState("10");
+    const [counterOptions, setCounterOptions] = useState<Array<{ date: string; time: string; endTime?: string }>>([
+        createDefaultScheduleOption(),
+    ]);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [editingOptionIndex, setEditingOptionIndex] = useState<number | null>(null);
+    const [activeTimePicker, setActiveTimePicker] = useState<{
+        optionIndex: number;
+        field: "start" | "end";
+    } | null>(null);
+    const [dateDraft, setDateDraft] = useState<Date | null>(new Date());
+    const [monthCursor, setMonthCursor] = useState(new Date());
+    const [timeDraft, setTimeDraft] = useState(parseTimeToDraft(createDefaultScheduleOption().time));
     const [focusedMatchroomId, setFocusedMatchroomId] = useState<string | null>(null);
+    const matchroomsRequestVersionRef = useRef(0);
+    const walkInsRequestVersionRef = useRef(0);
+    const loadWalkInsPageRef = useRef<((options?: { append?: boolean }) => Promise<void>) | null>(null);
+
+    const zoneOffers = useQuery(
+        api.bookings.listOffersByZone,
+        zone?.id ? { zoneId: zone.id as Id<"zones"> } : "skip",
+    );
+    const historyRows = useQuery(
+        api.zoneAdminBooking.listBookingHistoryForZone,
+        zone?.id && segment === "history" ? { zoneId: zone.id, limit: historyLimit } : "skip",
+    );
+    const historyHasMore = Boolean(
+        Array.isArray(historyRows) &&
+        historyRows.length >= historyLimit &&
+        historyLimit < HISTORY_MAX_LIMIT,
+    );
+
+    useEffect(() => {
+        setHistoryLimit(HISTORY_PAGE_SIZE);
+        setLoadingHistoryMore(false);
+    }, [segment, zone?.id]);
+
+    useEffect(() => {
+        if (historyRows !== undefined) {
+            setLoadingHistoryMore(false);
+        }
+    }, [historyRows]);
+
+    const loadHistoryMore = useCallback(() => {
+        if (loadingHistoryMore || !historyHasMore) return;
+        setLoadingHistoryMore(true);
+        setHistoryLimit((current) => Math.min(current + HISTORY_PAGE_SIZE, HISTORY_MAX_LIMIT));
+    }, [historyHasMore, loadingHistoryMore]);
+
+    const pageBranchAreas = useMemo(() => {
+        const allAreas = new Set<string>();
+        const rawBranches = Array.isArray((zone as any)?.branches) ? (zone as any).branches : [];
+        rawBranches.forEach((branch: any) => {
+            if (branch?.areaLabel) allAreas.add(String(branch.areaLabel));
+        });
+        if ((zone as any)?.primaryBranch?.areaLabel) {
+            allAreas.add(String((zone as any).primaryBranch.areaLabel));
+        }
+        return Array.from(allAreas);
+    }, [(zone as any)?.branches, (zone as any)?.primaryBranch?.areaLabel]);
+
+    const mergeQueueRows = useCallback((current: ZoneBookingQueueItem[], next: ZoneBookingQueueItem[]) => {
+        const byId = new Map<string, ZoneBookingQueueItem>();
+        [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+        return Array.from(byId.values());
+    }, []);
+
+    const mergeMatchroomRows = useCallback((current: ZoneMatchroomListItem[], next: ZoneMatchroomListItem[]) => {
+        const byId = new Map<string, ZoneMatchroomListItem>();
+        [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+        return Array.from(byId.values());
+    }, []);
+
+    const dateRangeBounds = useCallback((range: DateRangeFilter) => {
+        if (range === "all") return {};
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const dateFrom = start.getTime();
+        const dateTo = dateFrom + (range === "today" ? 1 : 7) * 24 * 60 * 60 * 1000 - 1;
+        return { dateFrom, dateTo };
+    }, []);
+
+    const loadQueuePage = useCallback(async (options?: { append?: boolean }) => {
+        if (!zone?.id) return;
+        const append = options?.append === true;
+        if (append && (queueDone || loadingQueueMore)) return;
+        if (append) {
+            setLoadingQueueMore(true);
+        } else {
+            setLoadingQueue(true);
+        }
+        try {
+            const result = await fetchZoneBookingQueuePage({
+                zoneId: zone.id,
+                branchAreas: pageBranchAreas,
+                limit: ZONE_PAGE_SIZE,
+                cursor: append ? queueCursor : null,
+                filters: {
+                    requestKind: requestType === "broadcast" ? "broadcast_fanout" : requestType === "direct" ? "direct_zone" : undefined,
+                    status: requestStatus === "all" ? "active" : requestStatus,
+                    branchId: requestBranch === "all" ? undefined : requestBranch,
+                    game: gameFilter === "all" ? undefined : gameFilter,
+                    searchText: requestSearchQuery || undefined,
+                    ...dateRangeBounds(requestDateRange),
+                },
+            });
+            setQueue((current) => append ? mergeQueueRows(current, result.page) : result.page);
+            setQueueCursor(result.continueCursor);
+            setQueueDone(result.isDone);
+            setSelectedRequestId((prev) => prev || result.page[0]?.id || null);
+        } catch (error) {
+            Logger.error("ZoneBookingsModule", "Failed to load paginated booking queue", error);
+            setErrorText("Failed to load booking queue.");
+        } finally {
+            setLoadingQueue(false);
+            setLoadingQueueMore(false);
+        }
+    }, [
+        dateRangeBounds,
+        gameFilter,
+        loadingQueueMore,
+        mergeQueueRows,
+        pageBranchAreas,
+        queueCursor,
+        queueDone,
+        requestBranch,
+        requestDateRange,
+        requestSearchQuery,
+        requestStatus,
+        requestType,
+        zone?.id,
+    ]);
+
+    const loadMatchroomsPage = useCallback(async (options?: { append?: boolean }) => {
+        if (!zone?.id) return;
+        const append = options?.append === true;
+        if (append && (matchroomsDone || loadingMatchroomsMore)) return;
+        const requestVersion = ++matchroomsRequestVersionRef.current;
+        const source = matchroomSource;
+        const bookingSource =
+            source === "walkin" ? "walkin"
+            : source === "admin" ? "admin"
+            : source === "online" ? "zone_accepted"
+            : undefined;
+        if (append) {
+            setLoadingMatchroomsMore(true);
+        } else {
+            setLoadingMatchrooms(true);
+        }
+        try {
+            const result = await fetchZoneMatchroomsPage({
+                zoneId: zone.id,
+                limit: ZONE_PAGE_SIZE,
+                cursor: append ? matchroomsCursor : null,
+                filters: {
+                    status: matchroomFilter === "all" ? undefined : matchroomFilter,
+                    paymentStatus: matchroomPayment === "all" ? undefined : matchroomPayment,
+                    bookingSource,
+                    searchText: matchroomSearchQuery || undefined,
+                    ...dateRangeBounds(matchroomDateRange),
+                },
+            });
+            if (requestVersion !== matchroomsRequestVersionRef.current) return;
+            setMatchrooms((current) => append ? mergeMatchroomRows(current, result.page) : result.page);
+            setMatchroomsCursor(result.continueCursor);
+            setMatchroomsDone(result.isDone);
+            setMatchroomsTotal(result.total ?? result.page.length);
+        } catch (error) {
+            if (requestVersion !== matchroomsRequestVersionRef.current) return;
+            Logger.error("ZoneBookingsModule", "Failed to load paginated matchrooms", error);
+            setErrorText("Failed to load matchrooms.");
+        } finally {
+            if (requestVersion !== matchroomsRequestVersionRef.current) return;
+            setLoadingMatchrooms(false);
+            setLoadingMatchroomsMore(false);
+        }
+    }, [
+        dateRangeBounds,
+        loadingMatchroomsMore,
+        matchroomDateRange,
+        matchroomFilter,
+        matchroomPayment,
+        matchroomSearchQuery,
+        matchroomSource,
+        matchroomsCursor,
+        matchroomsDone,
+        mergeMatchroomRows,
+        zone?.id,
+    ]);
+
+    const loadWalkInsPage = useCallback(async (options?: { append?: boolean }) => {
+        if (!zone?.id) return;
+        const append = options?.append === true;
+        if (append && (walkInsDone || loadingWalkInsMore)) return;
+        const requestVersion = ++walkInsRequestVersionRef.current;
+        if (append) {
+            setLoadingWalkInsMore(true);
+        } else {
+            setLoadingWalkIns(true);
+        }
+        try {
+            const result = await fetchZoneMatchroomsPage({
+                zoneId: zone.id,
+                limit: ZONE_PAGE_SIZE,
+                cursor: append ? walkInsCursor : null,
+                filters: {
+                    bookingSource: "walkin",
+                },
+            });
+            if (requestVersion !== walkInsRequestVersionRef.current) return;
+            setWalkInRooms((current) => append ? mergeMatchroomRows(current, result.page) : result.page);
+            setWalkInsCursor(result.continueCursor);
+            setWalkInsDone(result.isDone);
+            setWalkInsTotal(result.total ?? result.page.length);
+        } catch (error) {
+            if (requestVersion !== walkInsRequestVersionRef.current) return;
+            Logger.error("ZoneBookingsModule", "Failed to load paginated walk-ins", error);
+            setErrorText("Failed to load walk-in matchrooms.");
+        } finally {
+            if (requestVersion !== walkInsRequestVersionRef.current) return;
+            setLoadingWalkIns(false);
+            setLoadingWalkInsMore(false);
+        }
+    }, [
+        loadingWalkInsMore,
+        mergeMatchroomRows,
+        walkInsCursor,
+        walkInsDone,
+        zone?.id,
+    ]);
+
+    useEffect(() => {
+        loadWalkInsPageRef.current = loadWalkInsPage;
+    }, [loadWalkInsPage]);
 
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
     const deepMatchroomId = Array.isArray(params.matchroomId) ? params.matchroomId[0] : params.matchroomId;
+    const deepRefreshToken = Array.isArray(params.t) ? params.t[0] : params.t;
 
-    const branchAreas = useMemo(() => {
-        const allAreas = new Set<string>();
-        const rawBranches = Array.isArray(zone?.branches) ? zone.branches : [];
-        rawBranches.forEach((branch: any) => {
-            if (branch?.areaLabel) {
-                allAreas.add(String(branch.areaLabel));
-            }
-        });
-        if (zone?.primaryBranch?.areaLabel) {
-            allAreas.add(String(zone.primaryBranch.areaLabel));
+    const {
+        branchAreas,
+        primaryBranch,
+        combinedQueue,
+        filteredQueue,
+        selectedRequest,
+        selectedMatchroomId,
+        minDate,
+        firstWeekday,
+        daysInMonth,
+        monthYearLabel,
+    } = useZoneBookingsViewModel({
+        zone,
+        queue,
+        gameFilter,
+        timeOfDayFilter,
+        dateRangeFilter: requestDateRange,
+        branchFilter: requestBranch,
+        requestTypeFilter: requestType,
+        requestStatusFilter: requestStatus,
+        searchQuery: requestSearchQuery,
+        selectedRequestId,
+        monthCursor,
+    });
+
+    const activeRequestFilterCount = useMemo(
+        () =>
+            (gameFilter !== "all" ? 1 : 0) +
+            (timeOfDayFilter !== "all" ? 1 : 0) +
+            (requestDateRange !== "all" ? 1 : 0) +
+            (requestBranch !== "all" ? 1 : 0) +
+            (requestType !== "all" ? 1 : 0) +
+            (requestStatus !== "all" ? 1 : 0),
+        [gameFilter, timeOfDayFilter, requestDateRange, requestBranch, requestType, requestStatus],
+    );
+
+    const branchOptions = useMemo<FilterOption[]>(() => {
+        const branches = Array.isArray((zone as any)?.branches) ? (zone as any).branches : [];
+        return [
+            { key: "all", label: "Any branch" },
+            ...branches.map((branch: any) => ({
+                key: String(branch?.id),
+                label: branch?.branchDisplayName || branch?.areaLabel || "Branch",
+            })),
+        ];
+    }, [(zone as any)?.branches]);
+
+    const requestFilterGroups = useMemo<BookingFilterGroup[]>(
+        () => [
+            { key: "game", label: "Game", options: GAME_FILTERS, value: gameFilter, onSelect: (value) => setGameFilter(value as GameFilter) },
+            { key: "time", label: "Time of day", options: TIME_OF_DAY_FILTERS, value: timeOfDayFilter, onSelect: (value) => setTimeOfDayFilter(value as TimeOfDayFilter) },
+            { key: "date", label: "Date range", options: DATE_RANGE_FILTERS, value: requestDateRange, onSelect: (value) => setRequestDateRange(value as DateRangeFilter) },
+            { key: "branch", label: "Branch", options: branchOptions, value: requestBranch, onSelect: (value) => setRequestBranch(value) },
+            { key: "type", label: "Request type", options: REQUEST_TYPE_FILTERS, value: requestType, onSelect: (value) => setRequestType(value as RequestTypeFilter) },
+            { key: "status", label: "Request status", options: REQUEST_STATUS_FILTERS, value: requestStatus, onSelect: (value) => setRequestStatus(value as RequestStatusFilter) },
+        ],
+        [gameFilter, timeOfDayFilter, requestDateRange, requestBranch, requestType, requestStatus, branchOptions],
+    );
+
+    const matchroomFilterGroups = useMemo<BookingFilterGroup[]>(
+        () => [
+            { key: "status", label: "Matchroom status", options: MATCHROOM_STATUS_OPTIONS, value: matchroomFilter, onSelect: (value) => setMatchroomFilter(value as MatchroomFilter) },
+            { key: "date", label: "Date range", options: DATE_RANGE_FILTERS, value: matchroomDateRange, onSelect: (value) => setMatchroomDateRange(value as DateRangeFilter) },
+            { key: "branch", label: "Branch", options: branchOptions, value: matchroomBranch, onSelect: (value) => setMatchroomBranch(value) },
+            { key: "payment", label: "Payment status", options: PAYMENT_STATUS_OPTIONS, value: matchroomPayment, onSelect: (value) => setMatchroomPayment(value as PaymentFilter) },
+            { key: "source", label: "Booking source", options: BOOKING_SOURCE_OPTIONS, value: matchroomSource, onSelect: (value) => setMatchroomSource(value as SourceFilter) },
+        ],
+        [matchroomFilter, matchroomDateRange, matchroomBranch, matchroomPayment, matchroomSource, branchOptions],
+    );
+
+    const resetRequestFilters = useCallback(() => {
+        setGameFilter("all");
+        setTimeOfDayFilter("all");
+        setRequestDateRange("all");
+        setRequestBranch("all");
+        setRequestType("all");
+        setRequestStatus("all");
+    }, []);
+
+    const resetMatchroomFilters = useCallback(() => {
+        setMatchroomFilter("all");
+        setMatchroomDateRange("all");
+        setMatchroomBranch("all");
+        setMatchroomPayment("all");
+        setMatchroomSource("all");
+    }, []);
+
+    const originalStartMinutes = useMemo(
+        () => toClockMinutes(selectedRequest?.preferredTime) ?? toClockMinutes(counterOptions[0]?.time) ?? 12 * 60,
+        [counterOptions, selectedRequest?.preferredTime],
+    );
+    const originalDurationMinutes = useMemo(() => {
+        const explicitMinutes = Number((selectedRequest?.raw as any)?.durationMinutes || 0);
+        if (Number.isFinite(explicitMinutes) && explicitMinutes > 0) return explicitMinutes;
+        const durationHours = Number(selectedRequest?.raw?.durationHours || 0);
+        if (Number.isFinite(durationHours) && durationHours > 0) return Math.round(durationHours * 60);
+        return 60;
+    }, [selectedRequest?.raw]);
+    const allowedStartMin = originalStartMinutes - 120;
+    const allowedStartMax = originalStartMinutes + 120;
+    const originalEndMinutes = originalStartMinutes + originalDurationMinutes;
+    const allowedEndMin = originalEndMinutes - 120;
+    const allowedEndMax = originalEndMinutes + 120;
+
+    const counterValidationMessage = useMemo(() => {
+        const option = counterOptions[0];
+        if (!option?.date || !option?.time || !option?.endTime) return "Date, start time, and end time are required.";
+        const start = toClockMinutes(option.time);
+        const end = toClockMinutes(option.endTime);
+        if (start === null || end === null) return "Use a valid start and end time.";
+        if (end <= start) return "Ending booking time must be after the starting time.";
+        if (start < allowedStartMin || start > allowedStartMax || end < allowedEndMin || end > allowedEndMax) {
+            return "Alternative time must stay within 2 hours of the original booking window.";
         }
-        return Array.from(allAreas);
-    }, [zone?.branches, zone?.primaryBranch?.areaLabel]);
+        return "";
+    }, [allowedEndMax, allowedEndMin, allowedStartMax, allowedStartMin, counterOptions]);
 
-    const primaryBranch = useMemo(() => {
-        const branches = Array.isArray(zone?.branches) ? zone?.branches : [];
-        const primary = branches.find((item: any) => item?.isPrimary);
-        return primary || branches[0] || null;
-    }, [zone?.branches]);
+    const pendingOffers = useMemo(() => {
+        const now = Date.now();
+        return ((zoneOffers || []) as any[])
+            .filter((offer) => offer.status === "pending" && (!offer.expiresAt || offer.expiresAt > now))
+            .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0));
+    }, [zoneOffers]);
 
-    const walkInCount = useMemo(
-        () => matchrooms.filter((item) => item.bookingSource === "walkin").length,
-        [matchrooms],
-    );
-    const walkInRooms = useMemo(
-        () => matchrooms.filter((item) => item.bookingSource === "walkin"),
-        [matchrooms],
+    const pendingRequestIds = useMemo(
+        () => new Set(pendingOffers.map((offer) => String(offer.requestId))),
+        [pendingOffers],
     );
 
-    const combinedQueue = useMemo(() => {
-        if (!linkedRequests.length) return queue;
-        const merged = new Map<string, ZoneBookingQueueItem>();
-        queue.forEach((item) => merged.set(item.id, item));
-        linkedRequests.forEach((item) => merged.set(item.id, item));
-        return Array.from(merged.values());
-    }, [linkedRequests, queue]);
+    const visibleRequestsQueue = useMemo(
+        () =>
+            filteredQueue.filter((item) =>
+                ["open", "pending_payment"].includes(String(item.status || "")) &&
+                !pendingRequestIds.has(String(item.id)),
+            ),
+        [filteredQueue, pendingRequestIds],
+    );
+
+    const filteredMatchrooms = useMemo(() => {
+        const normalizedSearch = matchroomSearchQuery.trim().toLowerCase();
+        const branches = Array.isArray((zone as any)?.branches) ? (zone as any).branches : [];
+        const todayStart = (() => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            return date.getTime();
+        })();
+        return matchrooms.filter((item) => {
+            const statusOk =
+                matchroomFilter === "all" ||
+                String(item.status || "").toLowerCase() === matchroomFilter;
+
+            let dateOk = true;
+            if (matchroomDateRange !== "all") {
+                const millis = toScheduleMillis(item.scheduledDate);
+                dateOk = millis
+                    ? matchroomDateRange === "today"
+                        ? millis >= todayStart && millis < todayStart + 24 * 60 * 60 * 1000
+                        : millis >= todayStart && millis < todayStart + 7 * 24 * 60 * 60 * 1000
+                    : false;
+            }
+
+            // Branch matching prefers branchId; falls back to location substring; unknown passes.
+            let branchOk = true;
+            if (matchroomBranch !== "all") {
+                const branchId = String(item.branchId || "").trim();
+                if (branchId) {
+                    branchOk = branchId === matchroomBranch;
+                } else {
+                    const targetBranch = branches.find((branch: any) => String(branch?.id) === matchroomBranch);
+                    const location = String(item.location || "").trim().toLowerCase();
+                    if (targetBranch && location) {
+                        const area = String(targetBranch.areaLabel || "").toLowerCase();
+                        const name = String(targetBranch.branchDisplayName || "").toLowerCase();
+                        branchOk = (!!area && location.includes(area)) || (!!name && location.includes(name));
+                    } else {
+                        branchOk = true;
+                    }
+                }
+            }
+
+            let paymentOk = true;
+            if (matchroomPayment !== "all") {
+                const paid = String(item.paymentStatus || "").toLowerCase() === "paid";
+                paymentOk = matchroomPayment === "paid" ? paid : !paid;
+            }
+
+            let sourceOk = true;
+            if (matchroomSource !== "all") {
+                const source = String(item.bookingSource || "").toLowerCase();
+                const isWalkin = source.includes("walk");
+                const isAdmin = source.includes("admin");
+                sourceOk =
+                    matchroomSource === "walkin"
+                        ? isWalkin
+                        : matchroomSource === "admin"
+                            ? isAdmin
+                            : !isWalkin && !isAdmin;
+            }
+
+            const searchOk =
+                normalizedSearch.length === 0 ||
+                [
+                    item.title,
+                    item.game,
+                    item.location,
+                    item.scheduledDate,
+                    item.scheduledTime,
+                    item.hostName,
+                ]
+                    .join(" ")
+                    .toLowerCase()
+                    .includes(normalizedSearch);
+            return statusOk && dateOk && branchOk && paymentOk && sourceOk && searchOk;
+        });
+    }, [
+        matchroomFilter,
+        matchroomDateRange,
+        matchroomBranch,
+        matchroomPayment,
+        matchroomSource,
+        matchroomSearchQuery,
+        matchrooms,
+        (zone as any)?.branches,
+    ]);
+
+    const activeMatchroomFilterCount = useMemo(
+        () =>
+            (matchroomFilter !== "all" ? 1 : 0) +
+            (matchroomDateRange !== "all" ? 1 : 0) +
+            (matchroomBranch !== "all" ? 1 : 0) +
+            (matchroomPayment !== "all" ? 1 : 0) +
+            (matchroomSource !== "all" ? 1 : 0),
+        [matchroomFilter, matchroomDateRange, matchroomBranch, matchroomPayment, matchroomSource],
+    );
+
+    const updateCounterOption = (index: number, patch: Partial<{ date: string; time: string; endTime?: string }>) => {
+        setCounterOptions((prev) =>
+            prev.map((option, optionIndex) => {
+                if (optionIndex !== index) return option;
+                if (Object.prototype.hasOwnProperty.call(patch, "time")) {
+                    const startRaw = toClockMinutes(patch.time);
+                    const start = startRaw === null
+                        ? null
+                        : Math.max(allowedStartMin, Math.min(allowedStartMax, startRaw));
+                    return {
+                        ...option,
+                        ...(patch.date !== undefined ? { date: patch.date } : {}),
+                        time: start === null ? patch.time || "" : fromClockMinutes(start),
+                        endTime: start === null ? option.endTime : fromClockMinutes(start + originalDurationMinutes),
+                    };
+                }
+                if (Object.prototype.hasOwnProperty.call(patch, "endTime")) {
+                    const endRaw = toClockMinutes(patch.endTime);
+                    const end = endRaw === null
+                        ? null
+                        : Math.max(allowedEndMin, Math.min(allowedEndMax, endRaw));
+                    return {
+                        ...option,
+                        ...(patch.date !== undefined ? { date: patch.date } : {}),
+                        endTime: end === null ? patch.endTime : fromClockMinutes(end),
+                    };
+                }
+                return { ...option, ...patch };
+            }),
+        );
+    };
+
+    const removeCounterOption = (index: number) => {
+        setCounterOptions((prev) => {
+            if (prev.length === 1) return prev;
+            return prev.filter((_, optionIndex) => optionIndex !== index);
+        });
+    };
 
     useEffect(() => {
         if (!zone?.id) {
+            setQueue([]);
+            setMatchrooms([]);
+            setWalkInRooms([]);
+            setMatchroomsTotal(0);
+            setWalkInsTotal(0);
             setLoadingQueue(false);
             setLoadingMatchrooms(false);
+            setLoadingWalkIns(false);
             return;
         }
-
-        const unsubQueue = subscribeZoneBookingQueue(
-            zone.id,
-            branchAreas,
-            (rows) => {
-                setQueue(rows);
-                setLoadingQueue(false);
-                setSelectedRequestId((prev) => prev || rows[0]?.id || null);
-            },
-            (error) => {
-                setLoadingQueue(false);
-                if (error?.code === "permission-denied") {
-                    setErrorText("Booking queue permission denied by Firestore rules.");
-                } else {
-                    setErrorText("Failed to load booking queue.");
-                }
-            },
-        );
-
-        const unsubMatchrooms = subscribeZoneMatchrooms(
-            zone.id,
-            user?.uid,
-            (rows) => {
-                setMatchrooms(rows);
-                setLoadingMatchrooms(false);
-            },
-            (error) => {
-                setLoadingMatchrooms(false);
-                if (error?.code === "permission-denied") {
-                    setErrorText("Matchroom list permission denied by Firestore rules.");
-                } else {
-                    setErrorText("Failed to load matchrooms.");
-                }
-            },
-            {
-                locationHints: [
-                    zone.venueBrandName || "",
-                    zone.primaryBranch?.branchDisplayName || "",
-                    zone.primaryBranch?.areaLabel || "",
-                    ...branchAreas,
-                ],
-            },
-        );
-
-        return () => {
-            unsubQueue();
-            unsubMatchrooms();
-        };
-    }, [branchAreas, user?.uid, zone?.id]);
+        setQueueCursor(null);
+        setQueueDone(false);
+        void loadQueuePage({ append: false });
+    }, [
+        zone?.id,
+        pageBranchAreas,
+        gameFilter,
+        requestDateRange,
+        requestBranch,
+        requestType,
+        requestStatus,
+        requestSearchQuery,
+    ]);
 
     useEffect(() => {
-        let cancelled = false;
-        const resolveLinkedRequests = async () => {
-            if (!matchrooms.length) {
-                setLinkedRequests([]);
-                return;
-            }
-            try {
-                setBackfillInProgress(true);
-                const ids = Array.from(new Set(matchrooms.map((item) => item.id).filter(Boolean)));
-                const batches = chunk(ids, 10);
-                const collected: ZoneBookingQueueItem[] = [];
-                const linkedMatchroomIds = new Set<string>();
-
-                for (const batch of batches) {
-                    const q = query(
-                        collection(db, "booking_requests"),
-                        where("matchroomId", "in", batch),
-                    );
-                    const snapshot = await getDocs(q);
-                    snapshot.docs.forEach((docSnap: any) => {
-                        const data = docSnap.data() as Record<string, any>;
-                        const status = String(data.status || "open");
-                        if (data.matchroomId) {
-                            linkedMatchroomIds.add(String(data.matchroomId));
-                        }
-                        if (ACTIVE_QUEUE_STATUSES.has(status)) {
-                            collected.push(normalizeLinkedRequest(docSnap.id, data));
-                        }
-                    });
-                }
-
-                const matchroomMap = new Map(matchrooms.map((room) => [room.id, room]));
-                const missing = ids.filter((id) => !linkedMatchroomIds.has(id));
-                for (const matchroomId of missing) {
-                    const room = matchroomMap.get(matchroomId);
-                    if (!room || room.bookingSource === "walkin") continue;
-                    const docId = `matchroom_request_${matchroomId}`;
-                    const gameKey = normalizeGameKey(room.game);
-                    const requestData = {
-                        userId: room.hostUid || "",
-                        userName: room.hostName || "Player",
-                        gameKey,
-                        title: room.title || "Matchroom Booking",
-                        description: "Matchroom created. Awaiting zone admin approval.",
-                        maxPlayers: Number(room.maxPlayers || 0),
-                        reservedSlots: Number(room.currentPlayers || 0) || undefined,
-                        preferredDate: room.scheduledDate || null,
-                        preferredTime: room.scheduledTime || null,
-                        flexibilityWindow: "Exact time",
-                        preferredAreas: room.location ? [room.location] : [],
-                        budgetPerPlayer: Number(room.pricePerPlayer || 0) || 0,
-                        currency: room.currency || "PKR",
-                        locationMode: "zone",
-                        zoneId: zone?.id || null,
-                        status: "open",
-                        paymentStatus: room.paymentStatus || "unpaid",
-                        lifecycleStatus: "matchroom_admin_pending",
-                        matchroomId,
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp(),
-                    };
-                    await setDoc(doc(db, "booking_requests", docId), requestData, { merge: true });
-                    collected.push(normalizeLinkedRequest(docId, requestData));
-                }
-
-                if (!cancelled) {
-                    setLinkedRequests(collected);
-                }
-            } catch (e) {
-                if (!cancelled) {
-                    setLinkedRequests([]);
-                }
-            } finally {
-                if (!cancelled) {
-                    setBackfillInProgress(false);
-                }
-            }
-        };
-        resolveLinkedRequests();
-        return () => {
-            cancelled = true;
-        };
-    }, [matchrooms, zone?.id]);
+        if (!zone?.id) return;
+        setMatchroomsCursor(null);
+        setMatchroomsDone(false);
+        void loadMatchroomsPage({ append: false });
+    }, [
+        zone?.id,
+        matchroomFilter,
+        matchroomDateRange,
+        matchroomPayment,
+        matchroomSource,
+        matchroomSearchQuery,
+    ]);
 
     useEffect(() => {
-        if (deepSegment === "matchrooms" || deepSegment === "requests") {
-            setSegment(deepSegment);
+        if (!zone?.id || segment !== "walkins") return;
+        setWalkInsCursor(null);
+        setWalkInsDone(false);
+        void loadWalkInsPageRef.current?.({ append: false });
+    }, [deepRefreshToken, segment, zone?.id]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!zone?.id || segment !== "walkins") return undefined;
+            setWalkInsCursor(null);
+            setWalkInsDone(false);
+            void loadWalkInsPageRef.current?.({ append: false });
+            return undefined;
+        }, [segment, zone?.id]),
+    );
+
+    useEffect(() => {
+        if (deepSegment && ROUTABLE_SEGMENTS.has(deepSegment as Segment)) {
+            setSegment(deepSegment as Segment);
         }
         if (deepRequestId) {
             setSelectedRequestId(deepRequestId);
         }
         if (deepMatchroomId) {
             setFocusedMatchroomId(deepMatchroomId);
-            if (!deepRequestId) {
-                setSegment("requests");
+            if (!deepRequestId && deepSegment !== "history") {
+                setSegment("matchrooms");
             }
         }
     }, [deepMatchroomId, deepRequestId, deepSegment]);
@@ -419,21 +1142,18 @@ export default function ZoneBookingsModule() {
         let cancelled = false;
         const resolveRequestId = async () => {
             try {
-                const q = query(
-                    collection(db, "booking_requests"),
-                    where("matchroomId", "==", deepMatchroomId),
-                    limit(1),
-                );
-                const snapshot = await getDocs(q);
-                const docSnap = snapshot.docs[0];
-                if (!cancelled && docSnap) {
-                    setSelectedRequestId(docSnap.id);
+                // Use Convex to look up booking requests by zone, then filter by matchroomId
+                const allRequests = await convex.query(api.bookings.listRequestsByZone, {
+                    zoneId: zone.id as Id<"zones">,
+                });
+                const match = allRequests.find((r: any) => r.matchroomId === deepMatchroomId);
+                if (!cancelled && match) {
+                    setSelectedRequestId((match as any)._id);
                 }
                 if (!cancelled) {
                     setMatchroomLookupDone(true);
                 }
             } catch (e) {
-                // If we can't resolve, leave selection empty and let admin handle manually.
                 if (!cancelled) {
                     setMatchroomLookupDone(true);
                 }
@@ -446,31 +1166,13 @@ export default function ZoneBookingsModule() {
     }, [deepMatchroomId, deepRequestId, selectedRequestId, zone?.id]);
 
     useEffect(() => {
-        if (!deepMatchroomId || !matchroomLookupDone || selectedRequestId) return;
-        Alert.alert(
-            "No booking request linked",
-            "This matchroom doesn't have a booking request linked yet. Please select one from the Requests list.",
-        );
-    }, [deepMatchroomId, matchroomLookupDone, selectedRequestId]);
-
-    const filteredQueue = useMemo(
-        () =>
-            combinedQueue.filter((item) => {
-                const requestOk = requestFilter === "all" ? true : item.status === requestFilter;
-                const assetOk = assetFilter === "all" ? true : item.assetType === assetFilter;
-                return requestOk && assetOk;
-            }),
-        [assetFilter, combinedQueue, requestFilter],
-    );
-
-    const selectedRequest = useMemo(
-        () => combinedQueue.find((item) => item.id === selectedRequestId) || null,
-        [combinedQueue, selectedRequestId],
-    );
-    const selectedMatchroomId = useMemo(
-        () => getRequestMatchroomId(selectedRequest),
-        [selectedRequest],
-    );
+        if (!deepMatchroomId || !matchroomLookupDone || selectedRequestId || segment === "matchrooms") return;
+        showToast({
+            type: "warning",
+            title: "No booking request linked",
+            message: "This matchroom doesn't have a booking request linked yet. Please select one from the Requests list.",
+        });
+    }, [deepMatchroomId, matchroomLookupDone, selectedRequestId, segment, showToast]);
 
     useEffect(() => {
         setSelectedRequestId((prev) => {
@@ -479,93 +1181,269 @@ export default function ZoneBookingsModule() {
         });
     }, [combinedQueue]);
 
-    const handleAccept = async (targetRequest?: ZoneBookingQueueItem) => {
-        const req = targetRequest || selectedRequest;
-        if (!zone?.id || !user?.uid || !req) return;
-        setProcessingAction("accept");
-        const result = await acceptZoneBookingRequest({
-            requestId: req.id,
-            adminUid: user.uid,
-            zoneId: zone.id,
-            requestOwnerUid: req.userId,
-            branchId: primaryBranch?.id || undefined,
-            branchName: primaryBranch?.branchDisplayName || undefined,
-            location: zone.primaryBranch?.areaLabel || zone.venueBrandName || undefined,
-            zoneName: zone.venueBrandName || undefined,
-            note: "Accepted via admin queue",
-        });
-        setProcessingAction(null);
-        if (!result.ok) {
-            Alert.alert("Accept failed", result.message);
-            return;
-        }
-        Alert.alert("Accepted", "Booking request moved to confirmed lifecycle.");
-    };
+    const {
+        handleAccept,
+        handleReject,
+        handleCounterOffer,
+    } = useZoneBookingsActions({
+        zone,
+        user,
+        primaryBranch,
+        selectedRequest,
+        counterOptions,
+        setProcessingAction,
+        setShowCounterModal,
+        setCounterOptions,
+        rejectReason,
+        rejectNote,
+        rejectAlternative,
+        createDefaultScheduleOption,
+    });
+    const allocationConsumerVisible = showAllocationSheet || showCounterModal;
 
-    const handleReject = async () => {
-        if (!zone?.id || !user?.uid || !selectedRequest) return;
-        setProcessingAction("reject");
-        const result = await rejectZoneBookingRequest({
-            requestId: selectedRequest.id,
-            adminUid: user.uid,
-            zoneId: zone.id,
-            requestOwnerUid: selectedRequest.userId,
-            reason: rejectReason,
-            note: rejectNote.trim() || undefined,
-            alternative: rejectAlternative.trim() || undefined,
-        });
-        setProcessingAction(null);
-        if (!result.ok) {
-            Alert.alert("Reject failed", result.message);
-            return;
-        }
-        Alert.alert("Rejected", "Rejection reason and alternatives were saved.");
-    };
-
-    const handleCounterOffer = async () => {
-        if (!zone?.id || !user?.uid || !selectedRequest) return;
-
-        const parsedPrice = Number.parseInt(counterPrice, 10);
-        const parsedExpiry = Number.parseInt(counterExpiryMinutes, 10);
-        if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-            Alert.alert("Invalid price", "Enter a valid counter-offer price.");
+    useEffect(() => {
+        if (!allocationConsumerVisible || !zone?.id) {
+            setAllocationBranches([]);
+            setAllocationResources([]);
+            setAllocationSelectedResourceIds([]);
+            setAllocationBranchId(null);
+            setLoadingAllocationBranches(false);
+            setLoadingAllocationResources(false);
             return;
         }
 
-        const counterDateTime = formatDateTime(new Date(Date.now() + 2 * 60 * 60 * 1000));
-        setProcessingAction("counter");
-        try {
-            const result = await sendZoneCounterOffer({
-                requestId: selectedRequest.id,
-                requestOwnerUid: selectedRequest.userId,
+        setLoadingAllocationBranches(true);
+        const unsub = subscribeZoneBranches(
+            zone.id,
+            (rows) => {
+                setAllocationBranches(rows);
+                setLoadingAllocationBranches(false);
+                setAllocationBranchId(
+                    getRequestFixedBranch(selectedRequest, rows, primaryBranch)?.id || null,
+                );
+            },
+            () => {
+                setLoadingAllocationBranches(false);
+                setErrorText("Failed to load branch resources.");
+            },
+        );
+
+        return () => unsub();
+    }, [allocationConsumerVisible, primaryBranch, selectedRequest, zone?.id]);
+
+    useEffect(() => {
+        if (!allocationConsumerVisible || !zone?.id || !allocationBranchId) {
+            setAllocationResources([]);
+            setLoadingAllocationResources(false);
+            return;
+        }
+
+        let disposed = false;
+        let unsubscribe: (() => void) | null = null;
+        setLoadingAllocationResources(true);
+        void (async () => {
+            await releaseStaleHeldBranchResources({
                 zoneId: zone.id,
-                zoneName: zone.venueBrandName || "Zone",
-                zoneOwnerUid: user.uid,
-                branchId: primaryBranch?.id || undefined,
-                branchName: primaryBranch?.branchDisplayName || null,
-                proposedDate: counterDateTime.date,
-                proposedTime: counterDateTime.time,
-                pricePerPlayer: parsedPrice,
-                currency: selectedRequest.currency || "PKR",
-                location: zone.primaryBranch?.areaLabel || "",
-                message: counterMessage.trim(),
-                expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
+                branchId: allocationBranchId,
+                currentRequestId: selectedRequest?.id || null,
             });
+            if (disposed) return;
+            unsubscribe = subscribeBranchResources(
+                zone.id,
+                allocationBranchId,
+                (rows) => {
+                    setAllocationResources(
+                        rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
+                    );
+                    setLoadingAllocationResources(false);
+                },
+                () => {
+                    setLoadingAllocationResources(false);
+                    setErrorText("Failed to load branch resources.");
+                },
+            );
+        })();
 
-            if (!result.ok) {
-                Alert.alert("Counter-offer failed", result.message);
-                return;
+        return () => {
+            disposed = true;
+            unsubscribe?.();
+        };
+    }, [allocationBranchId, allocationConsumerVisible, selectedRequest?.id, zone?.id]);
+
+    useEffect(() => {
+        if (!allocationConsumerVisible) return;
+        setAllocationSelectedResourceIds([]);
+    }, [allocationBranchId, allocationConsumerVisible, selectedRequest?.id]);
+
+    const allocationResourceOptions = useMemo(
+        () => buildAllocationResourceOptions(selectedRequest, allocationResources),
+        [allocationResources, selectedRequest],
+    );
+
+    const allocationFixedBranch = useMemo(
+        () => getRequestFixedBranch(selectedRequest, allocationBranches, primaryBranch),
+        [allocationBranches, primaryBranch, selectedRequest],
+    );
+
+    const allocationBranchesForSheet = useMemo(
+        () => (allocationFixedBranch ? [allocationFixedBranch] : []),
+        [allocationFixedBranch],
+    );
+
+    const allocationSelectedUnitCount = useMemo(
+        () =>
+            allocationResourceOptions.filter((option) =>
+                option.resourceIds.every((resourceId) => allocationSelectedResourceIds.includes(resourceId)),
+            ).length,
+        [allocationResourceOptions, allocationSelectedResourceIds],
+    );
+
+    const allocationSelectionSummary = useMemo(() => {
+        if (!selectedRequest) return "Select resources";
+        const profile = getAllocationResourceProfile(selectedRequest);
+        if (profile.unit === "pc_room") return `${profile.requiredCount} PC rooms required`;
+        if (profile.assetType === "console") return "1 console required";
+        if (selectedRequest.assetType === "court") return "1 court required";
+        return `${profile.requiredCount} resource${profile.requiredCount === 1 ? "" : "s"} required`;
+    }, [selectedRequest]);
+
+    const allocationValidationMessage = useMemo(
+        () => getAllocationValidationMessage(selectedRequest, allocationSelectedUnitCount),
+        [allocationSelectedUnitCount, selectedRequest],
+    );
+    const allocationCanSubmit = useMemo(() => {
+        if (!selectedRequest || !allocationBranchId || loadingAllocationBranches || loadingAllocationResources) {
+            return false;
+        }
+        return allocationSelectedUnitCount === getRequiredResourceCount(selectedRequest);
+    }, [
+        allocationBranchId,
+        allocationSelectedUnitCount,
+        loadingAllocationBranches,
+        loadingAllocationResources,
+        selectedRequest,
+    ]);
+
+    const toggleAllocationResourceOption = (resourceIds: string[]) => {
+        const optionSelected = resourceIds.every((resourceId) =>
+            allocationSelectedResourceIds.includes(resourceId),
+        );
+        if (optionSelected) {
+            setAllocationSelectedResourceIds((prev) =>
+                prev.filter((resourceId) => !resourceIds.includes(resourceId)),
+            );
+            return;
+        }
+
+        const requiredCount = getRequiredResourceCount(selectedRequest);
+        if (allocationSelectedUnitCount >= requiredCount) {
+            showToast({
+                type: "warning",
+                title: "Selection limit reached",
+                message: `This booking allows ${requiredCount} selection${requiredCount === 1 ? "" : "s"}.`,
+            });
+            return;
+        }
+
+        setAllocationSelectedResourceIds((prev) => [
+            ...prev.filter((resourceId) => !resourceIds.includes(resourceId)),
+            ...resourceIds,
+        ]);
+    };
+
+    const openAllocationSheet = (targetRequest?: ZoneBookingQueueItem) => {
+        const request = targetRequest || selectedRequest;
+        if (!request) return;
+        setSelectedRequestId(request.id);
+        setAllocationSelectedResourceIds([]);
+        setAllocationBranchId(
+            getRequestFixedBranch(request, allocationBranches, primaryBranch)?.id || primaryBranch?.id || null,
+        );
+        setShowAllocationSheet(true);
+    };
+
+    const openCounterModalForRequest = (targetRequest?: ZoneBookingQueueItem) => {
+        const request = targetRequest || selectedRequest;
+        if (request) {
+            const defaultOption = createDefaultScheduleOption();
+            const startMinutes = toClockMinutes(request.preferredTime) ?? toClockMinutes(defaultOption.time) ?? 12 * 60;
+            const start = fromClockMinutes(startMinutes);
+            const durationHours = Number(request.raw?.durationHours || 0);
+            const durationMinutes =
+                Number.isFinite(durationHours) && durationHours > 0
+                    ? Math.round(durationHours * 60)
+                    : Number((request.raw as any)?.durationMinutes || 60) || 60;
+            const explicitEndMinutes = toClockMinutes(
+                (request.raw as any)?.endTime ||
+                (request.raw as any)?.preferredEndTime ||
+                (request.raw as any)?.scheduledEndTime,
+            );
+            setSelectedRequestId(request.id);
+            setCounterOptions([{
+                date: toDateString(request.preferredDate) || defaultOption.date,
+                time: start,
+                endTime: fromClockMinutes(explicitEndMinutes ?? startMinutes + durationMinutes),
+            }]);
+            setAllocationSelectedResourceIds([]);
+            setAllocationBranchId(
+                getRequestFixedBranch(request, allocationBranches, primaryBranch)?.id || primaryBranch?.id || null,
+            );
+        } else {
+            setCounterOptions([createDefaultScheduleOption()]);
+        }
+        setShowCounterModal(true);
+    };
+
+    const handleAllocationSubmit = async () => {
+        if (!selectedRequest || !allocationBranchId) return;
+        const acceptedRequestId = selectedRequest.id;
+        const branch = allocationFixedBranch || allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
+        const result = await handleAccept({
+            targetRequest: selectedRequest,
+            branchId: allocationBranchId,
+            branchName: branch?.branchDisplayName || null,
+            location: branch?.areaLabel || zone?.primaryBranch?.areaLabel || zone?.venueBrandName || null,
+            resourceIds: allocationSelectedResourceIds,
+        });
+        if (result?.ok) {
+            setShowAllocationSheet(false);
+            setAllocationSelectedResourceIds([]);
+            setQueue((current) =>
+                current.filter((item) => String(item.id) !== String(acceptedRequestId)),
+            );
+            setSelectedRequestId((current) =>
+                String(current || "") === String(acceptedRequestId) ? null : current,
+            );
+            setSegment("matchrooms");
+            if (result.matchroomId) {
+                setFocusedMatchroomId(result.matchroomId);
             }
+            void loadQueuePage({ append: false });
+            void loadMatchroomsPage({ append: false });
+            if (result.matchroomId) {
+                router.push(`/matchrooms/${result.matchroomId}` as any);
+            }
+        }
+    };
 
-            Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
-            setShowCounterModal(false);
-            setCounterPrice(""); // Reset on success
-            setCounterMessage("");
-        } catch (error: any) {
-            Logger.error("bookings", "handleCounterOffer crashed", error);
-            Alert.alert("Error", "An unexpected error occurred while sending the offer.");
-        } finally {
-            setProcessingAction(null);
+    const handleCounterOfferSubmit = async () => {
+        if (!selectedRequest || !allocationBranchId) return;
+        const branch = allocationFixedBranch || allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
+        const result = await handleCounterOffer({
+            branchId: allocationBranchId,
+            branchName: branch?.branchDisplayName || null,
+            location: branch?.areaLabel || zone?.primaryBranch?.areaLabel || zone?.venueBrandName || null,
+            resourceIds: allocationSelectedResourceIds,
+        });
+        if (result && !result.ok) {
+            setAllocationSelectedResourceIds([]);
+            void loadQueuePage({ append: false });
+            return;
+        }
+        if (result?.ok) {
+            setAllocationSelectedResourceIds([]);
+            void loadQueuePage({ append: false });
+            void loadMatchroomsPage({ append: false });
         }
     };
 
@@ -580,9 +1458,15 @@ export default function ZoneBookingsModule() {
 
             <SegmentedTabs
                 items={[
-                    { key: "requests", label: "Requests", badge: filteredQueue.length },
-                    { key: "matchrooms", label: "Matchrooms", badge: matchrooms.length },
-                    { key: "walkins", label: "Walk-ins", badge: walkInCount },
+                    { key: "requests", label: "Requests", badge: visibleRequestsQueue.length },
+                    { key: "pending", label: "Pending", badge: pendingOffers.length },
+                    { key: "matchrooms", label: "Matchrooms", badge: matchroomsTotal },
+                    { key: "walkins", label: "Walk-ins", badge: walkInsTotal },
+                    {
+                        key: "history",
+                        label: "History",
+                        badge: historyRows ? (historyRows.length > 99 ? "99+" : historyRows.length) : undefined,
+                    },
                 ]}
                 value={segment}
                 onChange={(value) => setSegment(value)}
@@ -592,324 +1476,193 @@ export default function ZoneBookingsModule() {
 
             {errorText ? (
                 <View style={styles.errorBox}>
-                    <MaterialIcons name="error-outline" size={16} color={COLORS.error} />
+                    <AppIcon name="error-outline" size="sm" color={COLORS.error} />
                     <Text style={styles.errorText}>{errorText}</Text>
                 </View>
             ) : null}
 
             {segment === "requests" ? (
-                <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                    <Pressable
-                        style={styles.filtersToggle}
-                        onPress={() => setShowFilters((prev) => !prev)}
-                    >
-                        <View style={styles.filtersToggleLeft}>
-                            <MaterialIcons name="tune" size={16} color={COLORS.accent} />
-                            <Text style={styles.filtersToggleText}>Filters</Text>
-                        </View>
-                        <MaterialIcons
-                            name={showFilters ? "expand-less" : "expand-more"}
-                            size={18}
-                            color={COLORS.textSecondary}
-                        />
-                    </Pressable>
+                <ZoneBookingsRequestsSection
+                    loadingQueue={loadingQueue}
+                    showFilters={showFilters}
+                    onToggleFilters={() => setShowFilters((prev) => !prev)}
+                    filterGroups={requestFilterGroups}
+                    searchQuery={requestSearchQuery}
+                    activeFilterCount={activeRequestFilterCount}
+                    onSearchQueryChange={setRequestSearchQuery}
+                    onResetFilters={resetRequestFilters}
+                    filteredQueue={visibleRequestsQueue}
+                    loadingMore={loadingQueueMore}
+                    onLoadMore={() => loadQueuePage({ append: true })}
+                    selectedRequestId={selectedRequestId}
+                    processingAction={processingAction}
+                    onSelectRequest={setSelectedRequestId}
+                    onOpenCounterModal={openCounterModalForRequest}
+                    onAccept={openAllocationSheet}
+                    onReject={handleReject}
+                    buildRequestMatchroom={requestToMatchroomCardData}
+                />
+            ) : null}
 
-                    {showFilters ? (
-                        <View style={styles.filtersWrap}>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                {REQUEST_FILTERS.map((filter) => (
-                                    <Pressable
-                                        key={filter}
-                                        onPress={() => setRequestFilter(filter)}
-                                        style={[
-                                            styles.filterChip,
-                                            requestFilter === filter && styles.filterChipActive,
-                                        ]}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.filterChipText,
-                                                requestFilter === filter && styles.filterChipTextActive,
-                                            ]}
-                                        >
-                                            {filter}
-                                        </Text>
-                                    </Pressable>
-                                ))}
-                            </ScrollView>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                {ASSET_FILTERS.map((filter) => (
-                                    <Pressable
-                                        key={filter}
-                                        onPress={() => setAssetFilter(filter)}
-                                        style={[
-                                            styles.filterChip,
-                                            assetFilter === filter && styles.filterChipActive,
-                                        ]}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.filterChipText,
-                                                assetFilter === filter && styles.filterChipTextActive,
-                                            ]}
-                                        >
-                                            {filter}
-                                        </Text>
-                                    </Pressable>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    ) : null}
-
-                    {loadingQueue ? (
-                        <ActivityIndicator size="small" color={COLORS.accent} />
-                    ) : backfillInProgress ? (
-                        <Text style={styles.emptyText}>Syncing matchroom requests...</Text>
-                    ) : filteredQueue.length === 0 ? (
-                        <Text style={styles.emptyText}>No requests found for selected filters.</Text>
-                    ) : (
-                        filteredQueue.map((item) => {
-                            const selected = selectedRequestId === item.id;
-                            const matchroomId = getRequestMatchroomId(item);
-                            return (
-                                <View key={item.id} style={selected ? styles.matchroomFocusedWrap : undefined}>
-                                    <MatchroomCard
-                                        room={requestToMatchroomCardData(item)}
-                                        onAcceptPress={() => {
-                                            setSelectedRequestId(item.id);
-                                            handleAccept(item);
-                                        }}
-                                        onPress={() => {
-                                            setSelectedRequestId(selected ? null : item.id);
-                                        }}
-                                        acceptLabel="Accept"
-                                        containerStyle={selected ? { marginBottom: 0 } : undefined}
-                                    />
-                                    {/* Inline actions inside the room card when selected */}
-                                    {selected && (
-                                        <View style={styles.inlineActionsCard}>
-                                            <View style={styles.actionsRow}>
-                                                <Pressable
-                                                    style={[styles.actionButton, styles.counterButton]}
-                                                    onPress={() => setShowCounterModal(true)}
-                                                    disabled={processingAction !== null}
-                                                >
-                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                                        <MaterialIcons name="edit" size={16} color="#FFF" />
-                                                        <Text style={[styles.actionText, { marginLeft: 6 }]}>Suggest Alternative</Text>
-                                                    </View>
-                                                </Pressable>
-                                            </View>
-                                            <View style={styles.actionsRow}>
-                                                <Pressable
-                                                    style={[styles.actionButton, styles.acceptButton]}
-                                                    onPress={() => handleAccept()}
-                                                    disabled={processingAction !== null}
-                                                >
-                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                                        {processingAction === "accept" ? (
-                                                            <ActivityIndicator size="small" color="#FFF" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialIcons name="check" size={16} color="#FFF" />
-                                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Accept</Text>
-                                                            </>
-                                                        )}
-                                                    </View>
-                                                </Pressable>
-                                                <Pressable
-                                                    style={[styles.actionButton, styles.rejectButton]}
-                                                    onPress={handleReject}
-                                                    disabled={processingAction !== null}
-                                                >
-                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                                        {processingAction === "reject" ? (
-                                                            <ActivityIndicator size="small" color="#FFF" />
-                                                        ) : (
-                                                            <>
-                                                                <MaterialIcons name="close" size={16} color="#FFF" />
-                                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Reject</Text>
-                                                            </>
-                                                        )}
-                                                    </View>
-                                                </Pressable>
-                                            </View>
-                                        </View>
-                                    )}
-                                </View>
-                            );
-                        })
-                    )}
-                </ScrollView>
+            {segment === "pending" ? (
+                <ZoneBookingsRequestsSection
+                    mode="pending"
+                    loadingQueue={zoneOffers === undefined}
+                    showFilters={false}
+                    onToggleFilters={() => undefined}
+                    filterGroups={requestFilterGroups}
+                    searchQuery={requestSearchQuery}
+                    activeFilterCount={activeRequestFilterCount}
+                    onSearchQueryChange={setRequestSearchQuery}
+                    onResetFilters={resetRequestFilters}
+                    filteredQueue={filteredQueue.filter((item) => pendingRequestIds.has(String(item.id)))}
+                    loadingMore={loadingQueueMore}
+                    onLoadMore={() => loadQueuePage({ append: true })}
+                    pendingOffers={pendingOffers}
+                    selectedRequestId={selectedRequestId}
+                    processingAction={processingAction}
+                    onSelectRequest={setSelectedRequestId}
+                    onOpenCounterModal={openCounterModalForRequest}
+                    onAccept={openAllocationSheet}
+                    onReject={handleReject}
+                    buildRequestMatchroom={requestToMatchroomCardData}
+                />
             ) : null}
 
             {segment === "matchrooms" ? (
-                <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                    {loadingMatchrooms ? (
-                        <ActivityIndicator size="small" color={COLORS.accent} />
-                    ) : matchrooms.length === 0 ? (
-                        <Text style={styles.emptyText}>No matchrooms found for this zone.</Text>
-                    ) : (
-                        <>
-                            <View style={styles.resultsCount}>
-                                <Text style={styles.resultsCountText}>
-                                    {matchrooms.length} matchroom{matchrooms.length !== 1 ? "s" : ""} found
-                                </Text>
-                            </View>
-                            {matchrooms.map((item) => (
-                                <View
-                                    key={item.id}
-                                    style={
-                                        focusedMatchroomId === item.id
-                                            ? styles.matchroomFocusedWrap
-                                            : styles.walkinMatchroomItem
-                                    }
-                                >
-                                    <MatchroomCard
-                                        room={toMatchroomCardData(
-                                            item,
-                                            zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
-                                        )}
-                                        containerStyle={focusedMatchroomId === item.id ? { marginBottom: 0 } : undefined}
-                                    />
-                                </View>
-                            ))}
-                        </>
-                    )}
-                </ScrollView>
+                <ZoneBookingsMatchroomsSection
+                    loadingMatchrooms={loadingMatchrooms}
+                    matchrooms={filteredMatchrooms}
+                    showFilters={showFilters}
+                    onToggleFilters={() => setShowFilters((prev) => !prev)}
+                    filterGroups={matchroomFilterGroups}
+                    searchQuery={matchroomSearchQuery}
+                    activeFilterCount={activeMatchroomFilterCount}
+                    onSearchQueryChange={setMatchroomSearchQuery}
+                    onResetFilters={resetMatchroomFilters}
+                    loadingMore={loadingMatchroomsMore}
+                    onLoadMore={() => loadMatchroomsPage({ append: true })}
+                    focusedMatchroomId={focusedMatchroomId}
+                    onAllocateResources={(item) =>
+                        router.push({
+                            pathname: "/zone/modules/resources",
+                            params: {
+                                matchroomId: item.id,
+                                branchId: item.branchId || "",
+                                t: Date.now().toString(),
+                            },
+                        } as any)
+                    }
+                    buildMatchroomCardData={(item) =>
+                        toMatchroomCardData(
+                            item,
+                            zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
+                        )
+                    }
+                />
             ) : null}
 
             {segment === "walkins" ? (
-                <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                    <View style={styles.walkinCard}>
-                        <Text style={styles.walkinTitle}>Create Walk-in Matchroom</Text>
-                        <Text style={styles.walkinSubtitle}>
-                            Use the same Create Matchroom flow as player dashboard, with admin walk-in controls.
-                        </Text>
-                        <Pressable
-                            style={[styles.actionButton, styles.walkinCreateButton]}
-                            onPress={() =>
-                                router.push({
-                                    pathname: "/matchrooms/create",
-                                    params: {
-                                        mode: "zone_walkin_admin",
-                                        zoneId: zone?.id || "",
-                                        zoneName: zone?.venueBrandName || "",
-                                        branchId: primaryBranch?.id || zone?.primaryBranch?.id || "",
-                                        t: Date.now().toString(),
-                                    },
-                                } as any)
-                            }
-                            disabled={processingAction !== null}
-                        >
-                            <Text style={styles.walkinCreateText}>Create Walk-in Matchroom</Text>
-                        </Pressable>
-                    </View>
-
-                    <View style={[styles.counterHeader, { marginTop: SPACING.lg }]}>
-                        <Text style={styles.detailsTitle}>Existing Walk-ins</Text>
-                        <Text style={styles.emptyText}>{walkInRooms.length}</Text>
-                    </View>
-                    {walkInRooms.length === 0 ? (
-                        <Text style={styles.emptyText}>No walk-in matchrooms yet.</Text>
-                    ) : (
-                        walkInRooms.map((item) => (
-                            <View key={`walkin-${item.id}`} style={styles.walkinMatchroomItem}>
-                                <MatchroomCard
-                                    room={toMatchroomCardData(
-                                        item,
-                                        zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
-                                    )}
-                                />
-                            </View>
-                        ))
-                    )}
-                </ScrollView>
+                <ZoneBookingsWalkinsSection
+                    walkInRooms={walkInRooms}
+                    total={walkInsTotal}
+                    loading={loadingWalkIns}
+                    loadingMore={loadingWalkInsMore}
+                    onLoadMore={() => loadWalkInsPage({ append: true })}
+                    processingAction={processingAction}
+                    onCreateWalkIn={() =>
+                        router.push({
+                            pathname: "/matchrooms/create",
+                            params: {
+                                mode: "zone_walkin_admin",
+                                zoneId: zone?.id || "",
+                                zoneName: zone?.venueBrandName || "",
+                                branchId: primaryBranch?.id || zone?.primaryBranch?.id || "",
+                                t: Date.now().toString(),
+                            },
+                        } as any)
+                    }
+                    buildMatchroomCardData={(item) =>
+                        toMatchroomCardData(
+                            item,
+                            zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
+                        )
+                    }
+                />
             ) : null}
 
-            <Modal
-                visible={showCounterModal}
-                animationType="slide"
-                transparent
-                onRequestClose={() => !processingAction && setShowCounterModal(false)}
-            >
-                <TouchableWithoutFeedback onPress={() => !processingAction && setShowCounterModal(false)}>
-                    <View style={styles.modalOverlay}>
-                        <TouchableWithoutFeedback>
-                            <View style={styles.modalContent}>
-                                <View style={styles.modalHeader}>
-                                    <View>
-                                        <Text style={styles.modalTitle}>Suggest Alternative</Text>
-                                        <Text style={styles.modalSubtitle}>Price and note</Text>
-                                    </View>
-                                    <Pressable
-                                        onPress={() => setShowCounterModal(false)}
-                                        disabled={processingAction !== null}
-                                    >
-                                        <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
-                                    </Pressable>
-                                </View>
+            {segment === "history" ? (
+                <ZoneBookingsHistorySection
+                    loading={historyRows === undefined}
+                    loadingMore={loadingHistoryMore}
+                    onLoadMore={loadHistoryMore}
+                    rows={(historyRows || []) as any[]}
+                />
+            ) : null}
 
-                                <ScrollView style={styles.counterForm} showsVerticalScrollIndicator={false}>
-                                    <Text style={styles.formLabel}>Counter Price (PKR)</Text>
-                                    <TextInput
-                                        value={counterPrice}
-                                        onChangeText={setCounterPrice}
-                                        keyboardType="numeric"
-                                        style={styles.input}
-                                        placeholder="1500"
-                                        placeholderTextColor={COLORS.muted}
-                                    />
-
-                                    <View style={{ marginBottom: SPACING.sm }}>
-                                        <Text style={styles.emptyText}>
-                                            Suggested time is auto-set (2 hours from now).
-                                        </Text>
-                                    </View>
-
-                                    <Text style={styles.formLabel}>Offer Expires In (Minutes)</Text>
-                                    <TextInput
-                                        value={counterExpiryMinutes}
-                                        onChangeText={setCounterExpiryMinutes}
-                                        keyboardType="numeric"
-                                        style={styles.input}
-                                        placeholder="10"
-                                        placeholderTextColor={COLORS.muted}
-                                    />
-
-                                    <Text style={styles.formLabel}>Note to Player</Text>
-                                    <TextInput
-                                        value={counterMessage}
-                                        onChangeText={setCounterMessage}
-                                        style={[styles.input, styles.inputMultiline]}
-                                        placeholder="Optional note"
-                                        placeholderTextColor={COLORS.muted}
-                                        multiline
-                                    />
-
-                                    <Pressable
-                                        style={[
-                                            styles.actionButton,
-                                            styles.counterButton,
-                                            { marginTop: 20, height: 54, width: "100%" },
-                                            (processingAction || !counterPrice) && { opacity: 0.6 },
-                                        ]}
-                                        onPress={handleCounterOffer}
-                                        disabled={processingAction !== null || !counterPrice}
-                                    >
-                                        {processingAction === "counter" ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
-                                        ) : (
-                                            <Text style={[styles.actionText, { fontSize: 16 }]}>Send Suggestion</Text>
-                                        )}
-                                    </Pressable>
-                                </ScrollView>
-                            </View>
-                        </TouchableWithoutFeedback>
-                    </View>
-                </TouchableWithoutFeedback>
-            </Modal>
+            <ZoneBookingsCounterOfferSheets
+                showCounterModal={showCounterModal}
+                setShowCounterModal={setShowCounterModal}
+                processingAction={processingAction}
+                counterOptions={counterOptions}
+                setCounterOptions={setCounterOptions}
+                createDefaultScheduleOption={createDefaultScheduleOption}
+                removeCounterOption={removeCounterOption}
+                handleCounterOffer={handleCounterOfferSubmit}
+                showDatePicker={showDatePicker}
+                setShowDatePicker={setShowDatePicker}
+                showTimePicker={showTimePicker}
+                setShowTimePicker={setShowTimePicker}
+                editingOptionIndex={editingOptionIndex}
+                setEditingOptionIndex={setEditingOptionIndex}
+                dateDraft={dateDraft}
+                setDateDraft={setDateDraft}
+                monthCursor={monthCursor}
+                setMonthCursor={setMonthCursor}
+                timeDraft={timeDraft}
+                setTimeDraft={setTimeDraft}
+                updateCounterOption={updateCounterOption}
+                minDate={minDate}
+                firstWeekday={firstWeekday}
+                daysInMonth={daysInMonth}
+                monthYearLabel={monthYearLabel}
+                parseTimeToDraft={parseTimeToDraft}
+                activeTimePicker={activeTimePicker}
+                setActiveTimePicker={setActiveTimePicker}
+                validationMessage={counterValidationMessage}
+                request={selectedRequest}
+                branches={allocationBranchesForSheet}
+                selectedBranchId={allocationBranchId}
+                loadingResources={loadingAllocationBranches || loadingAllocationResources}
+                resources={allocationResourceOptions}
+                selectedResourceIds={allocationSelectedResourceIds}
+                onToggleResource={toggleAllocationResourceOption}
+                selectedCount={allocationSelectedUnitCount}
+                requiredCount={getRequiredResourceCount(selectedRequest)}
+                allocationSummary={allocationSelectionSummary}
+                allocationValidationMessage={allocationValidationMessage}
+                allocationCanSubmit={allocationCanSubmit}
+            />
+            <ZoneBookingsAllocationSheet
+                visible={showAllocationSheet}
+                onClose={() => setShowAllocationSheet(false)}
+                processingAction={processingAction}
+                request={selectedRequest}
+                branches={allocationBranchesForSheet}
+                selectedBranchId={allocationBranchId}
+                onSelectBranch={() => undefined}
+                branchLocked
+                loadingResources={loadingAllocationBranches || loadingAllocationResources}
+                resources={allocationResourceOptions}
+                selectedResourceIds={allocationSelectedResourceIds}
+                onToggleResource={toggleAllocationResourceOption}
+                selectedCount={allocationSelectedUnitCount}
+                requiredCount={getRequiredResourceCount(selectedRequest)}
+                selectionSummary={allocationSelectionSummary}
+                validationMessage={allocationValidationMessage}
+                canSubmit={allocationCanSubmit}
+                onSubmit={handleAllocationSubmit}
+            />
         </Screen>
     );
 }
-

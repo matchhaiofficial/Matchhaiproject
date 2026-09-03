@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, FONTS, RADII, SHADOWS, SPACING } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -7,160 +7,109 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     segmentTabs: {
-        marginBottom: SPACING.md,
+        marginTop: SPACING.md,
     },
     content: {
+        paddingTop: SPACING.lg,
         paddingBottom: SPACING.xxl + 24,
     },
-    errorBox: {
-        borderWidth: 1,
-        borderColor: COLORS.error,
-        backgroundColor: "rgba(239, 83, 80, 0.12)",
-        borderRadius: RADII.sm,
-        padding: SPACING.sm,
+    markAllReadButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+    },
+    markAllReadText: {
+        color: COLORS.accent,
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    notificationCard: {
+        backgroundColor: COLORS.cardDark,
+        borderRadius: RADII.lg,
+        padding: SPACING.md + 2,
         marginBottom: SPACING.md,
-    },
-    errorText: {
-        color: COLORS.error,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    emptyText: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    card: {
         borderWidth: 1,
         borderColor: "rgba(255,255,255,0.08)",
-        backgroundColor: COLORS.cardDark,
-        borderRadius: 20,
-        padding: SPACING.md + 1,
-        marginBottom: SPACING.md,
+        ...SHADOWS.cardSoft,
     },
-    cardTop: {
+    cardHeader: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
-        gap: SPACING.sm,
+        marginBottom: SPACING.sm,
     },
-    cardIconWrap: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+    iconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         alignItems: "center",
         justifyContent: "center",
-        borderWidth: 1,
-        borderColor: "rgba(66, 165, 245, 0.35)",
-        backgroundColor: "rgba(66, 165, 245, 0.15)",
+        marginRight: SPACING.md,
+        backgroundColor: "rgba(66, 165, 245, 0.1)",
     },
-    cardHeaderText: {
+    unreadDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: COLORS.accent,
+        position: "absolute",
+        left: -4,
+        top: "50%",
+        marginTop: -4,
+    },
+    headerInfo: {
         flex: 1,
         minWidth: 0,
     },
-    cardTitle: {
+    typeText: {
         color: COLORS.text,
+        fontSize: 15,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption + 2,
+        fontWeight: "700",
     },
-    cardStatus: {
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xs + 1,
-        textTransform: "uppercase",
-        borderWidth: 1,
-        borderRadius: RADII.pill,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-    },
-    statusPending: {
-        color: "#FBC02D",
-        backgroundColor: "rgba(251, 192, 45, 0.14)",
-        borderColor: "rgba(251, 192, 45, 0.34)",
-    },
-    statusSeen: {
-        color: COLORS.accent,
-        backgroundColor: "rgba(66, 165, 245, 0.15)",
-        borderColor: "rgba(66, 165, 245, 0.35)",
-    },
-    cardType: {
-        color: COLORS.textSecondary,
+    timeText: {
+        color: COLORS.muted,
+        fontSize: 11,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
         marginTop: 2,
     },
-    cardMessage: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-        lineHeight: 18,
-        marginTop: 8,
-    },
-    cardTime: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
-        marginTop: 8,
-    },
-    metaRow: {
-        marginTop: SPACING.sm,
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 8,
-    },
-    metaChip: {
-        maxWidth: "100%",
-        minHeight: 30,
+    statusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
         borderRadius: RADII.pill,
+        backgroundColor: "rgba(255,255,255,0.05)",
         borderWidth: 1,
-        borderColor: "rgba(66, 165, 245, 0.26)",
-        backgroundColor: "rgba(66, 165, 245, 0.1)",
-        paddingHorizontal: 10,
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 5,
+        borderColor: "rgba(255,255,255,0.08)",
     },
-    metaChipText: {
-        color: COLORS.accent,
+    statusText: {
+        color: COLORS.textSecondary,
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        textTransform: "uppercase",
+    },
+    cardBody: {
+        backgroundColor: "rgba(255, 255, 255, 0.035)",
+        padding: SPACING.md,
+        borderRadius: RADII.md + 2,
+        marginBottom: SPACING.sm,
+    },
+    messageText: {
+        color: COLORS.textSecondary,
+        fontSize: 14,
+        lineHeight: 20,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
+    },
+    metaText: {
+        color: COLORS.muted,
+        fontSize: 12,
+        lineHeight: 18,
+        fontFamily: FONTS.body,
+        marginTop: 6,
     },
     actionRow: {
-        marginTop: SPACING.sm,
         flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
+        gap: SPACING.sm,
+        marginTop: SPACING.xs,
     },
-    primaryAction: {
+    actionButton: {
         flex: 1,
-        minHeight: 40,
-        borderRadius: RADII.md,
-        backgroundColor: COLORS.accent,
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 6,
-    },
-    primaryActionText: {
-        color: "#FFFFFF",
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption,
-    },
-    secondaryAction: {
-        minHeight: 40,
-        borderRadius: RADII.md,
-        borderWidth: 1,
-        borderColor: "rgba(66, 165, 245, 0.35)",
-        backgroundColor: "rgba(66, 165, 245, 0.1)",
-        paddingHorizontal: 12,
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 6,
-    },
-    secondaryActionText: {
-        color: COLORS.accent,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xs + 1,
     },
 });

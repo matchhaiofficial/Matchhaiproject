@@ -6,17 +6,17 @@ const { width } = Dimensions.get('window');
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         paddingBottom: SPACING.lg,
@@ -57,7 +57,7 @@ export default StyleSheet.create({
     },
     filtersPanel: {
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     filterSection: {
         marginBottom: 15,
@@ -212,12 +212,12 @@ export default StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderRadius: 8,
-        backgroundColor: COLORS.success + '25',
+        backgroundColor: COLORS.overlayLight,
         borderWidth: 1.5,
-        borderColor: COLORS.success + '80',
+        borderColor: COLORS.cardBorder,
     },
     joinedBtnText: {
-        color: COLORS.success,
+        color: COLORS.text,
         fontSize: 10,
         fontFamily: FONTS.heading,
         fontWeight: '700',
@@ -306,15 +306,15 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
     },
     priceTagContainer: {
-        backgroundColor: COLORS.success + '15',
+        backgroundColor: COLORS.overlayLight,
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: COLORS.success + '30',
+        borderColor: COLORS.cardBorder,
     },
     priceTagText: {
-        color: COLORS.success,
+        color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: 11,
         fontWeight: 'bold',
@@ -433,7 +433,7 @@ export default StyleSheet.create({
     modalSearchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         borderRadius: 12,
         paddingHorizontal: 12,
         height: 48,
@@ -463,3 +463,4 @@ export default StyleSheet.create({
         fontWeight: 'bold',
     }
 });
+

@@ -4,7 +4,7 @@ import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../.
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     screenContent: {
         paddingTop: 0,
@@ -18,7 +18,7 @@ export default StyleSheet.create({
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -35,7 +35,6 @@ export default StyleSheet.create({
         paddingBottom: SPACING.xxl,
     },
 
-    // Banner Section
     banner: {
         height: 180,
         backgroundColor: COLORS.cardDark,
@@ -65,7 +64,6 @@ export default StyleSheet.create({
         maxWidth: '100%',
     },
 
-    // Info Section
     infoCard: {
         backgroundColor: COLORS.cardDark,
         marginVertical: SPACING.sm,
@@ -87,7 +85,6 @@ export default StyleSheet.create({
         flex: 1,
     },
 
-    // Section Styling
     section: {
         marginTop: SPACING.lg,
     },
@@ -99,7 +96,6 @@ export default StyleSheet.create({
         marginBottom: SPACING.md,
     },
 
-    // Game Tags
     tagsRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -119,7 +115,6 @@ export default StyleSheet.create({
         fontWeight: '600',
     },
 
-    // Pricing Row
     priceRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -146,7 +141,6 @@ export default StyleSheet.create({
         textTransform: 'uppercase',
     },
 
-    // Action Button
     actionButton: {
         ...CTA.primaryButton,
         marginTop: SPACING.xl,
@@ -159,7 +153,7 @@ export default StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     errorContainer: {
         flex: 1,
@@ -173,3 +167,4 @@ export default StyleSheet.create({
         marginTop: 12,
     },
 });
+

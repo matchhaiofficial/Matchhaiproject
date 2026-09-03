@@ -12,13 +12,13 @@ import {
 export default StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundDark,
   },
 
   container: {
     flexGrow: 1,
     padding: SPACING.screenPadding,
-    // justifyContent intentionally removed to avoid keyboard/focus jumping
+    justifyContent: 'center',
   },
 
   heading: {
@@ -135,6 +135,67 @@ export default StyleSheet.create({
     color: '#ffb74d',
   },
 
+  modeHelperCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 193, 7, 0.34)',
+    backgroundColor: 'rgba(255, 193, 7, 0.1)',
+    borderRadius: RADII.md,
+    padding: SPACING.md,
+    marginTop: -SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  modeHelperHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+  },
+  modeHelperIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 193, 7, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 193, 7, 0.28)',
+  },
+  modeHelperCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  modeHelperTitle: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: TEXT_SIZES.label,
+    marginBottom: 2,
+  },
+  modeHelperMessage: {
+    color: '#ffcc80',
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+    lineHeight: 18,
+  },
+  modeHelperButton: {
+    marginTop: SPACING.sm,
+    minHeight: 40,
+    borderRadius: RADII.md,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+  },
+  modeHelperButtonPressed: {
+    opacity: 0.88,
+  },
+  modeHelperButtonText: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: TEXT_SIZES.label,
+  },
+
   errorText: {
     marginTop: SPACING.xs,
     color: COLORS.error,
@@ -222,20 +283,19 @@ export default StyleSheet.create({
   },
 
   primaryBtn: {
-    backgroundColor: COLORS.accent,
     borderRadius: RADII.lg,
     paddingVertical: SPACING.lg - 2,
     alignItems: 'center',
-  },
-
-  primaryBtnDisabled: {
-    backgroundColor: COLORS.inputBorder,
   },
 
   primaryBtnText: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
     fontSize: TEXT_SIZES.body,
+  },
+
+  primaryBtnTextDisabled: {
+    color: COLORS.muted,
   },
 
   dividerRow: {
@@ -310,3 +370,4 @@ export default StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+

@@ -1,23 +1,21 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useState, type ReactNode } from "react";
 import {
-    FlatList,
-    Modal,
     Pressable,
     Text,
-    TouchableOpacity,
     View,
     ViewStyle,
 } from "react-native";
+import { AppModalBody, AppModalHeader, AppPickerSheet } from "./AppModalPrimitives";
 import { COLORS } from "../theme";
+import { AppIcon, type AppIconName } from "./AppIcon";
 import styles from "./CustomSingleSelect.styles";
 
 interface CustomSelectProps {
-    label: string;
+    label: ReactNode;
     value: string;
     options: readonly string[];
     onChange: (val: string) => void;
-    icon?: keyof typeof MaterialIcons.glyphMap;
+    icon?: AppIconName;
     placeholder?: string;
     containerStyle?: ViewStyle;
 }
@@ -35,17 +33,17 @@ export const CustomSingleSelect = ({
 
     return (
         <View style={[styles.container, containerStyle]}>
-            {label && <Text style={styles.label}>{label}</Text>}
+            {typeof label === "string" ? <Text style={styles.label}>{label}</Text> : label}
             <Pressable
                 onPress={() => setVisible(true)}
                 style={[styles.inputBox]}
             >
                 {icon && (
-                    <MaterialIcons
+                    <AppIcon
                         name={icon}
-                        size={20}
+                        size="md"
                         style={styles.prefixIcon}
-                        color={value ? COLORS.accent : COLORS.muted}
+                        tone={value ? "accent" : "muted"}
                     />
                 )}
                 <Text
@@ -56,58 +54,48 @@ export const CustomSingleSelect = ({
                 >
                     {value || placeholder || `Select ${label}`}
                 </Text>
-                <MaterialIcons
+                <AppIcon
                     name="arrow-drop-down"
-                    size={24}
-                    color={COLORS.muted}
+                    size="lg"
+                    tone="muted"
                     style={{ marginLeft: "auto" }}
                 />
             </Pressable>
 
-            <Modal
+            <AppPickerSheet
                 visible={visible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setVisible(false)}
+                onClose={() => setVisible(false)}
             >
-                <Pressable
-                    style={styles.modalOverlay}
-                    onPress={() => setVisible(false)}
-                >
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>
-                                Select {label}
+                <AppModalHeader
+                    title={typeof label === "string" ? `Select ${label}` : "Select option"}
+                    onClose={() => setVisible(false)}
+                    compact
+                />
+                <AppModalBody scroll contentContainerStyle={styles.modalBodyContent}>
+                    {options.map((item) => (
+                        <Pressable
+                            key={item}
+                            onPress={() => {
+                                onChange(item);
+                                setVisible(false);
+                            }}
+                            style={styles.optionItem}
+                        >
+                            <Text
+                                style={[
+                                    styles.optionText,
+                                    item === value && styles.optionTextSelected,
+                                ]}
+                            >
+                                {item}
                             </Text>
-                        </View>
-                        <FlatList
-                            data={options}
-                            keyExtractor={(item: string) => item}
-                            renderItem={({ item }: { item: string }) => (
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        onChange(item);
-                                        setVisible(false);
-                                    }}
-                                    style={styles.optionItem}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.optionText,
-                                            item === value && styles.optionTextSelected,
-                                        ]}
-                                    >
-                                        {item}
-                                    </Text>
-                                    {item === value && (
-                                        <MaterialIcons name="check" size={20} color={COLORS.accent} />
-                                    )}
-                                </TouchableOpacity>
+                            {item === value && (
+                                <AppIcon name="check" size="md" tone="accent" />
                             )}
-                        />
-                    </View>
-                </Pressable>
-            </Modal>
+                        </Pressable>
+                    ))}
+                </AppModalBody>
+            </AppPickerSheet>
         </View>
     );
 };

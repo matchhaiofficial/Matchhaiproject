@@ -5,7 +5,7 @@ import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../.
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     scrollContent: {
         flexGrow: 1,
@@ -168,6 +168,7 @@ export default StyleSheet.create({
         paddingVertical: 8,
         marginRight: SPACING.sm,
         marginBottom: SPACING.sm,
+        minWidth: 0,
     },
     optionChipActive: {
         backgroundColor: COLORS.cardDark,
@@ -181,6 +182,40 @@ export default StyleSheet.create({
     optionChipTextActive: {
         color: COLORS.text,
         fontWeight: 'bold',
+    },
+    broadcastAreaChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm - 1,
+        marginRight: SPACING.sm,
+        marginBottom: SPACING.sm,
+    },
+    broadcastAreaChipActive: {
+        backgroundColor: '#1e2a38',
+        borderColor: COLORS.accent,
+    },
+    broadcastAreaChipText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
+    },
+    broadcastAreaChipTextActive: {
+        color: COLORS.text,
+    },
+    inlineChipContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+        gap: 4,
+    },
+    inlineChipText: {
+        flexShrink: 1,
+        minWidth: 0,
     },
 
     // Button
@@ -201,7 +236,7 @@ export default StyleSheet.create({
         elevation: 30,
         borderTopWidth: 1,
         borderTopColor: COLORS.cardBorder,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         paddingTop: SPACING.md,
         paddingHorizontal: 0,
     },
@@ -226,9 +261,9 @@ export default StyleSheet.create({
         marginBottom: SPACING.sm,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
     },
     zoneCardActive: {
         backgroundColor: '#1e2a38',
@@ -238,7 +273,6 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.body,
-        marginBottom: 2,
     },
     zoneDetail: {
         color: COLORS.muted,
@@ -248,7 +282,12 @@ export default StyleSheet.create({
     zonePrice: {
         color: COLORS.accent,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
+        fontSize: TEXT_SIZES.label,
+    },
+    zonePriceMuted: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
     },
 
     // Modal
@@ -296,6 +335,11 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.input,
         paddingVertical: SPACING.sm,
+    },
+    modalPickerBody: {
+        paddingHorizontal: 0,
+        paddingTop: 0,
+        paddingBottom: SPACING.md,
     },
     modalItem: {
         flexDirection: 'row',
@@ -435,6 +479,11 @@ export default StyleSheet.create({
         textAlign: 'center',
         color: COLORS.warning,
     },
+    submitFeedbackText: {
+        marginTop: 10,
+        textAlign: 'center',
+        lineHeight: 16,
+    },
     accentText: {
         color: COLORS.accent,
     },
@@ -506,19 +555,24 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
     },
     actionButton: {
-        backgroundColor: COLORS.accent,
+        minHeight: 54,
         paddingVertical: 12,
         paddingHorizontal: 24,
-        borderRadius: RADII.md,
+        borderRadius: RADII.xl,
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 8,
+        backgroundColor: COLORS.accent,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        ...SHADOWS.accentStrong,
     },
     actionButtonText: {
-        color: COLORS.background,
-        fontSize: TEXT_SIZES.body,
-        fontWeight: 'bold',
-        fontFamily: FONTS.heading,
+        color: '#FFFFFF',
+        fontSize: TEXT_SIZES.body + 1,
+        fontFamily: FONTS.interSemiBold,
+        letterSpacing: 0.2,
     },
     noResultsText: {
         color: COLORS.muted,
@@ -529,14 +583,21 @@ export default StyleSheet.create({
     zoneListScroll: {
         maxHeight: 300,
     },
+    zoneCardTopRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        marginBottom: 4,
+    },
     zoneInfoWrapper: {
         flex: 1,
-        maxWidth: '65%',
+        minWidth: 0,
         marginRight: 12,
     },
     zonePriceWrapper: {
         alignItems: 'flex-end',
-        minWidth: 80,
+        minWidth: 104,
+        flexShrink: 0,
     },
     memberGrid: {
         width: '100%',
@@ -757,5 +818,92 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontWeight: '700',
     },
+    phoneDialogCard: {
+        width: '100%',
+        maxWidth: 420,
+        ...SHADOWS.cardElevated,
+    },
+    phoneDialogContent: {},
+    phoneModalContent: {
+        gap: SPACING.md,
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    phoneAmountLabel: {
+        color: COLORS.text,
+        fontFamily: FONTS.bold,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 22,
+    },
+    phoneSectionLabel: {
+        color: COLORS.text,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: 13,
+        marginTop: 2,
+    },
+    phoneInput: {
+        minHeight: 48,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.input,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 0,
+        textAlignVertical: 'center',
+    },
+    paymentStatusPanel: {
+        alignItems: 'center',
+        gap: SPACING.sm,
+        paddingVertical: SPACING.md,
+    },
+    paymentStatusIcon: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.cardBackground,
+    },
+    paymentStatusTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.body,
+        textAlign: 'center',
+    },
+    paymentStatusText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+        textAlign: 'center',
+    },
+    paymentStatusMeta: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 11,
+        lineHeight: 16,
+        textAlign: 'center',
+    },
+    paymentStatusFooterNote: {
+        flex: 1,
+        paddingVertical: SPACING.sm,
+    },
+    phoneFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    phoneActionsRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+    },
+    phoneActionBtn: {
+        flex: 1,
+    },
 });
+
 

@@ -1,0 +1,29 @@
+name: Deploy Support AI Worker
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - product-ready
+    paths:
+      - "workers/**"
+      - ".github/workflows/deploy-support-worker.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Cloudflare Worker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy support AI worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers
+          command: deploy

@@ -1,46 +1,95 @@
 // src/constants/profileOptions.ts
 
-export const CITY_OPTIONS = [
-  "Karachi",
-  "Lahore",
-  "Islamabad",
-  "Rawalpindi",
-  "Faisalabad",
-  "Multan",
-  "Peshawar",
-  "Quetta",
-  "Hyderabad",
-  "Other",
-] as const;
+export const DEFAULT_CITY = "Karachi";
+
+export const CITY_OPTIONS = [DEFAULT_CITY] as const;
 
 // --- Karachi Areas ---
-// You can keep adding more here later.
 export const KARACHI_AREAS = [
-  "DHA Karachi",
-  "Clifton",
+  "Federal B. Area",
+  "Dastagir",
   "Gulshan-e-Iqbal",
   "Gulistan-e-Johar",
   "Bahadurabad",
-  "PECHS",
-  "Federal B Area",
-  "Nazimabad",
+  "Tariq Road",
+  "P.E.C.H.S Block 2",
+  "Defence Housing Authority Karachi",
+  "Clifton Karachi",
   "North Nazimabad",
   "North Karachi",
-  "Korangi",
-  "Landhi",
-  "Malir",
-  "Scheme 33",
-  "Saddar",
-  "Lyari",
-  "Surjani Town",
-  "Orangi Town",
-  "Shah Faisal Colony",
-  "Garden",
-  "Defence View",
-  "Kharadar",
-  "Shahrah-e-Faisal",
-  "Other (Karachi)",
+  "Nazimabad",
+  "Karsaz",
 ] as const;
+
+export type KarachiArea = (typeof KARACHI_AREAS)[number];
+
+const AREA_ALIAS_MAP: Record<string, KarachiArea> = {
+  "bahadurabad": "Bahadurabad",
+  "clifton": "Clifton Karachi",
+  "clifton karachi": "Clifton Karachi",
+  "dastagir": "Dastagir",
+  "defence": "Defence Housing Authority Karachi",
+  "defence housing authority": "Defence Housing Authority Karachi",
+  "defence housing authority karachi": "Defence Housing Authority Karachi",
+  "defense": "Defence Housing Authority Karachi",
+  "defense housing authority": "Defence Housing Authority Karachi",
+  "dha": "Defence Housing Authority Karachi",
+  "dha karachi": "Defence Housing Authority Karachi",
+  "f b area": "Federal B. Area",
+  "federal b area": "Federal B. Area",
+  "federal b area karachi": "Federal B. Area",
+  "fb area": "Federal B. Area",
+  "gulistan e johar": "Gulistan-e-Johar",
+  "gulistan johar": "Gulistan-e-Johar",
+  "gulistan-e-johar": "Gulistan-e-Johar",
+  "gulshan e iqbal": "Gulshan-e-Iqbal",
+  "gulshan iqbal": "Gulshan-e-Iqbal",
+  "gulshan-e-iqbal": "Gulshan-e-Iqbal",
+  "johar": "Gulistan-e-Johar",
+  "karsaz": "Karsaz",
+  "nazimabad": "Nazimabad",
+  "north karachi": "North Karachi",
+  "north nazimabad": "North Nazimabad",
+  "p e c h s": "P.E.C.H.S Block 2",
+  "p e c h s block 2": "P.E.C.H.S Block 2",
+  "pechs": "P.E.C.H.S Block 2",
+  "pechs block 2": "P.E.C.H.S Block 2",
+  "tariq road": "Tariq Road",
+};
+
+const normalizeAreaKey = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[.\-]/g, " ")
+    .replace(/\s+/g, " ");
+
+export const normalizeKarachiAreaLabel = (value?: string | null): string => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+
+  const exact = KARACHI_AREAS.find((area) => area === trimmed);
+  if (exact) return exact;
+
+  const normalizedKey = normalizeAreaKey(trimmed);
+  return AREA_ALIAS_MAP[normalizedKey] || trimmed;
+};
+
+export const normalizeKarachiAreaList = (
+  values?: readonly (string | null | undefined)[] | null,
+): string[] => {
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  (values || []).forEach((value) => {
+    const normalized = normalizeKarachiAreaLabel(value);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    next.push(normalized);
+  });
+
+  return next;
+};
 
 // --- User Demographics ---
 export const AGE_RANGES = [
@@ -59,6 +108,8 @@ export const PLAY_TIME_OPTIONS = [
 // --- Game options ---
 export const GAME_OPTIONS = [
   { key: "cs2", label: "Counter-Strike 2" },
+  { key: "cs16", label: "CS 1.6" },
+  { key: "valorant", label: "Valorant" },
   { key: "fc26", label: "FC 26" },
   { key: "tekken8", label: "Tekken 8" },
 ] as const;
@@ -71,6 +122,124 @@ export const CS2_ROLES = [
   "In-Game Leader (IGL)",
   "Lurker",
 ] as const;
+
+// --- Valorant tactical roles + agents (centralized; reuse everywhere) ---
+// Internal keys are safe/stable (e.g. KAY/O -> "kayo"); display labels are exact.
+export type ValorantAgent = { key: string; label: string };
+export type ValorantRoleGroup = {
+  key: string;
+  label: string;
+  agents: readonly ValorantAgent[];
+};
+
+export const VALORANT_ROLE_GROUPS: readonly ValorantRoleGroup[] = [
+  {
+    key: "duelist",
+    label: "Duelist",
+    agents: [
+      { key: "jett", label: "Jett" },
+      { key: "reyna", label: "Reyna" },
+      { key: "raze", label: "Raze" },
+      { key: "phoenix", label: "Phoenix" },
+      { key: "neon", label: "Neon" },
+      { key: "iso", label: "Iso" },
+      { key: "yoru", label: "Yoru" },
+      { key: "waylay", label: "Waylay" },
+    ],
+  },
+  {
+    key: "controller",
+    label: "Controller",
+    agents: [
+      { key: "omen", label: "Omen" },
+      { key: "brimstone", label: "Brimstone" },
+      { key: "viper", label: "Viper" },
+      { key: "astra", label: "Astra" },
+      { key: "harbor", label: "Harbor" },
+      { key: "clove", label: "Clove" },
+      { key: "miks", label: "Miks" },
+    ],
+  },
+  {
+    key: "initiator",
+    label: "Initiator",
+    agents: [
+      { key: "sova", label: "Sova" },
+      { key: "breach", label: "Breach" },
+      { key: "skye", label: "Skye" },
+      { key: "kayo", label: "KAY/O" },
+      { key: "fade", label: "Fade" },
+      { key: "gekko", label: "Gekko" },
+      { key: "tejo", label: "Tejo" },
+    ],
+  },
+  {
+    key: "sentinel",
+    label: "Sentinel",
+    agents: [
+      { key: "killjoy", label: "Killjoy" },
+      { key: "cypher", label: "Cypher" },
+      { key: "sage", label: "Sage" },
+      { key: "chamber", label: "Chamber" },
+      { key: "deadlock", label: "Deadlock" },
+      { key: "vyse", label: "Vyse" },
+      { key: "veto", label: "Veto" },
+    ],
+  },
+] as const;
+
+// Tactical role display labels used by profile, discover filters and matchroom create.
+export const VALORANT_ROLES: readonly string[] = VALORANT_ROLE_GROUPS.map(
+  (group) => group.label,
+);
+
+// Legacy generic roles that may exist on older user docs. Map them to the new
+// tactical roles so old data stays usable without being silently dropped.
+const LEGACY_VALORANT_ROLE_MAP: Record<string, string> = {
+  "Entry Fragger": "Duelist",
+  "Secondary Entry / Trader": "Duelist",
+  "Initiator / Support": "Initiator",
+  "Controller / Smoker": "Controller",
+  "Sentinel / Anchor": "Sentinel",
+};
+
+// Returns a valid tactical role label for any stored value (new or legacy),
+// or null when nothing meaningful is set.
+export const normalizeValorantRole = (
+  value?: string | null,
+): string | null => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  if (VALORANT_ROLE_GROUPS.some((group) => group.label === trimmed)) {
+    return trimmed;
+  }
+  const byKey = VALORANT_ROLE_GROUPS.find(
+    (group) => group.key === trimmed.toLowerCase(),
+  );
+  if (byKey) return byKey.label;
+  return LEGACY_VALORANT_ROLE_MAP[trimmed] || null;
+};
+
+// Agents for a given tactical role label (or key). Empty when no/unknown role.
+export const getValorantAgentsForRole = (
+  roleLabel?: string | null,
+): readonly ValorantAgent[] => {
+  const normalized = normalizeValorantRole(roleLabel);
+  if (!normalized) return [];
+  const group = VALORANT_ROLE_GROUPS.find((g) => g.label === normalized);
+  return group ? group.agents : [];
+};
+
+// Pretty "Role · Agent" (or just role) for display surfaces.
+export const formatValorantRoleAgent = (
+  roleLabel?: string | null,
+  agentLabel?: string | null,
+): string | null => {
+  const role = normalizeValorantRole(roleLabel);
+  const agent = String(agentLabel || "").trim();
+  if (!role) return agent || null;
+  return agent ? `${role} · ${agent}` : role;
+};
 
 // --- FC 26 formations (codes only, UI stays clean) ---
 export const FC_FORMATIONS = [
@@ -321,13 +490,15 @@ export const TEKKEN_CHARACTERS = [
   "Lidia Sobieska",
 ] as const;
 
-// --- Offline sports options (futsal, indoor cricket, padel, pickleball) ---
-
-export const SPORT_OPTIONS = [
-  { key: "futsal", label: "Futsal" },
-  { key: "indoor_cricket", label: "Indoor Cricket" },
-  { key: "padel", label: "Padel" },
-  { key: "pickleball", label: "Pickleball" },
+// Physical sports are temporarily disabled across the app.
+export const SPORT_OPTIONS: ReadonlyArray<{
+  key: "futsal" | "indoor_cricket" | "padel" | "pickleball";
+  label: string;
+}> = [
+  // { key: "futsal", label: "Futsal" },
+  // { key: "indoor_cricket", label: "Indoor Cricket" },
+  // { key: "padel", label: "Padel" },
+  // { key: "pickleball", label: "Pickleball" },
 ] as const;
 
 export const FUTSAL_POSITIONS = [

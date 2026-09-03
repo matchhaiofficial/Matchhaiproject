@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         paddingBottom: SPACING.lg,
@@ -31,11 +31,11 @@ export default StyleSheet.create({
         paddingVertical: 8,
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: COLORS.successBright,
-        backgroundColor: "rgba(0, 230, 118, 0.12)",
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
     },
     challengeHubButtonText: {
-        color: COLORS.successBright,
+        color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.caption,
         fontWeight: "700",
@@ -136,6 +136,9 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
         ...SHADOWS.cardElevated,
     },
+    teamCardPressed: {
+        opacity: 0.9,
+    },
     teamTopRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -210,12 +213,12 @@ export default StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 8,
-        backgroundColor: 'rgba(0, 230, 118, 0.15)',
+        backgroundColor: COLORS.overlayLight,
         borderWidth: 1,
-        borderColor: COLORS.successBright,
+        borderColor: COLORS.cardBorder,
     },
     challengeBtnText: {
-        color: COLORS.successBright,
+        color: COLORS.text,
         fontSize: 11,
         fontWeight: '700',
         textTransform: 'uppercase',
@@ -281,11 +284,11 @@ export default StyleSheet.create({
         paddingVertical: 3,
         borderRadius: 6,
         borderWidth: 1,
-        backgroundColor: 'rgba(0, 230, 118, 0.05)',
-        borderColor: 'rgba(0, 230, 118, 0.2)',
+        backgroundColor: COLORS.overlayLight,
+        borderColor: COLORS.cardBorder,
     },
     statsText: {
-        color: COLORS.successBright,
+        color: COLORS.textSecondary,
         fontSize: 10,
         fontFamily: FONTS.body,
         fontWeight: '700',
@@ -308,6 +311,9 @@ export default StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 8,
         zIndex: 10000, // Higher than TabBar (9999)
+    },
+    fabPressed: {
+        opacity: 0.9,
     },
 
     emptyState: {
@@ -336,7 +342,8 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
 });
+
 

@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/th
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
@@ -12,7 +12,7 @@ export default StyleSheet.create({
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -30,10 +30,93 @@ export default StyleSheet.create({
     segmentTabs: {
         marginTop: SPACING.md,
     },
+    tabsFilterRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    tabsInRow: {
+        flex: 1,
+        minWidth: 0,
+    },
+    filterSummaryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: SPACING.sm,
+    },
+    contentWrap: {
+        flex: 1,
+    },
+    filterBar: {
+        minHeight: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    filterSummary: {
+        flex: 1,
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 12,
+    },
+    filterButton: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterButtonPressed: {
+        opacity: 0.88,
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        minWidth: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: COLORS.accent,
+        borderWidth: 2,
+        borderColor: COLORS.backgroundDark,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+        color: '#FFF',
+        fontFamily: FONTS.heading,
+        fontSize: 10,
+        fontWeight: '700',
+    },
 
     // Notification List
     listContent: {
         paddingTop: SPACING.lg,
+    },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    pendingCardSpacer: {
+        marginBottom: 12,
+    },
+
+    markAllReadButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+    },
+    markAllReadText: {
+        color: COLORS.accent,
+        fontSize: 13,
+        fontWeight: '700',
     },
 
     // Notification Card
@@ -45,6 +128,13 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
         ...SHADOWS.cardSoft,
+    },
+    notificationCardUnread: {
+        backgroundColor: 'rgba(66, 165, 245, 0.08)',
+        borderColor: 'rgba(66, 165, 245, 0.38)',
+    },
+    notificationCardNoMargin: {
+        marginBottom: 0,
     },
     cardHeader: {
         flexDirection: 'row',
@@ -59,6 +149,22 @@ export default StyleSheet.create({
         justifyContent: 'center',
         marginRight: SPACING.md,
     },
+    iconContainerInfo: {
+        backgroundColor: 'rgba(66, 165, 245, 0.1)',
+    },
+    iconContainerSuccess: {
+        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    },
+    unreadDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: COLORS.accent,
+        position: "absolute",
+        left: -4,
+        top: "50%",
+        marginTop: -4,
+    },
     headerInfo: {
         flex: 1,
     },
@@ -67,6 +173,9 @@ export default StyleSheet.create({
         fontSize: 14,
         fontFamily: FONTS.bold,
         fontWeight: '600',
+    },
+    typeTextUnread: {
+        color: COLORS.accent,
     },
     timeText: {
         color: COLORS.muted,
@@ -91,6 +200,9 @@ export default StyleSheet.create({
         padding: SPACING.md,
         borderRadius: RADII.md + 2,
         marginBottom: SPACING.sm,
+    },
+    cardBodyUnread: {
+        backgroundColor: 'rgba(66, 165, 245, 0.075)',
     },
     messageWrap: {
         width: '100%',
@@ -157,6 +269,19 @@ export default StyleSheet.create({
         flexDirection: 'row',
         gap: SPACING.sm,
         marginTop: SPACING.xs,
+    },
+    counterOfferOptionRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+        marginTop: 10,
+        marginBottom: 0,
+        alignItems: "center",
+    },
+    counterOfferOptionTextWrap: {
+        flex: 1,
+    },
+    requestMetaMarginTop: {
+        marginTop: 10,
     },
     acceptButton: {
         flex: 1,
@@ -245,6 +370,11 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(239, 83, 80, 0.2)',
     },
+    clearHistoryContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     clearHistoryText: {
         color: COLORS.error,
         marginLeft: SPACING.sm,
@@ -252,4 +382,66 @@ export default StyleSheet.create({
         fontSize: 13,
         fontWeight: '600',
     },
+    filterDrawer: {
+        flex: 1,
+    },
+    filterDrawerContent: {
+        flex: 1,
+    },
+    filterDrawerBody: {
+        paddingTop: SPACING.sm,
+        gap: SPACING.md,
+    },
+    filterDrawerFooter: {
+        backgroundColor: COLORS.cardDark,
+    },
+    filterDrawerFooterRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+    },
+    filterDrawerFooterButton: {
+        flex: 1,
+    },
+    filterSection: {
+        gap: SPACING.xs,
+    },
+    filterSectionLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: 12,
+        textTransform: 'uppercase',
+    },
+    filterChipWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: SPACING.sm,
+    },
+    filterChip: {
+        minHeight: 38,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterChipActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent + '16',
+    },
+    filterChipPressed: {
+        opacity: 0.88,
+    },
+    filterChipText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    filterChipTextActive: {
+        color: COLORS.accent,
+    },
 });
+

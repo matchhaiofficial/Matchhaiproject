@@ -6,6 +6,9 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingBottom: 0,
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -30,14 +33,23 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
     },
+    body: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
     content: {
-        padding: SPACING.screenPadding,
-        alignItems: 'center',
+        alignItems: 'stretch',
+        paddingBottom: SPACING.lg,
     },
     statusDisplay: {
+        width: '100%',
         alignItems: 'center',
         marginBottom: SPACING.xl,
-        marginTop: SPACING.md,
+    },
+    statusPill: {
+        marginTop: SPACING.sm,
     },
     statusIconBg: {
         width: 100,
@@ -81,6 +93,9 @@ export default StyleSheet.create({
         marginBottom: SPACING.lg,
         ...SHADOWS.cardSoft,
     },
+    sectionCardSpacing: {
+        marginBottom: SPACING.lg,
+    },
     cardTitle: {
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
@@ -98,7 +113,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: SPACING.md,
-        height: 60,
+        minHeight: 58,
     },
     stepLineWrapper: {
         alignItems: 'center',
@@ -182,19 +197,48 @@ export default StyleSheet.create({
         marginTop: SPACING.md,
         fontStyle: 'italic',
     },
+    orderRow: {
+        marginTop: SPACING.md,
+        alignItems: 'flex-start',
+        gap: SPACING.md,
+    },
+    orderLabel: {
+        flex: 0,
+    },
+    orderValue: {
+        flex: 1,
+        textAlign: 'right',
+    },
+    settlementRow: {
+        alignItems: 'flex-start',
+        gap: SPACING.lg,
+    },
+    settlementLabel: {
+        flex: 0,
+        minWidth: 56,
+    },
+    settlementValue: {
+        flex: 1,
+        textAlign: 'right',
+        lineHeight: 18,
+    },
 
     // Footer Actions
     footer: {
-        padding: SPACING.screenPadding,
-        paddingTop: 0,
         gap: SPACING.md,
         width: '100%',
+    },
+    bottomActionContent: {
+        gap: SPACING.md,
     },
     footerRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: SPACING.md,
         width: '100%',
+    },
+    secondaryAction: {
+        flex: 1,
     },
     primaryBtn: {
         height: 56,
@@ -227,5 +271,14 @@ export default StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.heading,
-    }
+    },
+    secondaryDangerText: {
+        color: COLORS.error,
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.heading,
+    },
+    notFoundAction: {
+        marginTop: SPACING.lg,
+        minWidth: 220,
+    },
 });

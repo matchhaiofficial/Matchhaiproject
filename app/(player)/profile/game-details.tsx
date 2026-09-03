@@ -1,30 +1,35 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Image,
     Pressable,
     ScrollView,
     Switch,
     Text,
-    TouchableOpacity,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
     FC_FORMATIONS,
     FC_LEAGUES,
-    TEKKEN_CHARACTERS
+    getValorantAgentsForRole,
+    normalizeValorantRole,
+    TEKKEN_CHARACTERS,
+    VALORANT_ROLE_GROUPS
 } from "../../../constants/profileOptions";
+import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
+import { AppImage } from "../../../src/components/AppImage";
+import Screen from "../../../src/components/Screen";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
-import { db } from "../../../src/config/firebaseConfig";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
+import { SKILL_ASSESSMENT_CONFIG } from "../../../src/constants/skillQuestions";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { calculateInitialRating, GameKey, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
+import { calculateInitialRating, GameKey, GameSkillScore, getDisplaySkillScoreForGame, getTierFromRating } from "../../../src/services/skillRatingService";
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -46,8 +51,9 @@ const faceitLevelIcons: Record<number, any> = {
 
 // type GameKey = keyof typeof GAME_RULES;
 
-const TIER_CONFIG: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; color: string }> = {
+const TIER_CONFIG: Record<string, { icon: AppIconName; color: string }> = {
     Beginner: { icon: 'star-border', color: COLORS.muted },
+    Casual: { icon: 'star-half', color: '#8fb3ff' },
     Intermediate: { icon: 'star-half', color: COLORS.success },
     Advanced: { icon: 'star', color: COLORS.accent },
     Pro: { icon: 'stars', color: '#b968c7' },
@@ -67,6 +73,16 @@ const normalizeSkillScores = (scores: Record<string, GameSkillScore>) => {
     return normalized;
 };
 
+const getLinkedPlatformsForGame = (gameId: GameKey, profileData: any | null) => {
+    if (!profileData) return [] as string[];
+
+    const linked: string[] = [];
+    if ((gameId === 'cs2' || gameId === 'fc26' || gameId === 'tekken8') && profileData.steamId) linked.push('Steam');
+    if (gameId === 'cs2' && profileData.faceitId) linked.push('FACEIT');
+    if ((gameId === 'fc26' || gameId === 'tekken8') && profileData.psnAccountId) linked.push('PSN');
+    return linked;
+};
+
 export default function GameDetails() {
     const { user } = useAuth();
     const { showToast } = useToast();
@@ -76,6 +92,7 @@ export default function GameDetails() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [refreshingStats, setRefreshingStats] = useState(false);
 
     // Game Active State
     const [active, setActive] = useState(false);
@@ -91,10 +108,13 @@ export default function GameDetails() {
     const [tekkenSkillScore, setTekkenSkillScore] = useState<number | null>(null);
     const [tekkenBracket, setTekkenBracket] = useState<string | null>(null);
     const [skillScores, setSkillScores] = useState<Record<string, GameSkillScore>>({});
+    const [profileData, setProfileData] = useState<any | null>(null);
+    const autoRefreshKeyRef = useRef<string | null>(null);
 
     // -- Game Specific State --
     // We use a generic approach where possible but keep specific vars for complexity
     const [role, setRole] = useState<string | null>(null); // Shared for CS2, Indoor Cricket, etc.
+    const [valorantAgent, setValorantAgent] = useState<string | null>(null); // Valorant agent under selected tactical role
     const [multiRoles, setMultiRoles] = useState<string[]>([]); // For Tekken Favorites, Futsal Positions
 
     // FC25 (FC 26) Specifics
@@ -109,99 +129,135 @@ export default function GameDetails() {
     const gameRule: GameRule = GAME_RULES[gameId];
     const gameName = gameRule?.label || 'Game Details';
 
-    useEffect(() => {
-        const fetchProfile = async () => {
-            if (!user?.uid || !gameId) return;
-            try {
-                const docRef = doc(db, "users", user.uid);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
+    const applyProfileData = useCallback((data: any) => {
+        setProfileData(data);
+        setFaceitLevel(data.faceitSkillLevel || null);
+        setFaceitElo(data.faceitElo || null);
+        setSteamStats(data.steamStats || null);
+        setSteamCs2Hours(data.steamCs2Hours || null);
+        setSteamTekken8Hours(data.steamTekken8Hours || null);
+        setSteamFc26Hours(data.steamFc26Hours || null);
+        setPsnStats(data.psnStats || null);
+        setTekkenSkillScore(data.tekkenSkillScore || null);
+        setTekkenBracket(data.tekkenSkillBracket || null);
+        setSkillScores(normalizeSkillScores(data.skillScores || {}));
 
-                    // Common Stats
-                    setFaceitLevel(data.faceitSkillLevel || null);
-                    setFaceitElo(data.faceitElo || null);
-                    setSteamStats(data.steamStats || null);
-                    setSteamCs2Hours(data.steamCs2Hours || null);
-                    setSteamTekken8Hours(data.steamTekken8Hours || null);
-                    setSteamFc26Hours(data.steamFc26Hours || null);
-                    setPsnStats(data.psnStats || null);
-                    setTekkenSkillScore(data.tekkenSkillScore || null);
-                    setTekkenBracket(data.tekkenSkillBracket || null);
-                    setSkillScores(normalizeSkillScores(data.skillScores || {}));
-
-                    // Initialize Game State
-                    switch (gameId) {
-                        case 'cs2':
-                            setActive(!!data.playsCs2);
-                            setRole(data.cs2Role || null);
-                            break;
-                        case 'fc26':
-                            setActive(!!data.playsFc);
-                            setFcTeam(data.fcTeam || "");
-                            setFcFormation(data.fcFormation || null);
-                            if (data.selectedFcLeagueId) {
-                                setSelectedFcLeagueId(data.selectedFcLeagueId);
-                            } else if (data.fcTeam) {
-                                const league = FC_LEAGUES.find(l => (l.teams as readonly string[]).includes(data.fcTeam));
-                                if (league) setSelectedFcLeagueId(league.id);
-                            }
-                            break;
-                        case 'tekken8':
-                            setActive(!!data.playsTekken);
-                            setMultiRoles(data.tekkenFavorites || []);
-                            break;
-                        case 'futsal':
-                            setActive(!!data.playsFutsal);
-                            setMultiRoles(data.futsalPositions || []);
-                            break;
-                        case 'indoor_cricket':
-                            setActive(!!data.playsIndoorCricket);
-                            setRole(data.indoorCricketRole || null);
-                            break;
-                        case 'padel':
-                            setActive(!!data.playsPadel);
-                            setRole(data.padelRole || null);
-                            break;
-                        case 'pickleball':
-                            setActive(!!data.playsPickleball);
-                            setRole(data.pickleballRole || null);
-                            break;
-                    }
+        switch (gameId) {
+            case 'cs2':
+                setActive(!!data.playsCs2);
+                setRole(data.cs2Role || null);
+                break;
+            case 'cs16':
+                setActive(!!data.playsCs16);
+                setRole(data.cs16Role || null);
+                break;
+            case 'valorant':
+                setActive(!!data.playsValorant);
+                setRole(normalizeValorantRole(data.valorantRole));
+                setValorantAgent(data.valorantAgent || null);
+                break;
+            case 'fc26': {
+                setActive(!!data.playsFc);
+                setFcTeam(data.fcTeam || "");
+                setFcFormation(data.fcFormation || null);
+                if (data.selectedFcLeagueId) {
+                    setSelectedFcLeagueId(data.selectedFcLeagueId);
+                } else if (data.fcTeam) {
+                    const league = FC_LEAGUES.find(l => (l.teams as readonly string[]).includes(data.fcTeam));
+                    if (league) setSelectedFcLeagueId(league.id);
                 }
+                break;
+            }
+            case 'tekken8':
+                setActive(!!data.playsTekken);
+                setMultiRoles(data.tekkenFavorites || []);
+                break;
+            case 'futsal':
+                setActive(!!data.playsFutsal);
+                setMultiRoles(data.futsalPositions || []);
+                break;
+            case 'indoor_cricket':
+                setActive(!!data.playsIndoorCricket);
+                setRole(data.indoorCricketRole || null);
+                break;
+            case 'padel':
+                setActive(!!data.playsPadel);
+                setRole(data.padelRole || null);
+                break;
+            case 'pickleball':
+                setActive(!!data.playsPickleball);
+                setRole(data.pickleballRole || null);
+                break;
+        }
+    }, [gameId]);
 
-                // Background Refresh
-                refreshUserStats(user.uid).then((res) => {
-                    if (res.ok && res.data) {
-                        // Shallow update for UI reactivity if needed
-                        // Real implementation usually relies on listeners or full reload
-                    }
-                });
-
+    const fetchProfile = useCallback(async () => {
+            if (!user?._id || !gameId) return;
+            try {
+                const data = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                if (data) {
+                    applyProfileData(data);
+                }
             } catch (e) {
                 console.error("Failed to load game details", e);
                 showToast({ type: "error", title: "Error", message: "Failed to load game details" });
             } finally {
                 setLoading(false);
             }
-        };
-        fetchProfile();
-    }, [user?.uid, gameId]);
+    }, [applyProfileData, gameId, showToast, user?._id]);
+
+    useEffect(() => {
+        void fetchProfile();
+    }, [fetchProfile]);
 
     const [showAssessment, setShowAssessment] = useState(false);
 
+    const getExternalCalibration = () => {
+        if (!profileData || !gameId) return null;
+        const calibration = calculateInitialRating(gameId as GameKey, profileData);
+        return calibration.source === "questionnaire" ? null : calibration;
+    };
+
+    const linkedPlatforms = getLinkedPlatformsForGame(gameId, profileData);
+    const currentSkillScore = getDisplaySkillScoreForGame(skillScores, gameId);
+    const currentTierConfig = currentSkillScore ? (TIER_CONFIG[currentSkillScore.tier] || DEFAULT_TIER) : DEFAULT_TIER;
+    const hasSteamOrFaceit = Boolean(
+        profileData?.steamId ||
+        profileData?.steamProfileUrl ||
+        profileData?.faceitId ||
+        profileData?.faceitProfileUrl ||
+        profileData?.faceitNickname,
+    );
+    const hasPsn = Boolean(profileData?.psnStats?.psnOnlineId || profileData?.psnOnlineId);
+    const canRefreshExternalStats =
+        (gameId === "cs2" && hasSteamOrFaceit) ||
+        ((gameId === "tekken8" || gameId === "fc26") && (hasPsn || hasSteamOrFaceit));
+    const shouldShowVerificationHint =
+        Boolean(gameRule?.requiresOneOf?.length) &&
+        active &&
+        linkedPlatforms.length === 0;
+
     const persistChanges = async () => {
-        if (!user?.uid || !gameId) return;
+        if (!user?._id || !gameId) return;
 
         setSaving(true);
         try {
-            const updates: any = { updatedAt: new Date() };
+            const updates: any = {};
 
-            // Mapping generic state to Firestore fields
+            // Mapping generic state to fields
             switch (gameId) {
                 case 'cs2':
                     updates.playsCs2 = active;
                     updates.cs2Role = active ? role : null;
+                    break;
+                case 'cs16':
+                    updates.playsCs16 = active;
+                    updates.cs16Role = active ? role : null;
+                    break;
+                case 'valorant':
+                    updates.playsValorant = active;
+                    updates.valorantRole = active ? role : null;
+                    updates.valorantAgent = active ? valorantAgent : null;
                     break;
                 case 'fc26':
                     updates.playsFc = active;
@@ -234,48 +290,37 @@ export default function GameDetails() {
             // Skill Score Calibration
             if (active) {
                 const currentScore = skillScores[gameId];
+                const externalCalibration = getExternalCalibration();
                 // Only calibrate if no score exists OR no match history
                 if (!currentScore || (!currentScore.matchesPlayed && !currentScore.lastMatchDate)) {
+                    if (externalCalibration) {
+                        const rating = clampRating(externalCalibration.rating);
+                        const tier = getTierFromRating(rating);
 
-                    const isPhysical = !gameRule.skillSource;
-
-                    if (!isPhysical) {
-                        // Digital Game Auto-Calibration
-                        const tempProfile: any = {
-                            ...user,
-                            faceitSkillLevel: faceitLevel,
-                            psnStats: psnStats,
-                            steamCs2Hours: steamCs2Hours,
-                            steamFc26Hours: steamFc26Hours,
-                            // Add other necessary fields for calculation
+                        const newScore: GameSkillScore = {
+                            rating,
+                            tier,
+                            matchesPlayed: 0,
+                            wins: 0,
+                            losses: 0,
+                            initialSource: externalCalibration.source,
+                            initialRating: rating,
+                            lastMatchDate: null,
+                            lastUpdated: Date.now()
                         };
 
-                        const initial = calculateInitialRating(gameId as GameKey, tempProfile);
-                        if (initial && initial.source !== 'questionnaire') {
-                            // Valid external source found. Construct FULL Object.
-                            const rating = clampRating(initial.rating);
-                            const tier = getTierFromRating(rating);
-
-                            const newScore: GameSkillScore = {
-                                rating,
-                                tier,
-                                matchesPlayed: 0,
-                                wins: 0,
-                                losses: 0,
-                                initialSource: initial.source,
-                                initialRating: rating,
-                                lastMatchDate: null,
-                                lastUpdated: serverTimestamp()
-                            };
-
-                            updates[`skillScores.${gameId}`] = newScore;
-                        }
+                        const userData = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                        const existingScores = (userData as any)?.skillScores || {};
+                        updates.skillScores = { ...existingScores, [gameId]: newScore };
+                        setSkillScores((prev) => ({ ...prev, [gameId]: newScore }));
                     }
                 }
             }
 
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, updates);
+            await convex.mutation(api.users.updateGamePreferences, {
+                userId: user._id as Id<"users">,
+                updates,
+            });
 
             showToast({ type: "success", title: "Saved", message: `${gameName} preferences updated` });
             router.back();
@@ -294,45 +339,117 @@ export default function GameDetails() {
         }
 
         const currentScore = skillScores[gameId];
-        // Check if we need questionnaire: Physical game AND no existing score
-        const needsAssessment = !gameRule.skillSource && !currentScore;
+        const externalCalibration = getExternalCalibration();
+        const needsAssessment = !currentScore && !externalCalibration;
 
         if (needsAssessment) {
-            setShowAssessment(true);
+            if (SKILL_ASSESSMENT_CONFIG[gameId]) {
+                setShowAssessment(true);
+                return;
+            }
+
+            showToast({
+                type: "warning",
+                title: "Skill check unavailable",
+                message: "Saved your game preferences without a skill score.",
+            });
+            persistChanges();
         } else {
             persistChanges();
         }
     };
 
-    const handleAssessmentSuccess = (rating: number) => {
+    const refreshAndApplyStats = useCallback(async (
+        options: { force?: boolean; showFeedback?: boolean } = {},
+    ) => {
+        if (!user?._id || refreshingStats) return;
+
+        setRefreshingStats(true);
+        try {
+            const result = await refreshUserStats(user._id, { force: options.force });
+            if (!result.ok) {
+                if (options.showFeedback) {
+                    showToast({
+                        type: "warning",
+                        title: "Refresh unavailable",
+                        message: result.message,
+                    });
+                }
+                return;
+            }
+
+            const latest = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+            if (latest) applyProfileData(latest);
+
+            if (options.showFeedback) {
+                showToast({
+                    type: "success",
+                    title: "Stats refreshed",
+                    message: "Your linked Steam, FACEIT and PSN stats are up to date.",
+                });
+            }
+        } catch (error: any) {
+            Logger.error("GameDetails", "Stats refresh failed", error);
+            if (options.showFeedback) {
+                showToast({
+                    type: "error",
+                    title: "Stats refresh failed",
+                    message: error?.message || "Could not refresh linked gaming stats.",
+                });
+            }
+        } finally {
+            setRefreshingStats(false);
+        }
+    }, [applyProfileData, refreshingStats, showToast, user?._id]);
+
+    useEffect(() => {
+        if (!user?._id || !gameId || !active || !canRefreshExternalStats || refreshingStats) return;
+        const autoRefreshKey = `${String(user._id)}:${gameId}`;
+        if (autoRefreshKeyRef.current === autoRefreshKey) return;
+        autoRefreshKeyRef.current = autoRefreshKey;
+        void refreshAndApplyStats({ force: false, showFeedback: false });
+    }, [active, canRefreshExternalStats, gameId, refreshAndApplyStats, refreshingStats, user?._id]);
+
+    const handleRefreshStats = () => {
+        void refreshAndApplyStats({ force: true, showFeedback: true });
+    };
+
+    const handleAssessmentSuccess = (rating: number, tier: string) => {
         // Create full object for optimistic and persistent update
         const normalizedRating = clampRating(rating);
         const newScore: GameSkillScore = {
             rating: normalizedRating,
-            tier: getTierFromRating(normalizedRating),
+            tier: tier as any,
             matchesPlayed: 0,
             wins: 0,
             losses: 0,
             initialSource: 'questionnaire',
             initialRating: normalizedRating,
             lastMatchDate: null,
-            lastUpdated: new Date()
+            lastUpdated: Date.now()
         };
 
         setSkillScores(prev => ({ ...prev, [gameId]: newScore })); // Optimistic UI
 
-        // We override persistChanges here slightly to ensure this score is included
-        // Actually persistChanges logic for physical games relies on this being done?
-        // No, persistChanges doesn't read from state for physical games usually. 
-        // We should just direct update Firestore or pass it to persistChanges.
-        // Let's call persistChanges but inject the score update manually since state might lag.
-
         const asyncUpdate = async () => {
-            const userRef = doc(db, "users", user!.uid);
-            await updateDoc(userRef, {
-                [`skillScores.${gameId}`]: newScore
-            });
-            persistChanges(); // Save other pref changes
+            try {
+                const userData = await convex.query(api.users.getById, { userId: user!._id as Id<"users"> });
+                const existingScores = (userData as any)?.skillScores || {};
+                await convex.mutation(api.users.updateGamePreferences, {
+                    userId: user!._id as Id<"users">,
+                    updates: {
+                        skillScores: { ...existingScores, [gameId]: newScore },
+                    },
+                });
+                persistChanges();
+            } catch (error) {
+                Logger.error("GameDetails", "Assessment save failed", error);
+                showToast({
+                    type: "error",
+                    title: "Save failed",
+                    message: "Could not save your skill check. Please try again.",
+                });
+            }
         };
         asyncUpdate();
     };
@@ -358,6 +475,7 @@ export default function GameDetails() {
         if (gameId === 'fc26') return renderFcInputs();
         if (gameId === 'tekken8') return renderTekkenInputs(); // Tekken multiselect
         if (gameId === 'futsal') return renderFutsalInputs(); // Futsal multiselect
+        if (gameId === 'valorant') return renderValorantInputs(); // Tactical role + agent
 
         // Generic Role Renderer
         if (gameRule.roles) {
@@ -440,6 +558,46 @@ export default function GameDetails() {
         </View>
     );
 
+    // Valorant Specific (tactical role -> agent)
+    const renderValorantInputs = () => {
+        const agents = getValorantAgentsForRole(role);
+        return (
+            <>
+                <View style={styles.fieldGroup}>
+                    <Text style={styles.label}>Role</Text>
+                    <View style={styles.chipRow}>
+                        {VALORANT_ROLE_GROUPS.map((group) =>
+                            renderChip(group.label, role === group.label, () => {
+                                setRole(group.label);
+                                // Clear agent if it no longer belongs to the new role
+                                setValorantAgent((prev) =>
+                                    prev && getValorantAgentsForRole(group.label).some((a) => a.label === prev)
+                                        ? prev
+                                        : null,
+                                );
+                            }),
+                        )}
+                    </View>
+                </View>
+
+                {role && agents.length > 0 && (
+                    <View style={styles.fieldGroup}>
+                        <Text style={styles.label}>Agent</Text>
+                        <View style={styles.chipRow}>
+                            {agents.map((agent) =>
+                                renderChip(agent.label, valorantAgent === agent.label, () =>
+                                    setValorantAgent((prev) =>
+                                        prev === agent.label ? null : agent.label,
+                                    ),
+                                ),
+                            )}
+                        </View>
+                    </View>
+                )}
+            </>
+        );
+    };
+
     // Futsal Specific (Multi-select)
     const renderFutsalInputs = () => (
         <View style={styles.fieldGroup}>
@@ -458,22 +616,22 @@ export default function GameDetails() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>{gameName}</Text>
-                <Pressable
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader
+                title={gameName}
+                onBack={() => router.back()}
+                inlineTitle
+                rightAction={
+                    <Pressable
                     style={({ pressed }) => [
                         styles.saveButton,
                         saving && styles.saveButtonDisabled,
@@ -490,9 +648,10 @@ export default function GameDetails() {
                 >
                     <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
                 </Pressable>
-            </View>
+                }
+            />
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]} showsVerticalScrollIndicator={false}>
                 {/* Active Toggle */}
                 <View style={styles.toggleRow}>
                     <Text style={styles.toggleLabel}>Play this Game</Text>
@@ -507,36 +666,36 @@ export default function GameDetails() {
                 {active && (
                     <>
                         {/* Skill Card */}
-                        {skillScores[gameId] && (
+                        {currentSkillScore && (
                             <View style={styles.statsCard}>
                                 <View style={styles.statsHeader}>
                                     <Text style={styles.statsLabel}>Official Skill Rating</Text>
-                                    <MaterialIcons name="verified" size={16} color={COLORS.accent} />
+                                    <AppIcon name="verified" size={16} color={COLORS.accent} />
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{
                                         width: 50, height: 50, borderRadius: 25,
-                                        backgroundColor: (TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color + '20',
+                                        backgroundColor: currentTierConfig.color + '20',
                                         alignItems: 'center', justifyContent: 'center', marginRight: 16
                                     }}>
-                                        <MaterialIcons
-                                            name={(TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).icon}
+                                        <AppIcon
+                                            name={currentTierConfig.icon}
                                             size={28}
-                                            color={(TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color}
+                                            color={currentTierConfig.color}
                                         />
                                     </View>
                                     <View>
                                         <Text style={{ fontSize: 32, fontWeight: 'bold', color: COLORS.text, lineHeight: 38 }}>
-                                            {clampRating(skillScores[gameId].rating)}
+                                            {clampRating(currentSkillScore.rating)}
                                         </Text>
                                         <Text style={{
                                             fontSize: 14,
-                                            color: (TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color,
+                                            color: currentTierConfig.color,
                                             fontWeight: '700',
                                             textTransform: 'uppercase',
                                             letterSpacing: 1
                                         }}>
-                                            {skillScores[gameId].tier}
+                                            {currentSkillScore.tier}
                                         </Text>
                                     </View>
                                 </View>
@@ -564,7 +723,22 @@ export default function GameDetails() {
                             psnStats={psnStats}
                             tekkenSkillScore={tekkenSkillScore}
                             tekkenBracket={tekkenBracket}
+                            canRefreshExternalStats={canRefreshExternalStats}
+                            refreshingStats={refreshingStats}
+                            onRefreshStats={handleRefreshStats}
                         />
+
+                        {shouldShowVerificationHint && (
+                            <View style={styles.statsCard}>
+                                <View style={styles.statsHeader}>
+                                    <Text style={styles.statsLabel}>Verification Hint</Text>
+                                    <AppIcon name="info-outline" size={16} color={COLORS.accent} />
+                                </View>
+                                <Text style={styles.helpText}>
+                                    Link {gameRule.requiresOneOf?.map((platform) => platform.toUpperCase()).join(" or ")} in Profile for automatic calibration, or save this game now and use the in-app skill questions.
+                                </Text>
+                            </View>
+                        )}
 
                         {/* Inputs */}
                         {renderInputs()}
@@ -576,27 +750,61 @@ export default function GameDetails() {
                 visible={showAssessment}
                 onClose={() => setShowAssessment(false)}
                 gameKey={gameId}
-                userId={user?.uid || ''}
+                userId={user?._id || ''}
                 onSuccess={handleAssessmentSuccess}
             />
 
-        </SafeAreaView>
+        </Screen>
     );
 }
 
 // Sub-component for External Stats to keep main component clean
 const RenderExternalStats = (props: any) => {
-    const { gameId, faceitLevel, steamStats, steamCs2Hours, psnStats, tekkenSkillScore, steamTekken8Hours, steamFc26Hours } = props;
+    const {
+        gameId,
+        faceitLevel,
+        steamStats,
+        steamCs2Hours,
+        psnStats,
+        tekkenSkillScore,
+        steamTekken8Hours,
+        steamFc26Hours,
+        canRefreshExternalStats,
+        refreshingStats,
+        onRefreshStats,
+    } = props;
+
+    const refreshButton = canRefreshExternalStats ? (
+        <Pressable
+            onPress={onRefreshStats}
+            disabled={refreshingStats}
+            style={[styles.refreshStatsButton, refreshingStats && styles.refreshStatsButtonDisabled]}
+        >
+            {refreshingStats ? (
+                <ActivityIndicator size="small" color={COLORS.accent} />
+            ) : (
+                <AppIcon name="refresh" size={16} color={COLORS.accent} />
+            )}
+            <Text style={styles.refreshStatsText}>
+                {refreshingStats ? "Refreshing..." : "Refresh"}
+            </Text>
+        </Pressable>
+    ) : null;
 
     if (gameId === 'cs2' && faceitLevel) {
         return (
             <View style={styles.statsCard}>
                 <View style={styles.statsHeader}>
                     <Text style={styles.statsLabel}>Skill Stats</Text>
+                    {refreshButton}
                 </View>
                 <View style={styles.statsRow}>
                     <View style={styles.statItem}>
-                        <Image source={faceitLevelIcons[faceitLevel]} style={styles.faceitLevelIcon} resizeMode="contain" />
+                        <AppImage
+                            source={faceitLevelIcons[faceitLevel]}
+                            containerStyle={styles.faceitLevelIcon}
+                            contentFit="contain"
+                        />
                         <Text style={styles.statCaption}>FACEIT Level</Text>
                     </View>
                     {props.faceitElo && (
@@ -616,9 +824,26 @@ const RenderExternalStats = (props: any) => {
     if (gameId === 'cs2' && !faceitLevel && steamCs2Hours) {
         return (
             <View style={styles.statsCard}>
-                <Text style={[styles.statsLabel, { marginBottom: 8 }]}>Steam Stats</Text>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Steam Stats</Text>
+                    {refreshButton}
+                </View>
                 <Text style={styles.statValue}>{steamCs2Hours} hrs</Text>
                 <Text style={styles.statCaption}>Playtime</Text>
+            </View>
+        );
+    }
+
+    if (gameId === 'cs2' && canRefreshExternalStats) {
+        return (
+            <View style={styles.statsCard}>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Linked Stats</Text>
+                    {refreshButton}
+                </View>
+                <Text style={styles.helpText}>
+                    Refresh Steam or FACEIT to update profile display stats.
+                </Text>
             </View>
         );
     }
@@ -626,7 +851,10 @@ const RenderExternalStats = (props: any) => {
     if (gameId === 'tekken8' && (psnStats?.tekken8 || steamTekken8Hours)) {
         return (
             <View style={styles.statsCard}>
-                <Text style={[styles.statsLabel, { marginBottom: 8 }]}>Progress</Text>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Progress</Text>
+                    {refreshButton}
+                </View>
                 <View style={styles.statsRow}>
                     {psnStats?.tekken8?.progress !== undefined && (
                         <View style={styles.statItem}>
@@ -645,10 +873,27 @@ const RenderExternalStats = (props: any) => {
         );
     }
 
+    if (gameId === 'tekken8' && canRefreshExternalStats) {
+        return (
+            <View style={styles.statsCard}>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Linked Stats</Text>
+                    {refreshButton}
+                </View>
+                <Text style={styles.helpText}>
+                    Refresh PSN or Steam to update profile display stats.
+                </Text>
+            </View>
+        );
+    }
+
     if (gameId === 'fc26' && (psnStats?.fc || steamFc26Hours)) {
         return (
             <View style={styles.statsCard}>
-                <Text style={[styles.statsLabel, { marginBottom: 8 }]}>Progress</Text>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Progress</Text>
+                    {refreshButton}
+                </View>
                 <View style={styles.statsRow}>
                     {psnStats?.fc?.progress !== undefined && (
                         <View style={styles.statItem}>
@@ -663,6 +908,20 @@ const RenderExternalStats = (props: any) => {
                         </View>
                     )}
                 </View>
+            </View>
+        );
+    }
+
+    if (gameId === 'fc26' && canRefreshExternalStats) {
+        return (
+            <View style={styles.statsCard}>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Linked Stats</Text>
+                    {refreshButton}
+                </View>
+                <Text style={styles.helpText}>
+                    Refresh PSN or Steam to update profile display stats.
+                </Text>
             </View>
         );
     }

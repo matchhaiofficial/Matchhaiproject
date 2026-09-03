@@ -1,17 +1,19 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     RefreshControl,
     ScrollView,
     Text,
-    TouchableOpacity,
+    Pressable,
     View,
 } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
+import { AppIcon } from "../../src/components/AppIcon";
+import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
+import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useAuth } from "../../src/context/AuthContext";
 import {
     getChallengesForCaptain,
@@ -19,6 +21,7 @@ import {
     type TeamMatchChallenge,
 } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
+import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import styles from "./challenges.styles";
 
 const toMillis = (value: any) => {
@@ -30,21 +33,43 @@ const toMillis = (value: any) => {
     return 0;
 };
 
+type ChallengeTab = "pending" | "history";
+
+const isPendingChallenge = (item: TeamMatchChallenge) => {
+    const status = String(item.status || "pending");
+    return status === "pending" || status === "venue_proposed";
+};
+
+const getEmptyCopy = (tab: ChallengeTab) => {
+    if (tab === "pending") {
+        return {
+            title: "No pending challenges",
+            text: "Requested challenges and captain responses waiting for action will show here.",
+        };
+    }
+    return {
+        title: "No challenge history",
+        text: "Confirmed, completed, rejected, failed, or expired challenges will show here.",
+    };
+};
+
 export default function TeamChallengesScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [rows, setRows] = useState<TeamMatchChallenge[]>([]);
+    const [activeTab, setActiveTab] = useState<ChallengeTab>("pending");
+    const [now, setNow] = useState(() => Date.now());
 
     const fetchRows = useCallback(async () => {
-        if (!user?.uid) {
+        if (!user?._id) {
             setRows([]);
             setLoading(false);
             return;
         }
-        await repairTeamChallengesForCaptain(user.uid);
-        const result = await getChallengesForCaptain(user.uid);
+        await repairTeamChallengesForCaptain(user._id);
+        const result = await getChallengesForCaptain(user._id);
         if (result.ok && result.data) {
             setRows(result.data);
         } else {
@@ -52,7 +77,7 @@ export default function TeamChallengesScreen() {
         }
         setLoading(false);
         setRefreshing(false);
-    }, [user?.uid]);
+    }, [user?._id]);
 
     useFocusEffect(useCallback(() => {
         fetchRows();
@@ -61,6 +86,25 @@ export default function TeamChallengesScreen() {
     const onRefresh = () => {
         setRefreshing(true);
         fetchRows();
+    };
+
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), 30000);
+        return () => clearInterval(id);
+    }, []);
+
+    const pendingRows = useMemo(() => rows.filter(isPendingChallenge), [rows]);
+    const historyRows = useMemo(() => rows.filter((item) => !isPendingChallenge(item)), [rows]);
+    const visibleRows = activeTab === "pending" ? pendingRows : historyRows;
+    const emptyCopy = getEmptyCopy(activeTab);
+
+    const formatCountdown = (ms: number) => {
+        const total = Math.max(0, Math.floor(ms / 1000));
+        const minutes = Math.floor(total / 60);
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        if (hours <= 0) return `${mins}m`;
+        return `${hours}h ${mins}m`;
     };
 
     if (loading) {
@@ -81,40 +125,68 @@ export default function TeamChallengesScreen() {
                 showsVerticalScrollIndicator={false}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
             >
-                {rows.length === 0 ? (
-                    <View style={styles.emptyCard}>
-                        <MaterialIcons name="sports-esports" size={28} color={COLORS.muted} />
-                        <Text style={styles.emptyTitle}>No challenges yet</Text>
-                        <Text style={styles.emptyText}>Send or accept a team challenge to see it here.</Text>
-                    </View>
+                <SegmentedTabs<ChallengeTab>
+                    value={activeTab}
+                    onChange={setActiveTab}
+                    items={[
+                        { key: "pending", label: "Pending", badge: pendingRows.length || undefined },
+                        { key: "history", label: "History", badge: historyRows.length || undefined },
+                    ]}
+                    compact
+                />
+                {visibleRows.length === 0 ? (
+                    <AppCard variant="empty" style={styles.emptyCard}>
+                        <AppIcon name="sports-esports" size={28} tone="muted" />
+                        <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
+                        <Text style={styles.emptyText}>{emptyCopy.text}</Text>
+                    </AppCard>
                 ) : (
-                    rows.map((item) => {
+                    visibleRows.map((item) => {
                         const created = toMillis(item.createdAt);
                         return (
-                            <TouchableOpacity
+                            <Pressable
                                 key={item.id}
-                                style={styles.card}
+                                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                                 onPress={() => router.push(`/teams/challenge?id=${item.id}` as any)}
-                                activeOpacity={0.85}
                             >
                                 <View style={styles.topRow}>
                                     <Text style={styles.title} numberOfLines={1}>
                                         {item.challengerTeamName} vs {item.opponentTeamName}
                                     </Text>
-                                    <Text style={styles.status}>{item.status}</Text>
+                                    <StatusPill
+                                        tone={item.status === "rejected" ? "danger" : item.status === "completed" ? "success" : item.status === "admin_pending" ? "warning" : "info"}
+                                        label={String(item.status || "pending").replace(/_/g, " ")}
+                                    />
                                 </View>
                                 <Text style={styles.meta}>Game: {String(item.gameKey || "").toUpperCase()}</Text>
                                 <Text style={styles.meta}>
-                                    Common areas: {(item.commonAreas || []).length > 0 ? item.commonAreas.join(", ") : "None"}
+                                    Suggested areas: {(item.commonAreas || []).length > 0 ? item.commonAreas.join(", ") : "None"}
                                 </Text>
+                                {item.pricePerPlayer ? (
+                                    <Text style={styles.meta}>
+                                        Price: PKR {item.pricePerPlayer}/player{item.zoneRateLabel ? ` | ${item.zoneRateLabel}` : ""}
+                                    </Text>
+                                ) : null}
+                                {activeTab === "pending" ? (() => {
+                                    const scheduledAtMs = toMillis((item as any).scheduledAt) || (() => {
+                                        const parsed = parseScheduledDateTime(item.scheduledDate || "", item.scheduledTime || "");
+                                        return parsed ? parsed.getTime() : 0;
+                                    })();
+                                    if (!scheduledAtMs || scheduledAtMs <= now) return null;
+                                    return (
+                                        <Text style={styles.meta}>
+                                            Time left: {formatCountdown(scheduledAtMs - now)}
+                                        </Text>
+                                    );
+                                })() : null}
                                 <Text style={styles.meta}>
                                     {created ? new Date(created).toLocaleString() : "Just now"}
                                 </Text>
                                 <View style={styles.linkRow}>
-                                    <MaterialIcons name="arrow-forward" size={16} color={COLORS.accent} />
+                                    <AppIcon name="arrow-forward" size="sm" tone="accent" />
                                     <Text style={styles.linkText}>Open challenge workspace</Text>
                                 </View>
-                            </TouchableOpacity>
+                            </Pressable>
                         );
                     })
                 )}

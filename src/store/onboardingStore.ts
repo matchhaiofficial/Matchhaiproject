@@ -3,14 +3,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { FaceitProfileSummary } from "../services/faceitApi";
-import type { SteamProfileSummary } from "../services/steamApi";
+// Import types from Convex service (migrated from Firebase)
+import type {
+  FaceitProfileSummary,
+  SteamProfileSummary,
+} from "../services/convex/externalApiService";
 
 type Step1Data = {
   fullName: string;
   username: string;
   email: string;
   phone: string;
+  phoneVerified: boolean;
+  phoneVerifiedAt: number | null;
+  phoneVerifiedE164: string;
   password: string;
   city: string;
   ageRange: string;
@@ -22,9 +28,13 @@ type Step2Data = {
 
   // esports
   playsCs2: boolean;
+  playsCs16: boolean;
+  playsValorant: boolean;
   playsFc: boolean;
   playsTekken: boolean;
   cs2Role: string | null;
+  cs16Role: string | null;
+  valorantRole: string | null;
   fcTeam: string;
   fcFormation: string | null;
   tekkenFavorites: string[];
@@ -52,7 +62,7 @@ type Step2Data = {
   tekkenSkillBracket?: "A" | "B" | "C" | "D";
 };
 
-// Step 3 data
+// Step 3 data is optional and can be skipped during onboarding.
 type Step3Data = {
   steamProfileUrl: string;
   faceitProfileUrl: string;
@@ -72,8 +82,12 @@ type Step4Data = {
   consentMatchHistory: boolean;
 };
 
+type RegistrationPhase = "idle" | "submitting" | "partial-fail" | "success";
+
 export type OnboardingState = {
   currentStep: number;
+  registrationPhase: RegistrationPhase;
+  registrationSubStep: number;
 
   step1: Step1Data;
   step2: Step2Data;
@@ -82,6 +96,7 @@ export type OnboardingState = {
 
   // step navigation
   setCurrentStep: (step: number) => void;
+  setRegistrationProgress: (phase: RegistrationPhase, subStep?: number) => void;
 
   // original API (used in your screens)
   setStep1: (data: Partial<Step1Data>) => void;
@@ -101,6 +116,7 @@ export type OnboardingState = {
 const initialState: Omit<
   OnboardingState,
   | "setCurrentStep"
+  | "setRegistrationProgress"
   | "setStep1"
   | "setStep2"
   | "setStep3"
@@ -113,11 +129,16 @@ const initialState: Omit<
   | "resetAll"
 > = {
   currentStep: 1,
+  registrationPhase: "idle",
+  registrationSubStep: 0,
   step1: {
     fullName: "",
     username: "",
     email: "",
     phone: "",
+    phoneVerified: false,
+    phoneVerifiedAt: null,
+    phoneVerifiedE164: "",
     password: "",
     city: "Karachi",
     ageRange: "",
@@ -128,9 +149,13 @@ const initialState: Omit<
 
     // esports
     playsCs2: false,
+    playsCs16: false,
+    playsValorant: false,
     playsFc: false,
     playsTekken: false,
     cs2Role: null,
+    cs16Role: null,
+    valorantRole: null,
     fcTeam: "",
     fcFormation: null,
     tekkenFavorites: [],
@@ -180,6 +205,11 @@ export const useOnboardingStore = create<OnboardingState>()(
       ...initialState,
 
       setCurrentStep: (step: number) => set(() => ({ currentStep: step })),
+      setRegistrationProgress: (phase, subStep) =>
+        set((state) => ({
+          registrationPhase: phase,
+          registrationSubStep: subStep ?? state.registrationSubStep,
+        })),
 
       // core helpers
       setStep1: (data) =>

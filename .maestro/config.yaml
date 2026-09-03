@@ -1,0 +1,34 @@
+# Maestro workspace config.
+# Docs: https://maestro.mobile.dev/cli/configuration
+#
+# Defines the order in which `maestro test .maestro` executes the flows and
+# groups them with tags so you can run subsets, e.g.:
+#   maestro test --include-tags=smoke .maestro
+#   maestro test --include-tags=payment .maestro
+flows:
+  - "0*.yaml"
+
+# Per-flow tags are declared in each flow's header (tags:). This file only
+# pins execution order (login must run first so the session exists) and lets
+# Maestro discover the numbered flow files.
+includeTags:
+  - smoke
+  - core
+  - payment
+  - result
+
+# executionOrder is honored by Maestro when running a directory; numbered
+# filenames (01-..09-) already sort correctly, but we list the critical path
+# explicitly for clarity.
+executionOrder:
+  continueOnFailure: false
+  flowsOrder:
+    - 01-login
+    - 02-select-games
+    - 03-create-matchroom
+    - 04-discover-matchroom
+    - 05-join-request
+    - 06-approve-reject-join
+    - 07-booking-intent
+    - 08-mock-payment
+    - 09-result-verification

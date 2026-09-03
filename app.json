@@ -1,29 +1,49 @@
 {
   "expo": {
-    "name": "MatchHai",
-    "slug": "MatchHai",
-    "version": "1.0.0",
+    "name": "matchhai",
+    "slug": "matchhai",
+    "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "matchhai",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "MatchHai uses your photo library so you can upload profile pictures, team images, and chat attachments.",
+        "NSCameraUsageDescription": "MatchHai uses your camera so you can take profile pictures, team images, and chat attachments.",
+        "NSMicrophoneUsageDescription": "MatchHai uses your microphone so you can send voice messages and communicate during gameplay coordination.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.ovaisto.matchhai",
+      "googleServicesFile": "./firebase/GoogleService-Info.plist"
     },
     "android": {
+      "package": "com.ovaisto.matchhai",
+      "googleServicesFile": "./firebase/google-services.json",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "blockedPermissions": [
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/app-icon.png",
+        "backgroundColor": "#000000"
       },
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
+      "navigationBarColor": "#121212",
       "predictiveBackGestureEnabled": false,
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "bundler": "metro",
@@ -34,10 +54,49 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-secure-store",
+      "expo-audio",
+      "expo-notifications",
+      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "forceStaticLinking": [
+              "RNFBApp",
+              "RNFBMessaging"
+            ],
+            "extraPods": [
+              {
+                "name": "GoogleUtilities",
+                "modular_headers": true
+              }
+            ]
+          }
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "MatchHai uses your photo library so you can upload profile pictures, team images, and chat attachments.",
+          "cameraPermission": "MatchHai uses your camera so you can take profile pictures, team images, and chat attachments."
+        }
+      ],
+      "expo-document-picker"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cc63aac8-7e68-4dbc-9e95-c59e145fb7b4"
+      }
+    },
+    "owner": "basimmmmm"
   }
 }

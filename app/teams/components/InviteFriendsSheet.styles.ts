@@ -14,9 +14,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderTopLeftRadius: RADII.xl,
         borderTopRightRadius: RADII.xl,
-        minHeight: '50%',
-        maxHeight: '85%',
-        paddingBottom: 40,
     },
     header: {
         flexDirection: 'row',
@@ -44,8 +41,13 @@ export default StyleSheet.create({
         padding: 40,
         alignItems: 'center',
     },
+    listBody: {
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.sm,
+    },
     list: {
-        padding: SPACING.lg,
+        paddingBottom: 0,
     },
     friendItem: {
         flexDirection: 'row',
@@ -58,6 +60,8 @@ export default StyleSheet.create({
     friendInfo: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
+        minWidth: 0,
     },
     avatar: {
         width: 36,
@@ -77,6 +81,24 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
+        flexShrink: 1,
+        minWidth: 0,
+    },
+    inTeamBadge: {
+        marginTop: 4,
+        alignSelf: "flex-start",
+        borderRadius: RADII.pill,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        backgroundColor: "rgba(255, 193, 7, 0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(255, 193, 7, 0.22)",
+        maxWidth: 220,
+    },
+    inTeamBadgeText: {
+        color: COLORS.warning,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
     },
     inviteBtn: {
         backgroundColor: 'rgba(66, 165, 245, 0.1)',
@@ -85,16 +107,33 @@ export default StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 6,
         borderRadius: RADII.sm,
+        marginLeft: SPACING.sm,
+        alignSelf: 'flex-start',
+        maxWidth: 120,
     },
     inviteBtnDisabled: {
         borderColor: 'transparent',
         backgroundColor: 'transparent',
+    },
+    inviteBtnInvited: {
+        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+        borderColor: COLORS.warning,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
     },
     inviteBtnText: {
         color: COLORS.accent,
         fontFamily: FONTS.heading,
         fontSize: 12,
         fontWeight: '700',
+    },
+    inviteBtnTextInvited: {
+        color: COLORS.warning,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
     },
     emptyContainer: {
         padding: 40,
@@ -113,17 +152,9 @@ export default StyleSheet.create({
         textAlign: 'center',
         marginTop: 4,
     },
-    doneBtn: {
-        marginHorizontal: SPACING.xl,
-        backgroundColor: COLORS.accent,
-        paddingVertical: SPACING.lg,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        marginTop: SPACING.lg,
-    },
-    doneBtnText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
+    modalFooter: {
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.sm,
+        paddingBottom: SPACING.md,
     },
 });

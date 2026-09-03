@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     content: {
         padding: SPACING.screenPadding,
@@ -52,7 +52,7 @@ export default StyleSheet.create({
     input: {
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         borderRadius: RADII.sm,
         paddingHorizontal: SPACING.sm,
         paddingVertical: SPACING.sm,
@@ -71,7 +71,7 @@ export default StyleSheet.create({
         borderRadius: RADII.sm,
         paddingVertical: 8,
         paddingHorizontal: 12,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     chipActive: {
         borderColor: COLORS.accent,
@@ -107,3 +107,4 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.body,
     },
 });
+

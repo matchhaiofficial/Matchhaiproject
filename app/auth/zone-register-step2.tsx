@@ -1,73 +1,139 @@
-// app/auth/zone-register-step2.tsx
-import { MaterialIcons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { router } from "expo-router";
 import debounce from "lodash.debounce";
-import React, { useCallback, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
-import { CITY_OPTIONS, KARACHI_AREAS } from "../../constants/profileOptions";
-import LogoHalo from "../../src/components/LogoHalo";
+import {
+  DEFAULT_CITY,
+  KARACHI_AREAS,
+  normalizeKarachiAreaLabel,
+} from "../../constants/profileOptions";
+import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
+import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import { AppIcon } from "../../src/components/AppIcon";
+import {
+  AppBottomSheet,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader,
+} from "../../src/components/AppModalPrimitives";
+import { AppButton } from "../../src/components/AppPrimitives";
+import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
 import { BranchData, useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
+import { Perf } from "../../src/utils/perfInstrumentation";
 import styles from "./register.styles";
 
+type LocationSearchResult = {
+  display_name: string;
+  lat: string;
+  lon: string;
+  name?: string;
+  place_id: string;
+};
+
 export default function AdminRegisterStep2() {
-  const {
-    branches,
-    addBranch,
-    updateBranch,
-    removeBranch,
-    setBranches,
-    setCurrentStep
-  } = useZoneOnboardingStore();
+  const { step1, branches, addBranch, updateBranch, removeBranch, setBranches, setCurrentStep } =
+    useZoneOnboardingStore();
   const { showToast } = useToast();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
-
-  // Modal Form State
   const [branchDisplayName, setBranchDisplayName] = useState("");
-  const [city, setCity] = useState("Karachi");
   const [areaLabel, setAreaLabel] = useState<string>(KARACHI_AREAS[0]);
   const [addressLine1, setAddressLine1] = useState("");
   const [googleMapsUrl, setGoogleMapsUrl] = useState("");
   const [contactPhone, setContactPhone] = useState("");
-
-  // Location Search State
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [branchModalFocusKey, setBranchModalFocusKey] = useState(0);
 
-  // Search function (Debounced)
+  useEffect(() => {
+    setCurrentStep(2);
+    Perf.mark("Screen.Mount", {
+      routeKey: "/auth/zone-register-step2",
+      meta: {
+        routeKeyConfidence: "explicit",
+      },
+    });
+
+    const navMark = Perf.consumeNavMark("/auth/zone-register-step2");
+    if (navMark) {
+      Perf.mark("Nav.ToMounted", {
+        cid: navMark.cid,
+        routeKey: "/auth/zone-register-step2",
+        meta: {
+          durationMs: Date.now() - navMark.startedAt,
+          ...(navMark.meta || {}),
+        },
+      });
+    }
+  }, [setCurrentStep]);
+
+  useEffect(() => {
+    if (
+      !step1.ownerFullName.trim() ||
+      !step1.venueBrandName.trim() ||
+      !step1.contactEmail.trim() ||
+      !step1.password
+    ) {
+      router.replace("/auth/zone-register");
+    }
+  }, [step1]);
+
+  const branchCountLabel = useMemo(
+    () => (branches.length === 1 ? "1 branch added" : `${branches.length} branches added`),
+    [branches.length],
+  );
+  const detectAreaFromLocation = (locationText: string) => {
+    const normalized = locationText.toLowerCase();
+    const areaAliases: Record<string, string[]> = {
+      "Defence Housing Authority Karachi": ["dha", "defence housing authority", "defence"],
+      "Clifton Karachi": ["clifton"],
+      "Gulshan-e-Iqbal": ["gulshan", "gulshan-e-iqbal", "gulshan e iqbal"],
+      "Gulistan-e-Johar": ["johar", "gulistan-e-johar", "gulistan e johar"],
+      "North Nazimabad": ["north nazimabad"],
+      Nazimabad: ["nazimabad"],
+      "North Karachi": ["north karachi"],
+      "Federal B. Area": ["federal b area", "fb area", "f.b area"],
+      "P.E.C.H.S Block 2": ["pechs", "p.e.c.h.s"],
+      Dastagir: ["dastagir"],
+      "Tariq Road": ["tariq road"],
+      Bahadurabad: ["bahadurabad"],
+      Karsaz: ["karsaz"],
+    };
+
+    for (const area of KARACHI_AREAS) {
+      const aliases = areaAliases[area] || [area];
+      if (aliases.some((alias) => normalized.includes(alias.toLowerCase()))) {
+        return normalizeKarachiAreaLabel(area);
+      }
+    }
+
+    return null;
+  };
+
   const searchPlaces = async (text: string) => {
     if (text.length < 3) {
       setSearchResults([]);
       return;
     }
+
     setIsSearching(true);
     try {
-      // Using Nominatim OpenStreetMap API (Free)
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text + ", Karachi")}&limit=5&addressdetails=1`,
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(`${text}, Karachi`)}&limit=5&addressdetails=1`,
         {
           headers: {
-            "User-Agent": "MatchHaiApp/1.0" // Required by OSM
-          }
-        }
+            "User-Agent": "MatchHaiApp/1.0",
+          },
+        },
       );
       const data = await response.json();
-      setSearchResults(data);
+      setSearchResults(data || []);
     } catch (error) {
       console.error("Error searching places:", error);
     } finally {
@@ -75,11 +141,11 @@ export default function AdminRegisterStep2() {
     }
   };
 
-  // We use useCallback to create a memoized debounced function
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedSearch = useCallback(
-    debounce((text: string) => searchPlaces(text), 800),
-    []
+    debounce((text: string) => {
+      void searchPlaces(text);
+    }, 800),
+    [],
   );
 
   const handleSearchChange = (text: string) => {
@@ -87,40 +153,47 @@ export default function AdminRegisterStep2() {
     debouncedSearch(text);
   };
 
-  const handleSelectLocation = (result: any) => {
-    // 1. Set Address from result (using simplified display name)
-    const simplifiedName = result.display_name.split(',').slice(0, 3).join(', ');
+  const getBranchAddressSearchLabel = (branch: BranchData) => {
+    const address = String(branch.addressLine1 || "").trim();
+    if (!address) return "";
+
+    return address
+      .split(",")
+      .map((part) => part.trim())
+      .find(Boolean) || address;
+  };
+
+  const handleSelectLocation = (result: LocationSearchResult) => {
+    const formattedAddress = String(result.display_name || "");
+    const simplifiedName = formattedAddress.split(",").slice(0, 3).join(", ");
+    const mapsLink = `https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lon}`;
+
     setAddressLine1(simplifiedName);
-
-    // 2. Generate Google Maps URL
-    const lat = result.lat;
-    const lon = result.lon;
-    // Standard format safe for all devices
-    const mapsLink = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
     setGoogleMapsUrl(mapsLink);
-
-    // 3. Clear Search
-    setSearchQuery(result.name || result.display_name.split(',')[0]); // Set query to the selected name
+    setSearchQuery(result.name || formattedAddress.split(",")[0]);
     setSearchResults([]);
 
-    // 4. Auto-detect Area from address
-    // We check if any of our known KARACHI_AREAS are present in the full display name
-    // This helps prevent conflicts (e.g. User select DHA but searches North Nazimabad)
-    const fullName = result.display_name.toLowerCase();
-    const matchedArea = KARACHI_AREAS.find(area => fullName.includes(area.toLowerCase()));
-
+    const matchedArea = detectAreaFromLocation(formattedAddress);
     if (matchedArea) {
       setAreaLabel(matchedArea);
-      showToast({ type: "success", title: "Area Detected", message: `Set area to ${matchedArea}` });
+      showToast({
+        type: "success",
+        title: "Area detected",
+        message: `Set area to ${matchedArea}`,
+      });
+    } else {
+      showToast({
+        type: "info",
+        title: "Location selected",
+        message: "Address was filled. Please confirm the area manually if needed.",
+      });
     }
   };
 
   const resetForm = () => {
     setBranchDisplayName("");
-    setCity("Karachi");
     setAreaLabel(KARACHI_AREAS[0]);
     setAddressLine1("");
-    // ... rest of reset
     setGoogleMapsUrl("");
     setContactPhone("");
     setEditingBranchId(null);
@@ -128,7 +201,6 @@ export default function AdminRegisterStep2() {
     setSearchResults([]);
   };
 
-  // 📱 Pakistani phone formatter (matches Step 1)
   const formatPakistaniPhone = (value: string) => {
     const numeric = value.replace(/\D/g, "");
     if (!numeric) return value;
@@ -150,10 +222,11 @@ export default function AdminRegisterStep2() {
     if (rest.length <= 3) {
       formatted += rest;
     } else if (rest.length <= 7) {
-      formatted += rest.slice(0, 3) + " " + rest.slice(3);
+      formatted += `${rest.slice(0, 3)} ${rest.slice(3)}`;
     } else {
-      formatted += rest.slice(0, 3) + " " + rest.slice(3, 7) + " " + rest.slice(7);
+      formatted += `${rest.slice(0, 3)} ${rest.slice(3, 7)} ${rest.slice(7)}`;
     }
+
     return formatted.trim();
   };
 
@@ -165,43 +238,55 @@ export default function AdminRegisterStep2() {
     setContactPhone(next);
   };
 
+  const handleBranchFieldFocus = useCallback(() => {
+    setBranchModalFocusKey((current) => current + 1);
+  }, []);
+
   const openAddModal = () => {
     if (branches.length >= 10) {
-      showToast({ type: "warning", title: "Limit Reached", message: "You can add up to 10 branches maximum." });
+      showToast({
+        type: "warning",
+        title: "Limit reached",
+        message: "You can add up to 10 branches maximum.",
+      });
       return;
     }
+
     resetForm();
     setModalVisible(true);
   };
 
   const handleEditBranch = (branch: BranchData) => {
-    // ... same
     setEditingBranchId(branch.id);
     setBranchDisplayName(branch.branchDisplayName);
-    setCity(branch.city);
-    setAreaLabel(branch.areaLabel);
+    setAreaLabel(normalizeKarachiAreaLabel(branch.areaLabel) || KARACHI_AREAS[0]);
     setAddressLine1(branch.addressLine1);
     setGoogleMapsUrl(branch.googleMapsUrl);
     setContactPhone(branch.contactPhone || "");
+    setSearchQuery(getBranchAddressSearchLabel(branch));
+    setSearchResults([]);
     setModalVisible(true);
   };
 
   const handleSaveBranch = () => {
-    if (!branchDisplayName.trim() || !addressLine1.trim()) {
-      showToast({ type: "error", title: "Missing details", message: "Branch name and address are required." });
+    if (!branchDisplayName.trim() || !searchQuery.trim() || !googleMapsUrl.trim()) {
+      showToast({
+        type: "error",
+        title: "Missing details",
+        message: "Enter the branch name and select an address from the location results.",
+      });
       return;
     }
 
-    // Phone Validation
-    let finalPhone: string | undefined = undefined;
+    let finalPhone: string | undefined;
     if (contactPhone.trim()) {
       const normalizedPhone = contactPhone.trim().replace(/\s|-/g, "");
       const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
       if (!phoneRegex.test(normalizedPhone)) {
         showToast({
           type: "error",
-          title: "Invalid Phone",
-          message: "Please enter a valid Pakistani mobile number (e.g. 0300...)"
+          title: "Invalid phone",
+          message: "Please enter a valid Pakistani mobile number such as 0300 123 4567.",
         });
         return;
       }
@@ -209,27 +294,28 @@ export default function AdminRegisterStep2() {
     }
 
     if (editingBranchId) {
-      // Update existing
       updateBranch(editingBranchId, {
         branchDisplayName: branchDisplayName.trim(),
-        city,
-        areaLabel,
+        city: DEFAULT_CITY,
+        areaLabel: normalizeKarachiAreaLabel(areaLabel),
         addressLine1: addressLine1.trim(),
         googleMapsUrl: googleMapsUrl.trim(),
         contactPhone: finalPhone,
       });
-      showToast({ type: "success", title: "Updated", message: "Branch details updated successfully." });
+      showToast({
+        type: "success",
+        title: "Updated",
+        message: "Branch details updated successfully.",
+      });
     } else {
-      // Add new
       const newBranch: BranchData = {
         id: Math.random().toString(36).substring(7),
         branchDisplayName: branchDisplayName.trim(),
-        city,
-        areaLabel,
+        city: DEFAULT_CITY,
+        areaLabel: normalizeKarachiAreaLabel(areaLabel),
         addressLine1: addressLine1.trim(),
         googleMapsUrl: googleMapsUrl.trim(),
         contactPhone: finalPhone,
-        // Initialize inventory empty
         supportsCs2: false,
         supportsFc25: false,
         supportsTekken8: false,
@@ -238,7 +324,7 @@ export default function AdminRegisterStep2() {
         supportsPadel: false,
         supportsPickleball: false,
         pricing: {},
-        notes: ""
+        notes: "",
       };
       addBranch(newBranch);
     }
@@ -249,301 +335,329 @@ export default function AdminRegisterStep2() {
 
   const handleMoveUp = (index: number) => {
     if (index === 0) return;
-    const newBranches = [...branches];
-    [newBranches[index - 1], newBranches[index]] = [newBranches[index], newBranches[index - 1]];
-    setBranches(newBranches);
+    const next = [...branches];
+    [next[index - 1], next[index]] = [next[index], next[index - 1]];
+    setBranches(next);
   };
 
   const handleMoveDown = (index: number) => {
     if (index === branches.length - 1) return;
-    const newBranches = [...branches];
-    [newBranches[index + 1], newBranches[index]] = [newBranches[index], newBranches[index + 1]];
-    setBranches(newBranches);
+    const next = [...branches];
+    [next[index + 1], next[index]] = [next[index], next[index + 1]];
+    setBranches(next);
   };
 
   const handleContinue = () => {
-    if (branches.length === 0) {
-      showToast({ type: "info", title: "No branches", message: "Please add at least one branch to continue." });
+    if (!branches.length) {
+      showToast({
+        type: "info",
+        title: "No branches",
+        message: "Please add at least one branch to continue.",
+      });
       return;
     }
-    setCurrentStep(2);
-    router.push("/auth/zone-register-step3");
+
+    router.replace("/auth/zone-register-step3");
   };
 
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps = Platform.OS === "ios" ? { style: styles.screen, behavior: "padding" as const } : { style: styles.screen };
-
   return (
-    <Container {...containerProps}>
-      <ScrollView contentContainerStyle={[styles.container, { paddingBottom: 32 }]} showsVerticalScrollIndicator={false}>
-        <LogoHalo />
+    <Screen
+      scroll
+      keyboardAvoiding
+      style={styles.screen}
+      contentStyle={styles.container}
+      routeKey="/auth/zone-register-step2"
+      scrollProps={{
+        showsVerticalScrollIndicator: false,
+        keyboardShouldPersistTaps: "handled",
+      }}
+    >
+      <RegistrationStepHeader
+        title="Branch Setup"
+        subtitle=""
+        stepTitle="Step 2 of 4"
+        stepSubtitle="Branches and locations"
+        progress="50%"
+        onBack={() => router.replace("/auth/zone-register")}
+      />
 
-        {/* Stepper */}
-        <View style={styles.stepperWrapper}>
-          <View style={styles.stepperTopRow}>
-            <View>
-              <Text style={styles.stepperTitle}>Branches & Locations</Text>
-              <Text style={styles.stepperSubtitle}>Step 2 of 4 · Add your zone branches</Text>
-            </View>
+      <Text style={styles.heading}>Add branches</Text>
+      <Text style={styles.sub}>Each branch gets its own location, inventory, and pricing.</Text>
+
+      <View style={styles.reviewSectionCard}>
+        <View style={styles.reviewSectionHeaderRow}>
+          <View>
+            <Text style={styles.reviewSectionTitle}>Branch list</Text>
+            <Text style={styles.reviewValueMuted}>{branchCountLabel}</Text>
           </View>
-          <View style={styles.stepperBar}><View style={[styles.stepperBarFill, { width: "50%" }]} /></View>
-          <View style={styles.stepperDotsRow}>
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={styles.stepperDot} />
-            <View style={styles.stepperDot} />
-          </View>
-        </View>
-
-        <Text style={styles.heading}>Your Branches</Text>
-        <Text style={styles.sub}>Add all the branches you want to manage under this zone account.</Text>
-
-        {/* Branch List */}
-        {branches.map((branch, index) => (
-          <View key={branch.id} style={styles.card}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={{ color: COLORS.text, fontWeight: 'bold', fontSize: 16 }}>{branch.branchDisplayName}</Text>
-                <Text style={{ color: COLORS.muted, fontSize: 14 }}>{branch.areaLabel}, {branch.city}</Text>
-                {branch.contactPhone ? (
-                  <Text style={{ color: COLORS.muted, fontSize: 12, marginTop: 4 }}>
-                    <MaterialIcons name="phone" size={12} color={COLORS.muted} /> {branch.contactPhone}
-                  </Text>
-                ) : null}
-              </View>
-
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                {/* Reorder Controls */}
-                <View style={{ flexDirection: 'column', marginRight: 8 }}>
-                  <Pressable
-                    onPress={() => handleMoveUp(index)}
-                    disabled={index === 0}
-                    style={{ opacity: index === 0 ? 0.3 : 1, padding: 2 }}
-                  >
-                    <MaterialIcons name="keyboard-arrow-up" size={24} color={COLORS.accent} />
-                  </Pressable>
-                  <Pressable
-                    onPress={() => handleMoveDown(index)}
-                    disabled={index === branches.length - 1}
-                    style={{ opacity: index === branches.length - 1 ? 0.3 : 1, padding: 2 }}
-                  >
-                    <MaterialIcons name="keyboard-arrow-down" size={24} color={COLORS.accent} />
-                  </Pressable>
-                </View>
-
-                {/* Edit Action */}
-                <Pressable onPress={() => handleEditBranch(branch)} style={{ padding: 4 }}>
-                  <MaterialIcons name="edit" size={22} color={COLORS.accent} />
-                </Pressable>
-
-                {/* Delete Action */}
-                <Pressable onPress={() => removeBranch(branch.id)} style={{ padding: 4 }}>
-                  <MaterialIcons name="delete-outline" size={22} color={COLORS.error} />
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        ))}
-
-        {/* Add Branch Button */}
-        <Pressable
-          onPress={openAddModal}
-          style={({ pressed }) => [
-            styles.secondaryBtn,
-            { marginTop: 16, flexDirection: 'row', justifyContent: 'center', gap: 8 },
-            branches.length >= 10 && { opacity: 0.5, borderColor: COLORS.muted }
-          ]}
-          disabled={branches.length >= 10}
-        >
-          <MaterialIcons name="add" size={20} color={branches.length >= 10 ? COLORS.muted : COLORS.accent} />
-          <Text style={[styles.secondaryBtnText, branches.length >= 10 && { color: COLORS.muted }]}>
-            {branches.length >= 10 ? "Max Limit Reached (10)" : "Add Branch"}
-          </Text>
-        </Pressable>
-
-        {/* Navigation Buttons */}
-        <View style={{ marginTop: 32, gap: 12 }}>
-          <Pressable onPress={() => router.back()} style={{ alignSelf: 'center' }}>
-            <Text style={{ color: COLORS.muted }}>Back</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={handleContinue}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              branches.length === 0 && styles.primaryBtnDisabled,
-              pressed && branches.length > 0 && { opacity: 0.92 }
-            ]}
-            disabled={branches.length === 0}
+          <AppButton
+            variant="secondary"
+            size="sm"
+            onPress={openAddModal}
+            disabled={branches.length >= 10}
           >
-            <Text style={styles.primaryBtnText}>Continue</Text>
-          </Pressable>
+            {branches.length >= 10 ? "Limit reached" : "Add branch"}
+          </AppButton>
         </View>
 
-        {/* Branch Modal */}
-        <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' }}>
-            <View style={{ backgroundColor: COLORS.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '90%' }}>
-              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>
-                {editingBranchId ? "Edit Branch" : "Add New Branch"}
-              </Text>
+        {branches.length ? (
+          <View style={styles.summaryCardList}>
+            {branches.map((branch, index) => (
+              <View key={branch.id} style={styles.reviewCard}>
+                <View style={styles.reviewSectionHeaderRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={styles.reviewSectionTitle}>{branch.branchDisplayName}</Text>
+                    <Text style={styles.reviewValue}>
+                      {[normalizeKarachiAreaLabel(branch.areaLabel), DEFAULT_CITY].filter(Boolean).join(", ")}
+                    </Text>
+                    <Text style={[styles.reviewValue, { marginTop: 4 }]} numberOfLines={2}>
+                      {branch.addressLine1}
+                    </Text>
+                    {branch.contactPhone ? (
+                      <Text style={[styles.reviewValueMuted, { marginTop: 6 }]}>
+                        Contact: {branch.contactPhone}
+                      </Text>
+                    ) : null}
+                  </View>
 
-              <ScrollView>
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.label}>Branch Name</Text>
-                  <View style={styles.inputBox}>
-                    <View style={styles.inputRow}>
-                      <MaterialIcons name="store" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="e.g. O2 - FB Area"
-                        placeholderTextColor={COLORS.muted}
-                        value={branchDisplayName}
-                        onChangeText={setBranchDisplayName}
-                        selectionColor={COLORS.accent}
-                      />
+                  <View style={{ alignItems: "flex-end", gap: 10 }}>
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <Pressable
+                        onPress={() => handleMoveUp(index)}
+                        disabled={index === 0}
+                        style={{ opacity: index === 0 ? 0.35 : 1 }}
+                      >
+                        <AppIcon name="keyboard-arrow-up" size={22} color={COLORS.accent} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleMoveDown(index)}
+                        disabled={index === branches.length - 1}
+                        style={{ opacity: index === branches.length - 1 ? 0.35 : 1 }}
+                      >
+                        <AppIcon name="keyboard-arrow-down" size={22} color={COLORS.accent} />
+                      </Pressable>
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 12 }}>
+                      <Pressable onPress={() => handleEditBranch(branch)}>
+                        <Text style={styles.reviewEditLink}>Edit</Text>
+                      </Pressable>
+                      <Pressable onPress={() => removeBranch(branch.id)}>
+                        <Text style={[styles.reviewEditLink, { color: COLORS.error }]}>Delete</Text>
+                      </Pressable>
                     </View>
                   </View>
                 </View>
-
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.label}>City</Text>
-                  <View style={styles.inputBox}>
-                    <Picker selectedValue={city} onValueChange={setCity} style={{ color: COLORS.text }} dropdownIconColor={COLORS.muted}>
-                      {CITY_OPTIONS.map(c => <Picker.Item key={c} label={c} value={c} />)}
-                    </Picker>
-                  </View>
-                </View>
-
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.label}>Area</Text>
-                  <View style={styles.inputBox}>
-                    <Picker selectedValue={areaLabel} onValueChange={setAreaLabel} style={{ color: COLORS.text }} dropdownIconColor={COLORS.muted}>
-                      {KARACHI_AREAS.map(a => <Picker.Item key={a} label={a} value={a} />)}
-                    </Picker>
-                  </View>
-                </View>
-
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.label}>Address</Text>
-                  <View style={styles.inputBox}>
-                    <View style={styles.inputRow}>
-                      <MaterialIcons name="location-on" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Full address"
-                        placeholderTextColor={COLORS.muted}
-                        value={addressLine1}
-                        onChangeText={setAddressLine1}
-                        selectionColor={COLORS.accent}
-                        multiline
-                      />
-                    </View>
-                  </View>
-                </View>
-
-                {/* New: Contact Number */}
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.label}>Contact Number (Optional)</Text>
-                  <View style={styles.inputBox}>
-                    <View style={styles.inputRow}>
-                      <MaterialIcons name="phone" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="e.g. 0300 1234567"
-                        placeholderTextColor={COLORS.muted}
-                        value={contactPhone}
-                        onChangeText={handlePhoneChange}
-                        selectionColor={COLORS.accent}
-                        keyboardType="phone-pad"
-                      />
-                    </View>
-                  </View>
-                </View>
-
-                <View style={[styles.fieldGroup, { zIndex: 10 }]}>
-                  <Text style={styles.label}>Search Location (Map)</Text>
-                  <View style={styles.inputBox}>
-                    <View style={styles.inputRow}>
-                      <MaterialIcons name="search" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Search area (e.g. Hyperstar North)"
-                        placeholderTextColor={COLORS.muted}
-                        value={searchQuery}
-                        onChangeText={handleSearchChange}
-                        selectionColor={COLORS.accent}
-                      />
-                      {isSearching && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.accent }} />}
-                    </View>
-                  </View>
-
-                  {/* Search Results Dropdown */}
-                  {searchResults.length > 0 && (
-                    <View style={{
-                      backgroundColor: COLORS.cardBackground,
-                      borderWidth: 1,
-                      borderColor: COLORS.inputBorder,
-                      borderRadius: 8,
-                      marginTop: 4,
-                      maxHeight: 200,
-                    }}>
-                      <ScrollView nestedScrollEnabled style={{ maxHeight: 200 }}>
-                        {searchResults.map((result: any, idx) => (
-                          <Pressable
-                            key={idx}
-                            onPress={() => handleSelectLocation(result)}
-                            style={({ pressed }) => ({
-                              padding: 12,
-                              borderBottomWidth: idx === searchResults.length - 1 ? 0 : 1,
-                              borderBottomColor: COLORS.inputBorder,
-                              backgroundColor: pressed ? COLORS.inputBackground : 'transparent'
-                            })}
-                          >
-                            <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: 'bold' }}>
-                              {result.display_name.split(',')[0]}
-                            </Text>
-                            <Text style={{ color: COLORS.muted, fontSize: 12 }} numberOfLines={1}>
-                              {result.display_name}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-
-                {/* Hidden/Read-only Google Maps URL (Auto-generated) */}
-                {googleMapsUrl ? (
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Google Maps Link (Auto-generated)</Text>
-                    <View style={[styles.inputBox, { opacity: 0.7 }]}>
-                      <View style={styles.inputRow}>
-                        <MaterialIcons name="map" size={20} style={styles.prefixIcon} color={COLORS.success} />
-                        <TextInput
-                          style={[styles.input, { color: COLORS.success }]}
-                          value={googleMapsUrl}
-                          editable={false}
-                        />
-                      </View>
-                    </View>
-                  </View>
-                ) : null}
-
-                <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
-                  <Pressable onPress={() => setModalVisible(false)} style={[styles.secondaryBtn, { flex: 1 }]}>
-                    <Text style={styles.secondaryBtnText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable onPress={handleSaveBranch} style={[styles.primaryBtn, { flex: 1 }]}>
-                    <Text style={styles.primaryBtnText}>{editingBranchId ? "Update" : "Add"}</Text>
-                  </Pressable>
-                </View>
-              </ScrollView>
-            </View>
+              </View>
+            ))}
           </View>
-        </Modal>
+        ) : (
+          <View style={styles.emptyStateCard}>
+            <Text style={styles.emptyStateTitle}>No branches added yet</Text>
+            <Text style={styles.emptyStateText}>
+              Add at least one branch before continuing to inventory and pricing.
+            </Text>
+          </View>
+        )}
+      </View>
 
-      </ScrollView>
-    </Container>
+      <Pressable onPress={() => router.replace("/auth/zone-register")} style={styles.backLinkWrapper}>
+        <Text style={styles.backLinkText}>Back to admin details</Text>
+      </Pressable>
+
+      <View style={[styles.buttonShadowWrapper, branches.length > 0 && styles.buttonShadowWrapperActive]}>
+        <AppButton
+          onPress={handleContinue}
+          disabled={branches.length === 0}
+          size="lg"
+          style={[styles.primaryBtn, branches.length === 0 ? styles.primaryBtnDisabled : null]}
+        >
+          Continue
+        </AppButton>
+      </View>
+
+      <AppBottomSheet
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        sheetStyle={{ backgroundColor: COLORS.backgroundDark, maxHeight: "92%" }}
+        keyboardAware
+      >
+        <AppModalHeader
+          title={editingBranchId ? "Edit branch" : "Add branch"}
+          onClose={() => setModalVisible(false)}
+        />
+
+        <AppModalBody
+          scroll
+          keyboardAware
+          keyboardFocusKey={branchModalFocusKey}
+          contentContainerStyle={styles.branchModalContent}
+        >
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Branch name" required />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon name="store" size={20} style={styles.prefixIcon} color={COLORS.muted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Pasha's Arena - Garden"
+                    placeholderTextColor={COLORS.muted}
+                    value={branchDisplayName}
+                    onChangeText={setBranchDisplayName}
+                    selectionColor={COLORS.accent}
+                    returnKeyType="next"
+                    onFocus={handleBranchFieldFocus}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Area" required />
+              <View style={styles.inputBox}>
+                <Picker
+                  selectedValue={areaLabel}
+                  onValueChange={setAreaLabel}
+                  style={{ color: COLORS.text }}
+                  dropdownIconColor={COLORS.muted}
+                >
+                  {KARACHI_AREAS.map((option) => (
+                    <Picker.Item key={option} label={option} value={option} />
+                  ))}
+                </Picker>
+              </View>
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Branch phone" optional />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon name="phone" size={20} style={styles.prefixIcon} color={COLORS.muted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 0300 123 4567"
+                    placeholderTextColor={COLORS.muted}
+                    value={contactPhone}
+                    onChangeText={handlePhoneChange}
+                    selectionColor={COLORS.accent}
+                    keyboardType="phone-pad"
+                    onFocus={handleBranchFieldFocus}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={[styles.fieldGroup, { zIndex: 10 }]}>
+              <RegistrationFieldLabel label="Address" required />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon name="search" size={20} style={styles.prefixIcon} color={COLORS.muted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Garden, Karachi"
+                    placeholderTextColor={COLORS.muted}
+                    value={searchQuery}
+                    onChangeText={handleSearchChange}
+                    selectionColor={COLORS.accent}
+                    onFocus={handleBranchFieldFocus}
+                  />
+                  {isSearching ? (
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: COLORS.accent,
+                      }}
+                    />
+                  ) : null}
+                </View>
+              </View>
+
+              {searchResults.length > 0 ? (
+                <View
+                  style={{
+                    backgroundColor: COLORS.cardBackground,
+                    borderWidth: 1,
+                    borderColor: COLORS.inputBorder,
+                    borderRadius: 12,
+                    marginTop: 6,
+                    maxHeight: 220,
+                  }}
+                >
+                  <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
+                    {searchResults.map((result, index) => (
+                      <Pressable
+                        key={`${result.place_id}-${index}`}
+                        onPress={() => handleSelectLocation(result)}
+                        style={({ pressed }) => ({
+                          paddingVertical: 12,
+                          paddingHorizontal: 14,
+                          borderBottomWidth: index === searchResults.length - 1 ? 0 : 1,
+                          borderBottomColor: COLORS.inputBorder,
+                          backgroundColor: pressed ? COLORS.inputBackground : "transparent",
+                        })}
+                      >
+                        <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: "700" }}>
+                          {result.name || String(result.display_name).split(",")[0]}
+                        </Text>
+                        <Text style={{ color: COLORS.muted, fontSize: 12 }} numberOfLines={1}>
+                          {result.display_name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Address Details" optional />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon
+                    name="location-on"
+                    size={20}
+                    style={styles.prefixIcon}
+                    color={COLORS.muted}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Near Pakola Masjid, Garden Road, Karachi"
+                    placeholderTextColor={COLORS.muted}
+                    value={addressLine1}
+                    onChangeText={setAddressLine1}
+                    selectionColor={COLORS.accent}
+                    multiline
+                    onFocus={handleBranchFieldFocus}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {googleMapsUrl ? (
+              <View style={styles.fieldGroup}>
+                <RegistrationFieldLabel label="Google Maps link" optional />
+                <View style={[styles.inputBox, { opacity: 0.75 }]}>
+                  <View style={styles.inputRow}>
+                    <AppIcon name="map" size={20} style={styles.prefixIcon} color={COLORS.success} />
+                    <TextInput style={[styles.input, { color: COLORS.success }]} value={googleMapsUrl} editable={false} />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+        </AppModalBody>
+
+        <AppModalFooter>
+          <View style={styles.branchModalActions}>
+            <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setModalVisible(false)}>
+              Cancel
+            </AppButton>
+            <AppButton style={{ flex: 1 }} onPress={handleSaveBranch}>
+              {editingBranchId ? "Update" : "Add"}
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppBottomSheet>
+    </Screen>
   );
 }

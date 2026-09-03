@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/th
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         padding: SPACING.lg,
@@ -21,8 +21,22 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.xl,
     },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+        marginBottom: 0,
+    },
     scrollContent: {
         padding: SPACING.screenPadding,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
+    },
+    scrollContentInsideScreen: {
+        paddingHorizontal: 0,
+        paddingTop: 0,
+    },
+    scrollContentWithBottomAction: {
+        paddingBottom: 140,
     },
     section: {
         marginBottom: SPACING.xxl,
@@ -56,6 +70,27 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         marginTop: SPACING.xs,
     },
+    infoBox: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    infoBoxText: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 20,
+    },
+    infoBoxSmall: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+        marginTop: SPACING.xs,
+    },
     chipRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -86,6 +121,103 @@ export default StyleSheet.create({
     optionChipTextActive: {
         color: COLORS.text,
     },
+    inviteHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: SPACING.sm,
+    },
+    inviteCountText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+    },
+    inviteLoadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+        paddingVertical: SPACING.sm,
+    },
+    inviteHelperText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    inviteList: {
+        marginTop: SPACING.sm,
+    },
+    friendCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: COLORS.cardBackground,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        borderRadius: RADII.md,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.md,
+        marginBottom: SPACING.sm,
+    },
+    friendCardSelected: {
+        backgroundColor: '#1e2a38',
+        borderColor: COLORS.accent,
+    },
+    friendCardInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: SPACING.md,
+    },
+    friendAvatar: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(66, 165, 245, 0.18)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: SPACING.md,
+    },
+    friendAvatarText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+    },
+    friendMeta: {
+        flex: 1,
+    },
+    friendName: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+    },
+    friendSubtext: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        marginTop: 2,
+    },
+    inviteEmptyCard: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderStyle: 'dashed',
+        padding: SPACING.lg,
+        alignItems: 'center',
+    },
+    inviteEmptyTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        marginBottom: SPACING.xs,
+    },
+    inviteEmptyText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        textAlign: 'center',
+        lineHeight: 18,
+    },
 
     buttonWrapper: {
         padding: SPACING.screenPadding,
@@ -113,3 +245,4 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.body,
     },
 });
+

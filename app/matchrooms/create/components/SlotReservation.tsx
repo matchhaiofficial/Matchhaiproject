@@ -2,7 +2,7 @@
 import React from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { getGameConfig } from '../../../../constants/matchConfig';
-import { Team } from '../../../../src/services/teamService';
+import { Team } from '../../../../src/services/convex/teamService';
 import styles from '../create.styles';
 
 interface SlotReservationProps {

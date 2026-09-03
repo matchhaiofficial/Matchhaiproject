@@ -1,0 +1,1082 @@
+// src/services/convex/zoneAdminBookingService.ts
+// Convex-based zone admin booking service
+
+import { convex } from "../../lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+import Logger from "../../utils/logger";
+import { recordRateMetric } from "../../utils/perfInstrumentation";
+import {
+    createSharedPollingState,
+    PollingSubscriptionCallback,
+    publishPollingRows,
+    releasePollingSubscription,
+    replayPollingRows,
+    SharedPollingState,
+} from "./sharedPollingRegistry";
+import { getMatchroomLockAtMs } from "../../constants/timing";
+import { getUserFacingErrorMessage, isAuthSessionError } from "../../utils/userFacingErrors";
+
+/**
+ * Log a failed booking action. Expected auth/session failures (e.g. an expired
+ * session) are logged at WARN so they don't spam the red LogBox as console
+ * errors; genuine failures keep full ERROR detail. The user always gets a clean
+ * message via getUserFacingErrorMessage at the call site.
+ */
+function logBookingActionError(message: string, error: unknown) {
+    if (isAuthSessionError(error) || isExpectedBookingActionError(error)) {
+        Logger.warn("zoneAdminBooking", message, error);
+        return;
+    }
+    Logger.error("zoneAdminBooking", message, error);
+}
+
+function getRawBookingErrorMessage(error: unknown): string {
+    if (typeof error === "string") return error;
+    if (error instanceof Error) return error.message;
+    if (
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+    ) {
+        return String((error as { message: string }).message);
+    }
+    return error == null ? "" : String(error);
+}
+
+function isExpectedBookingActionError(error: unknown): boolean {
+    return /no longer available|selected resources are missing|select (?:a branch|resources|at least one resource)|add at least one date|alternative time|no captains found|booking request (?:can no longer be updated|has expired|not found)|does not (?:belong|support|match)|requires exactly|seat (?:not found|is already booked)|walk-in matchroom is already full/i.test(
+        getRawBookingErrorMessage(error),
+    );
+}
+
+export type ZoneBookingAssetType = "pc" | "console" | "court" | "mixed" | "unknown";
+export type ZoneBookingQueueStatus =
+    | "open"
+    | "pending_payment"
+    | "accepted"
+    | "expired"
+    | "cancelled";
+
+export interface ZoneBookingQueueItem {
+    id: string;
+    requestId?: string;
+    matchroomId?: string;
+    requestKind?: "direct_zone" | "broadcast_fanout" | string;
+    userId: string;
+    userName: string;
+    title: string;
+    gameKey: string;
+    maxPlayers: number;
+    playerCount?: number;
+    reservedSlots?: number;
+    teamMode?: "solo" | "team";
+    preferredDate?: any;
+    preferredTime?: string;
+    preferredAreas: string[];
+    responseExpiresAt?: any;
+    targetAreaLabel?: string;
+    budgetPerPlayer?: number;
+    currency?: string;
+    status: ZoneBookingQueueStatus | string;
+    paymentStatus?: "paid" | "unpaid" | string;
+    locationMode?: "zone" | "broadcast" | string;
+    zoneId?: string;
+    lifecycleStatus?: string;
+    allocatedBranchId?: string;
+    allocatedResourceIds?: string[];
+    allocatedAt?: any;
+    allocatedByUid?: string;
+    requestedResourceAssetType?: string;
+    requestedResourceSurface?: string;
+    requestedResourceTier?: string;
+    selectedZoneRateKey?: string;
+    createdAt?: any;
+    updatedAt?: any;
+    assetType: ZoneBookingAssetType;
+    priorityFlags: string[];
+    raw: Record<string, any>;
+}
+
+export interface ZoneMatchroomListItem {
+    id: string;
+    hostUid?: string | null;
+    hostName?: string | null;
+    title: string;
+    game: string;
+    status: string;
+    scheduledDate?: string;
+    scheduledTime?: string;
+    maxPlayers: number;
+    currentPlayers: number;
+    paymentStatus?: string;
+    bookingSource?: string;
+    walkInPaymentMode?: string;
+    location?: string;
+    branchId?: string | null;
+    durationMinutes?: number;
+    pricePerPlayer?: number;
+    totalAmount?: number;
+    currency?: string;
+    zoneId?: string | null;
+    zoneOwnerUid?: string | null;
+    resourceIds?: string[];
+    createdAt?: any;
+    hostSkillTier?: string;
+    hostSkillScore?: number | null;
+    format?: string;
+    seriesType?: string | null;
+    durationHours?: number | null;
+    overs?: number | null;
+    slotsA?: any[];
+    slotsB?: any[];
+}
+
+export type ZonePageResult<T> = {
+    page: T[];
+    isDone: boolean;
+    continueCursor: string | null;
+    total?: number;
+};
+
+const POLL_INTERVAL_MS = 5000;
+const queuePollingState = new Map<string, SharedPollingState<ZoneBookingQueueItem>>();
+const matchroomPollingState = new Map<string, SharedPollingState<ZoneMatchroomListItem>>();
+
+function normalizeHintList(values?: string[]) {
+    return (values || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 10)
+        .sort();
+}
+
+function normalizeAreaList(values: string[]) {
+    return values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .sort();
+}
+
+function makeQueueSubscriptionKey(zoneId: string, branchAreas: string[]) {
+    return JSON.stringify({
+        zoneId,
+        branchAreas: normalizeAreaList(branchAreas),
+    });
+}
+
+function makeMatchroomSubscriptionKey(zoneId: string, ownerUid?: string, locationHints?: string[]) {
+    return JSON.stringify({
+        zoneId,
+        ownerUid: ownerUid || "",
+        locationHints: normalizeHintList(locationHints),
+    });
+}
+
+const ACTIVE_QUEUE_STATUSES = new Set([
+    "open",
+    "pending_payment",
+    "accepted",
+]);
+
+const normalizeGameKey = (value: unknown) =>
+    String(value || "").trim().toLowerCase();
+
+const computeAssetTypeFromGame = (gameKey: string): ZoneBookingAssetType => {
+    if (["cs2", "cs16", "valorant"].includes(gameKey)) return "pc";
+    if (["fc25", "fc26", "tekken8"].includes(gameKey)) return "console";
+    if (["futsal", "indoor_cricket", "padel", "pickleball"].includes(gameKey)) return "court";
+    return "unknown";
+};
+
+const computePriorityFlags = (data: Record<string, any>) => {
+    const flags: string[] = [];
+    if ((data.budgetPerPlayer || 0) >= 1500) flags.push("high_value");
+    if (data.teamMode === "team" && (data.reservedSlots || 1) > 1) flags.push("recurring");
+    if (data.isVipRequest === true || data.priority === "vip") flags.push("vip");
+    return flags;
+};
+
+const toDurationMinutes = (request: Record<string, any>) => {
+    const gameKey = String(request.gameKey || "").toLowerCase();
+    const seriesType = String(request.seriesType || "").toUpperCase();
+    const overs = String(request.overs || "").trim();
+
+    if (gameKey === "futsal") {
+        const hours = Number(request.durationHours || 0);
+        if (Number.isFinite(hours) && hours > 0) return Math.round(hours * 60);
+        return 60;
+    }
+    if (gameKey === "indoor_cricket") {
+        if (overs === "6") return 150;
+        if (overs === "5") return 120;
+        return 120;
+    }
+    if (gameKey === "cs2" || gameKey === "cs16" || gameKey === "valorant") {
+        if (seriesType === "BO1") return 60;
+        if (seriesType === "BO3") return 180;
+        if (seriesType === "BO5") return 300;
+        if (seriesType === "BO10") return 600;
+        return 60;
+    }
+    if (gameKey === "fc26") {
+        if (seriesType === "BO1") return 30;
+        if (seriesType === "BO3") return 60;
+        if (seriesType === "BO5") return 120;
+        if (seriesType === "BO10") return 180;
+        return 60;
+    }
+    if (gameKey === "tekken8") {
+        if (seriesType === "BO7") return 60;
+        if (seriesType === "BO20") return 120;
+        if (seriesType === "BO40") return 180;
+        return 60;
+    }
+    if (gameKey === "padel" || gameKey === "pickleball") {
+        if (seriesType === "BO5") return 120;
+        if (seriesType === "BO10") return 180;
+        return 60;
+    }
+    return 60;
+};
+
+const toDateString = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.length >= 8) return trimmed;
+    }
+    if (typeof value === "number") {
+        return new Date(value).toISOString().slice(0, 10);
+    }
+    return undefined;
+};
+
+const toTimeString = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === "string") return value.trim();
+    if (typeof value === "number") {
+        return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return undefined;
+};
+
+const toClockMinutes = (value: unknown) => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const twelveHour = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (twelveHour) {
+        let hour = Number(twelveHour[1]);
+        const minute = Number(twelveHour[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+            return null;
+        }
+        const period = twelveHour[3].toUpperCase();
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
+        return hour * 60 + minute;
+    }
+    const twentyFourHour = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!twentyFourHour) return null;
+    const hour = Number(twentyFourHour[1]);
+    const minute = Number(twentyFourHour[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+    }
+    return hour * 60 + minute;
+};
+
+const toLocalDateTimeMillis = (dateValue?: string, timeValue?: string) => {
+    const date = String(dateValue || "").trim();
+    const clockMinutes = toClockMinutes(timeValue);
+    const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match || clockMinutes === null) return undefined;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const value = new Date(
+        year,
+        month - 1,
+        day,
+        Math.floor(clockMinutes / 60),
+        clockMinutes % 60,
+        0,
+        0,
+    ).getTime();
+    return Number.isFinite(value) ? value : undefined;
+};
+
+const normalizeBookingRequest = (data: Record<string, any>): ZoneBookingQueueItem => {
+    const gameKey = normalizeGameKey(data.gameKey);
+    const id = data.id || data._id || "";
+
+    return {
+        id: String(id),
+        requestId: String(data.requestId || id),
+        matchroomId: data.matchroomId ? String(data.matchroomId) : undefined,
+        userId: data.userId || "",
+        userName: data.userName || "Player",
+        title: data.title || "Booking Request",
+        gameKey,
+        maxPlayers: Number(data.maxPlayers || data.playerCount || 0),
+        playerCount: Number(data.playerCount || data.maxPlayers || 0) || undefined,
+        reservedSlots: Number(data.reservedSlots || 0) || undefined,
+        teamMode: data.teamMode,
+        preferredDate: data.preferredDate,
+        preferredTime: data.preferredTime,
+        preferredAreas: Array.isArray(data.preferredAreas) ? data.preferredAreas : [],
+        requestKind: data.requestKind || "direct_zone",
+        responseExpiresAt: data.responseExpiresAt,
+        targetAreaLabel: data.targetAreaLabel || undefined,
+        budgetPerPlayer: Number(data.budgetPerPlayer || 0) || undefined,
+        currency: data.currency || "PKR",
+        status: data.status || "open",
+        paymentStatus: data.paymentStatus || "unpaid",
+        locationMode: data.locationMode,
+        zoneId: data.zoneId ? String(data.zoneId) : undefined,
+        lifecycleStatus: data.lifecycleStatus,
+        allocatedBranchId: data.allocatedBranchId || undefined,
+        allocatedResourceIds: Array.isArray(data.allocatedResourceIds)
+            ? data.allocatedResourceIds.map((resourceId: any) => String(resourceId))
+            : undefined,
+        allocatedAt: data.allocatedAt,
+        allocatedByUid: data.allocatedByUid || undefined,
+        requestedResourceAssetType: data.requestedResourceAssetType || undefined,
+        requestedResourceSurface: data.requestedResourceSurface || undefined,
+        requestedResourceTier: data.requestedResourceTier || undefined,
+        selectedZoneRateKey: data.selectedZoneRateKey || undefined,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+        assetType: computeAssetTypeFromGame(gameKey),
+        priorityFlags: computePriorityFlags(data),
+        raw: data,
+    };
+};
+
+const normalizeZoneMatchroom = (data: Record<string, any>): ZoneMatchroomListItem => {
+    const perPlayer = Number(data.pricing?.perPlayer ?? data.pricePerPlayer ?? 0);
+    const playersForAmount = Number(data.currentPlayers || data.maxPlayers || 0);
+    const fallbackTotal = perPlayer > 0 && playersForAmount > 0 ? perPlayer * playersForAmount : 0;
+    const totalAmountRaw = Number(data.pricing?.total ?? data.totalAmount ?? fallbackTotal ?? 0);
+    const durationMinutesRaw = Number(
+        data.durationMinutes ??
+        ((Number(data.durationHours || 0) > 0 ? Number(data.durationHours) * 60 : 0)),
+    );
+
+    return {
+        id: String(data.id || data._id),
+        hostUid: data.hostUid || null,
+        hostName: data.hostName || null,
+        title: data.title || "Matchroom",
+        game: data.game || "unknown",
+        status: data.status || "open",
+        scheduledDate: data.scheduledDate,
+        scheduledTime: data.scheduledTime,
+        maxPlayers: Number(data.maxPlayers || 0),
+        currentPlayers: Number(data.currentPlayers || 0),
+        paymentStatus: data.paymentStatus || "unpaid",
+        bookingSource: data.bookingSource || "standard",
+        walkInPaymentMode: data.walkIn?.paymentMode || null,
+        location: data.location || null,
+        branchId: data.branchId || data.walkIn?.branchId || null,
+        durationMinutes: Number.isFinite(durationMinutesRaw) ? durationMinutesRaw : 0,
+        pricePerPlayer: Number.isFinite(perPlayer) ? perPlayer : 0,
+        totalAmount: Number.isFinite(totalAmountRaw) ? totalAmountRaw : 0,
+        currency: data.pricing?.currency || data.currency || "PKR",
+        zoneId: data.zoneId || null,
+        zoneOwnerUid: data.zoneOwnerUid || null,
+        resourceIds: Array.isArray(data.resourceIds)
+            ? data.resourceIds.map((id: any) => String(id)).filter(Boolean)
+            : [],
+        createdAt: data.createdAt,
+        hostSkillTier: data.hostSkillTier || "Any",
+        hostSkillScore: data.hostSkillScore ?? null,
+        format: data.format,
+        seriesType: data.seriesType || null,
+        durationHours: data.durationHours || null,
+        overs: data.overs ? Number(data.overs) : null,
+        slotsA: data.slotsA || [],
+        slotsB: data.slotsB || [],
+    };
+};
+
+export async function fetchZoneBookingQueuePage(input: {
+    zoneId: string;
+    branchAreas?: string[];
+    limit?: number;
+    cursor?: string | null;
+    filters?: {
+        requestKind?: string;
+        status?: string;
+        branchId?: string;
+        game?: string;
+        dateFrom?: number;
+        dateTo?: number;
+        searchText?: string;
+    };
+}): Promise<ZonePageResult<ZoneBookingQueueItem>> {
+    const result = await convex.query((api as any).zoneAdminBooking.listBookingQueuePageForZone, {
+        zoneId: input.zoneId,
+        branchAreas: normalizeAreaList(input.branchAreas || []),
+        limit: input.limit || 20,
+        cursor: input.cursor ?? null,
+        filters: input.filters,
+    });
+    const page = (result?.page || [])
+        .map((row: any) => normalizeBookingRequest(row))
+        .filter((item: ZoneBookingQueueItem) => ACTIVE_QUEUE_STATUSES.has(item.status));
+    return {
+        page,
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total ?? page.length),
+    };
+}
+
+export async function fetchZoneMatchroomsPage(input: {
+    zoneId: string;
+    limit?: number;
+    cursor?: string | null;
+    filters?: {
+        status?: string;
+        bookingSource?: string;
+        paymentStatus?: string;
+        dateFrom?: number;
+        dateTo?: number;
+        searchText?: string;
+    };
+}): Promise<ZonePageResult<ZoneMatchroomListItem>> {
+    const result = await convex.query((api as any).zoneAdminBooking.listMatchroomsPageForZone, {
+        zoneId: input.zoneId,
+        limit: input.limit || 20,
+        cursor: input.cursor ?? null,
+        filters: input.filters,
+    });
+    const page = (result?.page || []).map((row: any) => normalizeZoneMatchroom(row));
+    return {
+        page,
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total ?? page.length),
+    };
+}
+
+/**
+ * Subscribe to zone booking queue using polling.
+ * For real-time reactivity, use useQuery(api.zoneAdminBooking.listBookingQueueForZone) in components.
+ */
+export function subscribeZoneBookingQueue(
+    zoneId: string,
+    branchAreas: string[],
+    onData: (rows: ZoneBookingQueueItem[]) => void,
+    onError: (error: any) => void,
+) {
+    const key = makeQueueSubscriptionKey(zoneId, branchAreas);
+    const callbackRef: PollingSubscriptionCallback<ZoneBookingQueueItem> = { onData, onError };
+    let state = queuePollingState.get(key);
+
+    if (!state) {
+        state = createSharedPollingState();
+        queuePollingState.set(key, state);
+    }
+
+    state.callbacks.add(callbackRef);
+    replayPollingRows(state, callbackRef);
+
+    const poll = async (currentState: SharedPollingState<ZoneBookingQueueItem>) => {
+        if (currentState.inFlight) return;
+        currentState.inFlight = true;
+        try {
+            const results = await convex.query(api.zoneAdminBooking.listBookingQueueForZone, {
+                zoneId,
+                branchAreas: normalizeAreaList(branchAreas),
+            });
+
+            const normalized = results
+                .map((r: any) => normalizeBookingRequest(r))
+                .filter((item: ZoneBookingQueueItem) => ACTIVE_QUEUE_STATUSES.has(item.status));
+            recordRateMetric("zone_admin.booking_queue_reads_per_minute", normalized.length, {
+                zoneId,
+            });
+
+            publishPollingRows(currentState, normalized);
+        } catch (error: any) {
+            Logger.error("zoneAdminBooking", "Queue poll failed", error);
+            currentState.callbacks.forEach((callback) => callback.onError(error));
+        } finally {
+            currentState.inFlight = false;
+        }
+    };
+
+    if (!state.interval) {
+        void poll(state);
+        state.interval = setInterval(() => {
+            void poll(state!);
+        }, POLL_INTERVAL_MS);
+    }
+
+    return () => {
+        releasePollingSubscription(queuePollingState, key, callbackRef);
+    };
+}
+
+/**
+ * Subscribe to zone matchrooms using polling.
+ * For real-time reactivity, use useQuery(api.zoneAdminBooking.listMatchroomsForZone) in components.
+ */
+export function subscribeZoneMatchrooms(
+    zoneId: string,
+    ownerUid: string | undefined,
+    onData: (rows: ZoneMatchroomListItem[]) => void,
+    onError: (error: any) => void,
+    options?: {
+        locationHints?: string[];
+    },
+) {
+    const key = makeMatchroomSubscriptionKey(zoneId, ownerUid, options?.locationHints);
+    const callbackRef: PollingSubscriptionCallback<ZoneMatchroomListItem> = { onData, onError };
+    let state = matchroomPollingState.get(key);
+
+    if (!state) {
+        state = createSharedPollingState();
+        matchroomPollingState.set(key, state);
+    }
+
+    state.callbacks.add(callbackRef);
+    replayPollingRows(state, callbackRef);
+
+    const poll = async (currentState: SharedPollingState<ZoneMatchroomListItem>) => {
+        if (currentState.inFlight) return;
+        currentState.inFlight = true;
+        try {
+            const results = await convex.query(api.zoneAdminBooking.listMatchroomsForZone, {
+                zoneId,
+                ownerUid: ownerUid || undefined,
+                locationHints: normalizeHintList(options?.locationHints),
+            });
+
+            const rows: ZoneMatchroomListItem[] = results.map((data: any) => normalizeZoneMatchroom(data));
+
+            recordRateMetric("zone_admin.matchroom_reads_per_minute", rows.length, {
+                zoneId,
+            });
+
+            publishPollingRows(currentState, rows);
+        } catch (error: any) {
+            Logger.error("zoneAdminBooking", "Matchroom poll failed", error);
+            currentState.callbacks.forEach((callback) => callback.onError(error));
+        } finally {
+            currentState.inFlight = false;
+        }
+    };
+
+    if (!state.interval) {
+        void poll(state);
+        state.interval = setInterval(() => {
+            void poll(state!);
+        }, POLL_INTERVAL_MS);
+    }
+
+    return () => {
+        releasePollingSubscription(matchroomPollingState, key, callbackRef);
+    };
+}
+
+export async function acceptZoneBookingRequest(input: {
+    requestId: string;
+    adminUid: string;
+    zoneId: string;
+    branchId: string;
+    resourceIds: string[];
+    requestOwnerUid?: string;
+    note?: string;
+    branchName?: string;
+    location?: string;
+    zoneName?: string;
+}): Promise<{ ok: true; message?: string; matchroomId?: string } | { ok: false; message: string }> {
+    try {
+        // Get the booking request to build matchroom data
+        const request = await convex.query(api.bookings.getRequestById, {
+            requestId: input.requestId as Id<"bookingRequests">,
+        });
+
+        if (!request) {
+            return { ok: false, message: "Booking request not found." };
+        }
+
+        if (!input.resourceIds.length) {
+            return { ok: false, message: "Select at least one resource." };
+        }
+
+        const requestData = request as any;
+        const requestOwnerUid = String(requestData.userId || input.requestOwnerUid || "");
+        if (!requestOwnerUid) {
+            return { ok: false, message: "Request owner missing." };
+        }
+
+        const scheduledDate = toDateString(requestData.preferredDate);
+        const scheduledTime = toTimeString(requestData.preferredTime);
+        const paymentSlots = Number(requestData.paymentReservedSlots || requestData.reservedSlots || 1);
+        const paymentAmount = Math.max(0, Number(requestData.budgetPerPlayer || 0) * paymentSlots);
+        const durationMinutes = toDurationMinutes(requestData);
+        const scheduledStartAt = toLocalDateTimeMillis(scheduledDate, scheduledTime);
+        const expiresAt = scheduledStartAt
+            ? scheduledStartAt + Math.max(30, durationMinutes) * 60 * 1000
+            : Date.now() + 48 * 60 * 60 * 1000;
+
+        const matchroomData = {
+            hostUid: requestOwnerUid,
+            hostName: requestData.userName || "Player",
+            game: requestData.gameKey || "unknown",
+            title: requestData.title || "Zone Booking",
+            description: requestData.description || "Accepted zone booking request",
+            maxPlayers: Number(requestData.maxPlayers || requestData.playerCount || 10),
+            players: [{
+                uid: requestOwnerUid,
+                username: requestData.userName || "Player",
+                joinedAt: Date.now(),
+                role: "Host",
+            }],
+            playerUids: [requestOwnerUid],
+            location: input.location || input.branchName || input.zoneName || "Zone Venue",
+            locationMode: "zone" as const,
+            scheduledDate,
+            scheduledTime,
+            scheduledStartAt,
+            lockAt: getMatchroomLockAtMs(scheduledStartAt) ?? undefined,
+            expiresAt,
+            durationMinutes,
+            pricing: {
+                perPlayer: Number(requestData.budgetPerPlayer || 0),
+                currency: requestData.currency || "PKR",
+            },
+            slotsA: [] as any[],
+            slotsB: [] as any[],
+            format: requestData.format,
+            seriesType: requestData.seriesType || undefined,
+            selectedMaps: requestData.selectedMaps || [],
+            skillLevel: requestData.skillLevel,
+            hostSkillTier: requestData.hostSkillTier ?? "Any",
+            hostSkillScore: requestData.hostSkillScore ?? undefined,
+            hostSkillContext: requestData.hostSkillContext,
+            teamMode: requestData.teamMode,
+            teamId: requestData.teamId || undefined,
+            reservedSlots: requestData.reservedSlots,
+            paymentStatus: (requestData.paymentStatus || "unpaid") as "paid" | "unpaid",
+            paymentAmount,
+            paymentReservedSlots: paymentSlots,
+            paymentCurrency: requestData.currency || "PKR",
+            isLocked: false,
+            zoneAdminApproved: true,
+            overs: requestData.overs ? Number(requestData.overs) : undefined,
+            durationHours: requestData.durationHours || undefined,
+            flexibility: requestData.flexibilityWindow,
+        };
+
+        const result = await convex.mutation(api.zoneAdminBooking.acceptBookingRequest, {
+            requestId: input.requestId as Id<"bookingRequests">,
+            adminUid: input.adminUid,
+            zoneId: input.zoneId,
+            branchId: input.branchId,
+            resourceIds: input.resourceIds as Id<"zoneResources">[],
+            requestOwnerUid: input.requestOwnerUid,
+            note: input.note,
+            branchName: input.branchName,
+            location: input.location,
+            zoneName: input.zoneName,
+            matchroomData,
+        });
+
+        const matchroomId = result?.matchroomId ? String(result.matchroomId) : undefined;
+        if (matchroomId) {
+            return { ok: true, matchroomId };
+        }
+
+        const updatedRequest = await convex.query(api.bookings.getRequestById, {
+            requestId: input.requestId as Id<"bookingRequests">,
+        });
+        return {
+            ok: true,
+            matchroomId: updatedRequest?.matchroomId ? String(updatedRequest.matchroomId) : undefined,
+        };
+    } catch (error: any) {
+        logBookingActionError("Failed to accept request", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to accept request.") };
+    }
+}
+
+export async function rejectZoneBookingRequest(input: {
+    requestId: string;
+    adminUid: string;
+    zoneId: string;
+    requestOwnerUid?: string;
+    reason: string;
+    note?: string;
+    alternative?: string;
+}): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+    try {
+        await convex.mutation(api.zoneAdminBooking.rejectBookingRequest, {
+            requestId: input.requestId as Id<"bookingRequests">,
+            adminUid: input.adminUid,
+            zoneId: input.zoneId,
+            requestOwnerUid: input.requestOwnerUid,
+            reason: input.reason,
+            note: input.note,
+            alternative: input.alternative,
+        });
+
+        return { ok: true };
+    } catch (error: any) {
+        logBookingActionError("Failed to reject request", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reject request.") };
+    }
+}
+
+export async function sendZoneCounterOffer(input: {
+    requestId: string;
+    requestOwnerUid: string;
+    zoneId: string;
+    zoneName: string;
+    zoneOwnerUid: string;
+    adminUid?: string;
+    branchId?: string;
+    branchName?: string;
+    resourceIds?: string[];
+    scheduleOptions: Array<{
+        date: string;
+        time: string;
+        endTime?: string;
+        startAt?: number;
+    }>;
+    pricePerPlayer: number;
+    currency?: string;
+    location?: string;
+    message?: string;
+    expiresInMinutes?: number;
+    originalStartAt?: number;
+    proposedStartAts?: number[];
+}): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
+    try {
+        const offerId = await convex.mutation(api.zoneAdminBooking.sendCounterOffer, {
+            requestId: input.requestId as Id<"bookingRequests">,
+            requestOwnerUid: input.requestOwnerUid,
+            zoneId: input.zoneId as Id<"zones">,
+            zoneName: input.zoneName,
+            zoneOwnerUid: input.zoneOwnerUid,
+            adminUid: input.adminUid,
+            branchId: input.branchId,
+            branchName: input.branchName,
+            resourceIds: (input.resourceIds || []) as Id<"zoneResources">[],
+            scheduleOptions: input.scheduleOptions,
+            pricePerPlayer: input.pricePerPlayer,
+            currency: input.currency,
+            location: input.location,
+            message: input.message,
+            expiresInMinutes: input.expiresInMinutes,
+            originalStartAt: input.originalStartAt,
+            proposedStartAts: input.proposedStartAts,
+        });
+
+        return { ok: true, id: offerId };
+    } catch (error: any) {
+        logBookingActionError("Failed to send counter offer", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send counter-offer.") };
+    }
+}
+
+export async function respondToZoneCounterOffer(input: {
+    offerId: string;
+    responderUid: string;
+    decision: "accepted" | "rejected";
+    selectedOptionIndex?: number;
+}): Promise<{
+    ok: true;
+    status?: string;
+    matchroomId?: string;
+    locked?: boolean;
+    alreadyClosed?: boolean;
+    message?: string;
+} | { ok: false; message: string }> {
+    try {
+        const result = await convex.mutation(api.zoneAdminBooking.respondToCounterOffer, {
+            offerId: input.offerId as Id<"zoneOffers">,
+            responderUid: input.responderUid,
+            decision: input.decision,
+            selectedOptionIndex: input.selectedOptionIndex,
+        });
+        const response = result as any;
+
+        return {
+            ok: true,
+            status: response?.status,
+            matchroomId: response?.matchroomId,
+            locked: response?.locked === true,
+            alreadyClosed: response?.alreadyClosed === true,
+            message: response?.message,
+        };
+    } catch (error: any) {
+        Logger.warn("zoneAdminBooking", "Failed to respond to counter offer", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to time options.") };
+    }
+}
+
+export async function createZoneWalkInMatchroom(input: {
+    zoneId: string;
+    zoneOwnerUid: string;
+    branchId?: string | null;
+    branchName?: string | null;
+    adminUid: string;
+    adminName: string;
+    gameKey: string;
+    title: string;
+    scheduledDate: string;
+    scheduledTime: string;
+    durationMinutes: number;
+    seriesType?: string | null;
+    seatCount: number;
+    bookedSeatCount?: number;
+    paymentMode?: "venue_pay" | "guest_pay" | "matchhai_pay";
+    paymentStatus?: "paid" | "unpaid";
+    paymentAmount?: number;
+    paymentReservedSlots?: number;
+    paymentMethod?: "wallet" | "easypaisa" | "free" | string;
+    clientCreateRequestId?: string;
+    sourcePaymentOrderRefNum?: string;
+    pricePerPlayer?: number;
+    currency?: string;
+    captainSeatNumber?: number | null;
+        knownPlayers?: Array<{
+        uid: string;
+        username: string;
+        skillTier?: "Beginner" | "Casual" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+        seatNumber?: number;
+        isCaptain?: boolean;
+    }>;
+}): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
+    try {
+        const knownPlayersRaw = Array.isArray(input.knownPlayers) ? input.knownPlayers : [];
+        const totalSeats = Math.max(1, Math.floor(input.seatCount));
+        const allowedSkillTiers = new Set(["Beginner", "Casual", "Intermediate", "Advanced", "Pro", "Elite"]);
+
+        const knownPlayers = knownPlayersRaw.slice(0, totalSeats).map((player, index) => {
+            const rawTier = String(player?.skillTier || "").trim();
+            const normalizedTier = allowedSkillTiers.has(rawTier) ? rawTier : "Beginner";
+            return {
+                uid: String(player?.uid || `walkin_guest_${index + 1}`),
+                username: String(player?.username || "").trim() || `Player ${index + 1}`,
+                skillTier: normalizedTier as "Beginner" | "Casual" | "Intermediate" | "Advanced" | "Pro" | "Elite",
+                seatNumber: Number.isFinite(player?.seatNumber)
+                    ? Math.max(1, Math.floor(Number(player.seatNumber)))
+                    : index + 1,
+                isCaptain: Boolean(player?.isCaptain),
+            };
+        });
+
+        const explicitBookedSeatCount = Number.isFinite(input.bookedSeatCount)
+            ? Math.max(0, Math.floor(Number(input.bookedSeatCount)))
+            : 0;
+        const bookedSeatCount = Math.min(
+            totalSeats,
+            Math.max(knownPlayers.length, explicitBookedSeatCount),
+        );
+
+        const pricePerPlayer = Number.isFinite(input.pricePerPlayer)
+            ? Math.max(0, Number(input.pricePerPlayer))
+            : 0;
+        const paymentMode = input.paymentMode || "matchhai_pay";
+        const paymentAmount = Number.isFinite(input.paymentAmount)
+            ? Math.max(0, Math.ceil(Number(input.paymentAmount)))
+            : Math.max(0, Math.ceil(pricePerPlayer * bookedSeatCount));
+        const paymentReservedSlots = Number.isFinite(input.paymentReservedSlots)
+            ? Math.max(0, Math.floor(Number(input.paymentReservedSlots)))
+            : bookedSeatCount;
+
+        const paymentStatus: "paid" | "unpaid" =
+            input.paymentStatus === "paid" || input.paymentStatus === "unpaid"
+                ? input.paymentStatus
+                : paymentMode === "venue_pay" || paymentAmount <= 0
+                    ? "paid"
+                    : "unpaid";
+        const isPaymentSuccessful = paymentStatus === "paid";
+
+        const createOpenSlot = (slotId: string) => ({
+            slotId,
+            status: "open" as const,
+            role: "Player",
+        });
+
+        const hydrateSlots = (slotsA: any[], slotsB: any[]) => {
+            const allSlots = [...slotsA, ...slotsB];
+            for (let index = 0; index < allSlots.length; index += 1) {
+                const slot = allSlots[index];
+                if (index < knownPlayers.length) {
+                    const player = knownPlayers[index];
+                    slot.status = isPaymentSuccessful ? "confirmed" : "reserved";
+                    slot.uid = player.uid;
+                    slot.user = {
+                        uid: player.uid,
+                        username: player.username,
+                        skillTier: player.skillTier,
+                    };
+                    if (!isPaymentSuccessful) {
+                        slot.role = "Booked";
+                    }
+                } else if (index < bookedSeatCount) {
+                    slot.status = "reserved";
+                    slot.role = "Booked";
+                }
+            }
+            return { slotsA, slotsB };
+        };
+
+        const { slotsA, slotsB } = (() => {
+            if (totalSeats % 2 !== 0) {
+                const localSlotsA = Array.from({ length: totalSeats }, (_, idx) => createOpenSlot(`A${idx + 1}`));
+                return hydrateSlots(localSlotsA, []);
+            }
+            const teamSize = Math.max(1, totalSeats / 2);
+            const localSlotsA = Array.from({ length: teamSize }, (_, idx) => createOpenSlot(`A${idx + 1}`));
+            const localSlotsB = Array.from({ length: teamSize }, (_, idx) => createOpenSlot(`B${idx + 1}`));
+            return hydrateSlots(localSlotsA, localSlotsB);
+        })();
+
+        // Determine captains
+        const captainsByFlag = knownPlayers.filter((player) => player.isCaptain);
+        let captainUidA: string | undefined = undefined;
+        let captainUidB: string | undefined = undefined;
+
+        if (captainsByFlag.length > 0) {
+            captainsByFlag.forEach(captain => {
+                if (!captain.uid) return;
+                const inTeamA = slotsA.some((slot: any) => (slot.user?.uid || slot.uid) === captain.uid);
+                const inTeamB = slotsB.some((slot: any) => (slot.user?.uid || slot.uid) === captain.uid);
+                if (inTeamA) captainUidA = captain.uid;
+                if (inTeamB) captainUidB = captain.uid;
+            });
+        } else {
+            const captainSeatByInput = Number.isFinite(input.captainSeatNumber)
+                ? Math.max(1, Math.min(totalSeats, Math.floor(Number(input.captainSeatNumber))))
+                : null;
+            const captainBySeat = captainSeatByInput ? knownPlayers[captainSeatByInput - 1] || null : null;
+            const fallbackCaptain = captainBySeat || knownPlayers[0] || null;
+
+            if (fallbackCaptain?.uid) {
+                const inTeamA = slotsA.some((slot: any) => (slot.user?.uid || slot.uid) === fallbackCaptain.uid);
+                const inTeamB = slotsB.some((slot: any) => (slot.user?.uid || slot.uid) === fallbackCaptain.uid);
+                if (inTeamA || slotsB.length === 0) {
+                    captainUidA = fallbackCaptain.uid;
+                } else if (inTeamB) {
+                    captainUidB = fallbackCaptain.uid;
+                }
+            }
+        }
+
+        const players = knownPlayers.map((player) => ({
+            uid: player.uid,
+            username: player.username,
+            joinedAt: Date.now(),
+            role: "Player" as const,
+        }));
+
+        const walkInData = {
+            paymentMode,
+            paymentAmount,
+            paymentReservedSlots,
+            paymentStatus,
+            paymentMethod: input.paymentMethod || null,
+            seatCount: totalSeats,
+            bookedSeatCount,
+            knownPlayerCount: knownPlayers.length,
+            unknownSeatCount: Math.max(0, bookedSeatCount - knownPlayers.length),
+            captainSeatNumber: captainsByFlag[0]?.seatNumber || null,
+            captainUid: captainsByFlag[0]?.uid || null,
+            roster: knownPlayers.map((player) => ({
+                uid: player.uid,
+                username: player.username,
+                skillTier: player.skillTier,
+                seatNumber: player.seatNumber,
+                isCaptain: player.isCaptain,
+            })),
+            branchId: input.branchId || null,
+            branchName: input.branchName || null,
+            createdBy: input.adminUid,
+            createdAt: Date.now(),
+        };
+
+        const matchroomId = await convex.mutation(api.zoneAdminBooking.createWalkInMatchroom, {
+            zoneId: input.zoneId,
+            zoneOwnerUid: input.zoneOwnerUid,
+            branchId: input.branchId || undefined,
+            branchName: input.branchName || undefined,
+            adminUid: input.adminUid,
+            adminName: input.adminName,
+            gameKey: input.gameKey,
+            title: input.title,
+            scheduledDate: input.scheduledDate,
+            scheduledTime: input.scheduledTime,
+            durationMinutes: input.durationMinutes,
+            seriesType: input.seriesType || undefined,
+            seatCount: totalSeats,
+            bookedSeatCount: bookedSeatCount,
+            paymentMode,
+            pricePerPlayer,
+            currency: input.currency,
+            captainSeatNumber: input.captainSeatNumber ?? undefined,
+            knownPlayers: knownPlayers.map((p) => ({
+                uid: p.uid,
+                username: p.username,
+                skillTier: p.skillTier,
+                seatNumber: p.seatNumber,
+                isCaptain: p.isCaptain,
+            })),
+            slotsA,
+            slotsB,
+            captainUidA,
+            captainUidB,
+            players,
+            playerUids: knownPlayers.map((p) => p.uid),
+            currentPlayers: bookedSeatCount,
+            paymentStatus,
+            paymentAmount,
+            paymentReservedSlots,
+            paymentMethod: input.paymentMethod || undefined,
+            clientCreateRequestId: input.clientCreateRequestId || undefined,
+            sourcePaymentOrderRefNum: input.sourcePaymentOrderRefNum || undefined,
+            walkIn: walkInData,
+        });
+
+        return { ok: true, id: matchroomId };
+    } catch (error: any) {
+        logBookingActionError("Failed to create walk-in matchroom", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create walk-in booking.") };
+    }
+}
+
+export async function bookZoneWalkInSeat(input: {
+    matchroomId: string;
+    team: "A" | "B";
+    slotId: string;
+    mode?: "book" | "reserve";
+    playerName?: string;
+    skillTier?: "Beginner" | "Casual" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+}): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+    try {
+        const result = await convex.mutation(api.zoneAdminBooking.bookWalkInSeat, {
+            matchroomId: input.matchroomId,
+            team: input.team,
+            slotId: input.slotId,
+            mode: input.mode || "book",
+            playerName: input.playerName,
+            skillTier: input.skillTier,
+        });
+
+        return {
+            ok: true,
+            message: result?.message || "Seat booked.",
+        };
+    } catch (error: any) {
+        logBookingActionError("Failed to book walk-in seat", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to book walk-in seat.") };
+    }
+}

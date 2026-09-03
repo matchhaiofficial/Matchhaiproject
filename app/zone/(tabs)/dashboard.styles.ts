@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, CONTROL_SIZES, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -7,11 +7,12 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     screenContent: {
-        paddingTop: 0,
+        flex: 1,
+        paddingTop: 10,
         paddingBottom: 0,
     },
-    container: {
-        paddingBottom: 0,
+    zoneAdmincontainer: {
+        paddingBottom: SPACING.lg,
     },
     loadingContainer: {
         flex: 1,
@@ -25,47 +26,16 @@ export default StyleSheet.create({
         paddingBottom: SPACING.xl,
     },
     noZoneCard: {
-        backgroundColor: COLORS.cardDark,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        padding: SPACING.xl,
+        paddingVertical: SPACING.xxl,
+    },
+    rejectedReasonWrap: {
+        marginTop: SPACING.md,
         alignItems: "center",
-    },
-    noZoneIconWrap: {
-        width: 56,
-        height: 56,
-        borderRadius: 18,
-        alignItems: "center",
-        justifyContent: "center",
-        marginBottom: SPACING.md,
-        backgroundColor: "rgba(66,165,245,0.14)",
-        borderWidth: 1,
-        borderColor: "rgba(66,165,245,0.32)",
-    },
-    noZoneIconDanger: {
-        backgroundColor: "rgba(239,83,80,0.14)",
-        borderColor: "rgba(239,83,80,0.32)",
-    },
-    noZoneTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.lg,
-        textAlign: "center",
-    },
-    noZoneText: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.body,
-        textAlign: "center",
-        marginTop: SPACING.sm,
-        lineHeight: 22,
     },
     rejectReason: {
         color: COLORS.error,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.caption,
-        marginTop: SPACING.md,
         textAlign: "center",
     },
     iconButton: {
@@ -81,6 +51,11 @@ export default StyleSheet.create({
     iconButtonPressed: {
         opacity: 0.85,
     },
+    headerActionsRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+    },
     notificationBadge: {
         position: "absolute",
         top: -4,
@@ -93,7 +68,7 @@ export default StyleSheet.create({
         justifyContent: "center",
         backgroundColor: COLORS.error,
         borderWidth: 2,
-        borderColor: COLORS.background,
+        borderColor: COLORS.backgroundDark,
     },
     notificationBadgeText: {
         color: "#fff",
@@ -103,9 +78,9 @@ export default StyleSheet.create({
     heroCard: {
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         backgroundColor: COLORS.cardDark,
-        padding: SPACING.md,
+        padding: SPACING.lg,
         marginBottom: SPACING.md,
     },
     heroRow: {
@@ -113,14 +88,14 @@ export default StyleSheet.create({
         alignItems: "center",
     },
     avatarIconWrap: {
-        width: 54,
-        height: 54,
+        width: 58,
+        height: 58,
         borderRadius: 18,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "rgba(66,165,245,0.15)",
+        backgroundColor: `${COLORS.accent}14`,
         borderWidth: 1,
-        borderColor: "rgba(66,165,245,0.38)",
+        borderColor: `${COLORS.accent}55`,
     },
     heroTextWrap: {
         marginLeft: SPACING.md,
@@ -128,133 +103,84 @@ export default StyleSheet.create({
     },
     heroEyebrow: {
         color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs,
+        fontFamily: FONTS.interMedium,
+        fontSize: 11,
         textTransform: "uppercase",
         letterSpacing: 1,
     },
     heroTitle: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.lg,
+        fontSize: 22,
         marginTop: 2,
     },
     heroSubtitle: {
         color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.caption,
         marginTop: 2,
     },
     tagsRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        marginTop: SPACING.sm,
+        marginTop: SPACING.md,
+        gap: SPACING.sm,
     },
-    tag: {
-        backgroundColor: "rgba(255,255,255,0.05)",
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: RADII.pill,
-        marginRight: SPACING.sm,
-        marginBottom: 6,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.1)",
-    },
-    tagText: {
-        color: COLORS.textSecondary,
-        fontSize: TEXT_SIZES.xs,
-        fontFamily: FONTS.body,
-        textTransform: "uppercase",
-    },
-    tagSuccess: {
-        backgroundColor: "rgba(0,230,118,0.14)",
-        borderColor: "rgba(0,230,118,0.3)",
-    },
-    tagDanger: {
-        backgroundColor: "rgba(239,83,80,0.14)",
-        borderColor: "rgba(239,83,80,0.3)",
-    },
-    tagSuccessText: {
-        color: COLORS.successBright,
-    },
-    tagDangerText: {
-        color: COLORS.error,
-    },
-    coreGrid: {
+    snapshotPanel: {
+        width: "100%",
         flexDirection: "row",
         flexWrap: "wrap",
-        justifyContent: "space-between",
-        marginBottom: SPACING.md,
-    },
-    coreCard: {
-        width: "48%",
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 16,
-        backgroundColor: "rgba(255,255,255,0.04)",
-        padding: SPACING.sm,
-        marginBottom: SPACING.sm,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
+        backgroundColor: COLORS.cardDark,
+        overflow: "hidden",
+        marginBottom: SPACING.md,
     },
-    coreValue: {
+    snapshotItem: {
+        width: "50%",
+        minHeight: 62,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.md,
+    },
+    snapshotItemLeft: {
+        borderRightWidth: StyleSheet.hairlineWidth,
+        borderRightColor: COLORS.cardBorder,
+    },
+    snapshotItemTop: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: COLORS.cardBorder,
+    },
+    snapshotIconWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+    },
+    snapshotTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    snapshotLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interMedium,
+        fontSize: 11,
+        lineHeight: 14,
+    },
+    snapshotValue: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xl,
-    },
-    coreLabel: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
+        fontSize: 19,
+        lineHeight: 23,
+        marginTop: 1,
     },
     section: {
-        marginTop: SPACING.sm,
-    },
-    sectionHeaderRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: SPACING.md,
-    },
-    sectionTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: 18,
-    },
-    sectionLink: {
-        color: COLORS.accent,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    sectionMuted: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    opsCard: {
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        borderRadius: 20,
-        backgroundColor: COLORS.cardDark,
-        padding: SPACING.md,
-    },
-    metricRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        marginBottom: SPACING.xs,
-    },
-    metricLabel: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    metricValue: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption + 1,
-    },
-    emptyText: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
+        marginTop: SPACING.lg,
     },
     matchroomsWrap: {
         gap: SPACING.sm,
@@ -263,92 +189,58 @@ export default StyleSheet.create({
         flexDirection: "row",
         flexWrap: "wrap",
         justifyContent: "space-between",
+        alignItems: "stretch",
     },
     moduleCard: {
-        width: "48%",
+        width: "48.5%",
+        minHeight: 122,
+        marginBottom: SPACING.md,
+    },
+    verificationBanner: {
         borderWidth: 1,
-        borderRadius: 20,
+        borderColor: "rgba(255, 193, 7, 0.35)",
+        backgroundColor: "rgba(255, 193, 7, 0.1)",
+        borderRadius: CONTROL_SIZES.cardRadius,
         padding: SPACING.md,
         marginBottom: SPACING.md,
     },
-    moduleCardPressed: {
-        opacity: 0.9,
-        transform: [{ scale: 0.98 }],
-    },
-    moduleTop: {
+    verificationBannerHeader: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: SPACING.sm,
+        gap: SPACING.sm,
+        marginBottom: SPACING.xs,
     },
-    moduleIconWrap: {
-        width: 48,
-        height: 48,
-        borderRadius: 16,
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        backgroundColor: "rgba(0,0,0,0.2)",
-    },
-    moduleTag: {
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: RADII.pill,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.3)",
-    },
-    moduleTagText: {
-        color: COLORS.text,
-        fontFamily: FONTS.body,
-        fontSize: 10,
-        textTransform: "uppercase",
-    },
-    moduleTitle: {
+    verificationBannerTitle: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.label,
-        marginBottom: 4,
+        fontSize: TEXT_SIZES.body,
     },
-    moduleDescription: {
+    verificationBannerText: {
         color: COLORS.textSecondary,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
-        lineHeight: 17,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
     },
-    opsGrid: {
+    verificationBannerActions: {
         flexDirection: "row",
-        flexWrap: "wrap",
-        justifyContent: "space-between",
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
     },
-    opsTile: {
-        width: "48%",
-        borderWidth: 1,
-        borderRadius: 20,
-        padding: SPACING.md,
-        marginBottom: SPACING.md,
+    verificationActionButton: {
+        flex: 1,
     },
-    opsTileTop: {
+    dashboardLocked: {
+        opacity: 0.48,
+    },
+    dashboardLockState: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
+        gap: SPACING.xs,
         marginBottom: SPACING.sm,
     },
-    opsTileValue: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.lg,
-    },
-    opsTileTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption + 1,
-        marginBottom: 2,
-    },
-    opsTileSubtitle: {
+    dashboardLockStateText: {
         color: COLORS.textSecondary,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
-        lineHeight: 16,
+        fontSize: TEXT_SIZES.caption,
     },
 });
-

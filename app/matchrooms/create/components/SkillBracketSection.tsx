@@ -1,6 +1,6 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { AppIcon } from '../../../../src/components/AppIcon';
 import { SKILL_ASSESSMENT_CONFIG } from '../../../../src/constants/skillQuestions';
 import {
     GameSkillScore,
@@ -42,11 +42,11 @@ const ChipGroup = ({
     <View style={{ marginBottom: 16 }}>
         <Text style={[styles.sectionLabel, { fontSize: 13, marginBottom: 8 }]}>{label}</Text>
         <View style={styles.chipRow}>
-            {options.map((opt) => {
+            {options.map((opt, index) => {
                 const active = selectedValue === opt.value;
                 return (
                     <Pressable
-                        key={String(opt.value)}
+                        key={`${label}:${index}:${opt.label}`}
                         onPress={() => onSelect(opt.value)}
                         style={[
                             styles.optionChip,
@@ -122,12 +122,12 @@ export default function SkillBracketSection({
     const [localSkill, setLocalSkill] = useState<GameSkillScore | null>(null);
 
     useEffect(() => {
-        if (!userProfile?.uid) return;
+        if (!userProfile?._id) return;
 
         const loadSkill = async () => {
             setLoading(true);
             try {
-                const skill = await initializeSkillIfMissing(userProfile.uid, gameKey as any, userProfile);
+                const skill = await initializeSkillIfMissing(userProfile._id, gameKey as any, userProfile);
                 if (skill) {
                     setLocalSkill({ ...skill, rating: clampRating(skill.rating) });
                     if (valueTier === null) {
@@ -144,13 +144,13 @@ export default function SkillBracketSection({
         };
 
         loadSkill();
-    }, [gameKey, userProfile?.uid]);
+    }, [gameKey, userProfile?._id]);
 
     const handleCalibrationComplete = async (answers: Record<string, number>) => {
-        if (!userProfile?.uid) return;
+        if (!userProfile?._id) return;
         setLoading(true);
         try {
-            const res = await saveSelfAssessment(userProfile.uid, gameKey as any, answers);
+            const res = await saveSelfAssessment(userProfile._id, gameKey as any, answers);
             if (res.ok && res.rating !== undefined && res.tier) {
                 const normalizedRating = clampRating(res.rating);
                 const newSkill: GameSkillScore = {
@@ -162,7 +162,7 @@ export default function SkillBracketSection({
                     initialSource: 'questionnaire',
                     initialRating: normalizedRating,
                     lastMatchDate: null,
-                    lastUpdated: new Date()
+                    lastUpdated: Date.now()
                 };
                 setLocalSkill(newSkill);
                 onChange({ score: normalizedRating, tier: res.tier });
@@ -182,7 +182,7 @@ export default function SkillBracketSection({
         );
     }
 
-    const tiers = ['Any', 'Beginner', 'Intermediate', 'Advanced', 'Pro'];
+    const tiers = ['Any', 'Beginner', 'Casual', 'Intermediate', 'Advanced', 'Pro', 'Elite'];
     const hasAssessment = !!SKILL_ASSESSMENT_CONFIG[gameKey];
     const selectedTier = valueTier || 'Any';
 
@@ -200,7 +200,7 @@ export default function SkillBracketSection({
                             <Text style={styles.skillBadgeText}>{localSkill.tier}</Text>
                             <Text style={styles.skillBadgeRating}>MatchHai Score: {clampRating(localSkill.rating)}/100</Text>
                         </View>
-                        <MaterialIcons name="check-circle" size={24} color={COLORS.accent} />
+                        <AppIcon name="check-circle" size={24} color={COLORS.accent} />
                     </View>
 
                     <Text style={[styles.sectionLabel, { fontSize: 13, marginTop: 16, marginBottom: 8 }]}>Match Bracket</Text>

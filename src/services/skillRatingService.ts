@@ -1,19 +1,30 @@
 // src/services/skillRatingService.ts
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db } from '../config/firebaseConfig';
+import { convex } from '../lib/convex';
+import { api } from '../../convex/_generated/api';
+import { Id } from '../../convex/_generated/dataModel';
 import { SKILL_ASSESSMENT_CONFIG } from '../constants/skillQuestions';
-import type { UserProfile } from './userService';
+import { getUserFacingErrorMessage } from '../utils/userFacingErrors';
+import type { UserProfile } from './convex/userService';
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════
 
-export type SkillTier = 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
+export type SkillTier = 'Beginner' | 'Casual' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
+
+export type SaveSelfAssessmentResult =
+    | { ok: true; rating: number; tier: SkillTier }
+    | { ok: false; message: string };
 
 export interface GameSkillScore {
-    // Current rating (0-100)
+    // Current rating (0-100) — UI projection of the server ELO.
     rating: number;
     tier: SkillTier;
+
+    // Dynamic, server-authoritative MatchHai ELO (1000-based). Read-only on the
+    // client: it is computed and written ONLY by the backend after a verified
+    // match result. Optional because pre-existing scores may not have it yet.
+    elo?: number;
 
     // Stats
     matchesPlayed: number;
@@ -25,11 +36,25 @@ export interface GameSkillScore {
     initialRating: number;
 
     // Timestamps
-    lastMatchDate: any; // Firestore Timestamp or Date
-    lastUpdated: any;
+    lastMatchDate: number | null;
+    lastUpdated: number;
 }
 
-export type GameKey = 'cs2' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' | 'padel' | 'pickleball' | 'fc25';
+export type GameKey = 'cs2' | 'cs16' | 'valorant' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' | 'padel' | 'pickleball' | 'fc25';
+
+function getCanonicalGameKey(gameKey: GameKey | string): GameKey {
+    return (gameKey === 'fc25' ? 'fc26' : gameKey) as GameKey;
+}
+
+function getStoredSkillScore(profile: Pick<UserProfile, "skillScores"> | null | undefined, gameKey: GameKey) {
+    const scores = profile?.skillScores as Record<string, GameSkillScore | undefined> | undefined;
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
+    if (!scores) return null;
+    if (canonicalGameKey === 'fc26') {
+        return scores.fc26 || scores.fc25 || null;
+    }
+    return scores[canonicalGameKey] || null;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -37,9 +62,10 @@ export type GameKey = 'cs2' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' |
 
 export const SKILL_THRESHOLDS = {
     BEGINNER: 30,    // 0-30
-    INTERMEDIATE: 60, // 31-60
-    ADVANCED: 80,    // 61-80
-    // PRO: 81-100
+    CASUAL: 50,
+    INTERMEDIATE: 70,
+    ADVANCED: 85,
+    PRO: 95,
 };
 
 const DEFAULT_RATING = 45; // Intermediate by default
@@ -50,9 +76,11 @@ const DEFAULT_RATING = 45; // Intermediate by default
 
 export function getTierFromRating(rating: number): SkillTier {
     if (rating <= SKILL_THRESHOLDS.BEGINNER) return 'Beginner';
+    if (rating <= SKILL_THRESHOLDS.CASUAL) return 'Casual';
     if (rating <= SKILL_THRESHOLDS.INTERMEDIATE) return 'Intermediate';
     if (rating <= SKILL_THRESHOLDS.ADVANCED) return 'Advanced';
-    return 'Pro';
+    if (rating <= SKILL_THRESHOLDS.PRO) return 'Pro';
+    return 'Elite';
 }
 
 function clamp(num: number, min: number, max: number) {
@@ -61,6 +89,42 @@ function clamp(num: number, min: number, max: number) {
 
 function clampRating(value: number) {
     return clamp(value, 0, 100);
+}
+
+export function normalizeSkillScoreForDisplay<T extends Record<string, any>>(
+    score: T | null | undefined
+): (T & { rating: number; tier: SkillTier }) | null {
+    if (!score || typeof score !== 'object') return null;
+    const rawRating = Number(score.rating);
+    if (!Number.isFinite(rawRating)) return null;
+    const rating = clampRating(rawRating);
+    return {
+        ...score,
+        rating,
+        tier: getTierFromRating(rating),
+    };
+}
+
+export function getDisplaySkillScoreForGame(
+    scores: Record<string, GameSkillScore | undefined> | null | undefined,
+    gameKey: string | null | undefined
+): (GameSkillScore & Record<string, any>) | null {
+    if (!scores || !gameKey) return null;
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
+    const candidateKeys =
+        canonicalGameKey === 'fc26'
+            ? ['fc26', 'fc25']
+            : canonicalGameKey === 'tekken8'
+                ? ['tekken8', 'tekken']
+                : canonicalGameKey === 'indoor_cricket'
+                    ? ['indoor_cricket', 'cricket']
+                    : [canonicalGameKey];
+
+    for (const key of candidateKeys) {
+        const normalized = normalizeSkillScoreForDisplay(scores[key]);
+        if (normalized) return normalized as GameSkillScore & Record<string, any>;
+    }
+    return null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -75,10 +139,11 @@ export function calculateInitialRating(
     gameKey: GameKey,
     userProfile: UserProfile
 ): { rating: number; source: GameSkillScore['initialSource'] } {
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
     let rating = DEFAULT_RATING;
     let source: GameSkillScore['initialSource'] = 'questionnaire';
 
-    switch (gameKey) {
+    switch (canonicalGameKey) {
         case 'cs2': {
             // 1. FACEIT Level (1-10)
             if (userProfile.faceitSkillLevel) {
@@ -103,8 +168,15 @@ export function calculateInitialRating(
             break;
         }
 
-        case 'fc26':
-        case 'fc25': {
+        case 'cs16': {
+            break;
+        }
+
+        case 'valorant': {
+            break;
+        }
+
+        case 'fc26': {
             // 1. PSN Hours / Progress
             if (userProfile.psnStats?.fc) {
                 // If we have "progress" from trophies (0-100), use it as a base
@@ -114,9 +186,9 @@ export function calculateInitialRating(
                 }
             }
             // 2. Steam Hours
-            if (userProfile.steamFc26Hours) { // Assuming mapped in profile
-                if (userProfile.steamFc26Hours > 200) rating = Math.max(rating, 50);
-                if (userProfile.steamFc26Hours > 500) rating = Math.max(rating, 70);
+            if ((userProfile as any).steamFc26Hours) { // Assuming mapped in profile
+                if ((userProfile as any).steamFc26Hours > 200) rating = Math.max(rating, 50);
+                if ((userProfile as any).steamFc26Hours > 500) rating = Math.max(rating, 70);
                 source = 'steam';
             }
             break;
@@ -148,6 +220,48 @@ export function calculateScoreFromAnswers(
     gameKey: string,
     answers: Record<string, number>
 ): { rating: number; tier: SkillTier } | null {
+    if (gameKey === 'valorant') {
+        const q1 = answers.recent_rank;
+        const q2 = answers.match_performance;
+        const q3 = answers.game_sense;
+        if ([q1, q2, q3].some((value) => typeof value !== 'number')) return null;
+
+        const totalScore = q1 + q2 + q3;
+        let result: { rating: number; tier: SkillTier };
+
+        if (totalScore <= 5) result = { rating: 20, tier: 'Beginner' };
+        else if (totalScore <= 8) result = { rating: 45, tier: 'Casual' };
+        else if (totalScore <= 11) result = { rating: 65, tier: 'Intermediate' };
+        else if (totalScore <= 13) result = { rating: 82, tier: 'Advanced' };
+        else result = { rating: 97, tier: 'Elite' };
+
+        const capTier = (() => {
+            let capped: SkillTier | null = null;
+            if (q1 === 1) capped = 'Casual';
+            else if (q1 === 2) capped = 'Intermediate';
+            if (q2 === 1) capped = 'Casual';
+            if (q3 === 1) capped = 'Casual';
+            return capped;
+        })();
+
+        if (capTier) {
+            const tierOrder: SkillTier[] = ['Beginner', 'Casual', 'Intermediate', 'Advanced', 'Pro', 'Elite'];
+            if (tierOrder.indexOf(result.tier) > tierOrder.indexOf(capTier)) {
+                const capRatings: Record<SkillTier, number> = {
+                    Beginner: 20,
+                    Casual: 45,
+                    Intermediate: 65,
+                    Advanced: 82,
+                    Pro: 90,
+                    Elite: 97,
+                };
+                result = { rating: capRatings[capTier], tier: capTier };
+            }
+        }
+
+        return result;
+    }
+
     const config = SKILL_ASSESSMENT_CONFIG[gameKey];
     if (!config) return null;
 
@@ -165,14 +279,13 @@ export function calculateScoreFromAnswers(
     // We assume thresholds are sorted by maxScore ascending
     for (const thresh of config.thresholds) {
         if (totalScore <= thresh.maxScore) {
-            // The threshold.rating in config is expected to be 0-100 now. 
+            // The threshold.rating in config is expected to be 0-100 now.
             // If the existing config uses old values, we might need to interpret specifically.
             // As per instruction, we use the config's mapping.
             const normalizedRating = clampRating(thresh.rating);
             return {
                 rating: normalizedRating,
-                // We re-calculate tier to ensure consistency with our new global logic
-                tier: getTierFromRating(normalizedRating)
+                tier: thresh.tier
             };
         }
     }
@@ -189,36 +302,49 @@ export async function saveSelfAssessment(
     uid: string,
     gameKey: GameKey,
     answers: Record<string, number>
-): Promise<{ ok: boolean; rating?: number; tier?: SkillTier }> {
+): Promise<SaveSelfAssessmentResult> {
     try {
-        const result = calculateScoreFromAnswers(gameKey, answers);
-        if (!result) return { ok: false };
+        const canonicalGameKey = getCanonicalGameKey(gameKey);
+        const result = calculateScoreFromAnswers(canonicalGameKey, answers);
+        if (!result) {
+            return {
+                ok: false,
+                message: "Please answer every skill question before continuing.",
+            };
+        }
 
         const normalizedRating = clampRating(result.rating);
-        const normalizedTier = getTierFromRating(normalizedRating);
+        const normalizedTier = result.tier;
 
-        const skillScore: GameSkillScore = {
+        const skillScore = {
             rating: normalizedRating,
             tier: normalizedTier,
             matchesPlayed: 0,
             wins: 0,
             losses: 0,
-            initialSource: 'questionnaire',
+            initialSource: 'questionnaire' as const,
             initialRating: normalizedRating,
-            lastMatchDate: null,
-            lastUpdated: serverTimestamp(),
+            lastMatchDate: null as number | null,
+            lastUpdated: Date.now(),
         };
 
-        const userRef = doc(db, 'users', uid);
-        await updateDoc(userRef, {
-            [`skillScores.${gameKey}`]: skillScore
+        await convex.mutation(api.users.updateSkillScores, {
+            userId: uid as Id<"users">,
+            game: canonicalGameKey as any,
+            skillScore,
         });
 
         return { ok: true, rating: normalizedRating, tier: normalizedTier };
 
     } catch (error) {
         console.error('[skillRatingService] saveSelfAssessment error:', error);
-        return { ok: false };
+        return {
+            ok: false,
+            message: getUserFacingErrorMessage(
+                error,
+                "Could not save your skill check. Please try again.",
+            ),
+        };
     }
 }
 
@@ -231,14 +357,16 @@ export async function initializeSkillIfMissing(
     gameKey: GameKey,
     userProfile: UserProfile
 ): Promise<GameSkillScore | null> {
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
 
     // Check if already exists locally in the passed profile to avoid read
-    if (userProfile.skillScores?.[gameKey]) {
-        return userProfile.skillScores[gameKey]!;
+    const existingSkill = getStoredSkillScore(userProfile, canonicalGameKey);
+    if (existingSkill) {
+        return existingSkill;
     }
 
     // Attempt to calculate from external data
-    const { rating, source } = calculateInitialRating(gameKey, userProfile);
+    const { rating, source } = calculateInitialRating(canonicalGameKey, userProfile);
     const normalizedRating = clampRating(rating);
 
     // If source is 'questionnaire', it means we found no external data.
@@ -258,12 +386,14 @@ export async function initializeSkillIfMissing(
         initialSource: source,
         initialRating: normalizedRating,
         lastMatchDate: null,
-        lastUpdated: serverTimestamp(),
+        lastUpdated: Date.now(),
     };
 
     try {
-        await updateDoc(doc(db, 'users', uid), {
-            [`skillScores.${gameKey}`]: newScore
+        await convex.mutation(api.users.updateSkillScores, {
+            userId: uid as Id<"users">,
+            game: canonicalGameKey as any,
+            skillScore: newScore,
         });
         return newScore;
     } catch (e) {
@@ -273,152 +403,12 @@ export async function initializeSkillIfMissing(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ELO / SKILL UPDATES (MATCH RESULTS)
+// MATCH-RESULT ELO — SERVER-AUTHORITATIVE
 // ═══════════════════════════════════════════════════════════════
-
-/**
- * Valid types for match result
- */
-export type MatchResultOutcome = 'win' | 'loss' | 'draw';
-
-const BASE_K = 4; // Low K because range is small (0-100). Max delta ~4-5 points.
-const PROVISIONAL_K = 8;
-const PROVISIONAL_LIMIT = 20;
-
-/**
- * Calculates ELO Delta based on expected score.
- * Formula: Expected = 1 / (1 + 10^((RatingB - RatingA)/40))
- * Divider is 40 (not 400) because our scale is 0-100.
- */
-export function calculateRatingChange(
-    currentRating: number,
-    opponentRating: number,
-    result: MatchResultOutcome,
-    matchesPlayed: number,
-    confidence: number = 1.0
-): number {
-    // 1. Determine K-Factor
-    const K = matchesPlayed < PROVISIONAL_LIMIT ? PROVISIONAL_K : BASE_K;
-
-    // Scale K by confidence
-    const K_eff = K * confidence;
-
-    // 2. Calculate Expected Score
-    // Divisor 40 scales the 0-100 difference to traditional ELO's 0-1000 equivalent behavior
-    const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - currentRating) / 40));
-
-    // 3. Determine Actual Score
-    let actualScore = 0.5;
-    if (result === 'win') actualScore = 1;
-    else if (result === 'loss') actualScore = 0;
-
-    // 4. Calculate Delta
-    // We round to nearest integer
-    const delta = Math.round(K_eff * (actualScore - expectedScore));
-
-    return delta;
-}
-
-export const applyMatchResult = async (
-    matchId: string,
-    gameKey: string,
-    winnerSide: 'A' | 'B',
-    sideA: string[], // Uids
-    sideB: string[], // Uids
-    confidence: number = 1.0
-) => {
-    try {
-        const { writeBatch } = await import('firebase/firestore');
-        const batch = writeBatch(db);
-        const { getUserProfile } = await import('./userService');
-
-        // Fetch all profiles
-        const allUids = [...sideA, ...sideB];
-        const profiles: Record<string, UserProfile> = {};
-
-        // We need existing ratings to calculate team averages
-        for (const uid of allUids) {
-            const res = await getUserProfile(uid);
-            if (res.ok && res.data) {
-                profiles[uid] = res.data;
-            }
-        }
-
-        // Helper to get rating safely
-        const getRating = (uid: string): number => {
-            const p = profiles[uid];
-            if (!p || !p.skillScores) return 45;
-
-            // Dynamic access with type safety check?
-            // Just cast to any for dynamic property access to avoid TS complexity here
-            const scores = p.skillScores as any;
-            const s = scores[gameKey];
-            if (typeof s?.rating === 'number') {
-                return clampRating(s.rating);
-            }
-            return 45;
-        };
-
-        // Calculate Team Averages
-        const ratingA = sideA.reduce((sum, uid) => sum + getRating(uid), 0) / Math.max(1, sideA.length);
-        const ratingB = sideB.reduce((sum, uid) => sum + getRating(uid), 0) / Math.max(1, sideB.length);
-
-        // Apply updates
-        allUids.forEach(uid => {
-            const isSideA = sideA.includes(uid);
-            const userRating = getRating(uid);
-
-            const p = profiles[uid];
-            // Safe stats access
-            let currentStats = { wins: 0, losses: 0, matchesPlayed: 0 };
-            if (p && p.skillScores) {
-                const scores = p.skillScores as any;
-                const rawStats = scores[gameKey];
-                if (rawStats) {
-                    currentStats = {
-                        wins: rawStats.wins || 0,
-                        losses: rawStats.losses || 0,
-                        matchesPlayed: rawStats.matchesPlayed || 0
-                    };
-                }
-            }
-
-            let result: MatchResultOutcome = 'draw';
-            if (winnerSide === 'A') result = isSideA ? 'win' : 'loss';
-            else if (winnerSide === 'B') result = isSideA ? 'loss' : 'win';
-
-            const opponentRating = isSideA ? ratingB : ratingA;
-
-            const delta = calculateRatingChange(userRating, opponentRating, result, currentStats.matchesPlayed, confidence);
-            const newRating = Math.max(0, Math.min(100, userRating + delta)); // Clamp 0-100
-
-            // Stats Update
-            const newWins = currentStats.wins + (result === 'win' ? 1 : 0);
-            const newLosses = currentStats.losses + (result === 'loss' ? 1 : 0);
-
-            const userRef = doc(db, 'users', uid);
-            const updatePath = `skillScores.${gameKey}`;
-
-            batch.update(userRef, {
-                [`${updatePath}.rating`]: newRating,
-                [`${updatePath}.tier`]: getTierFromRating(newRating),
-                [`${updatePath}.wins`]: newWins,
-                [`${updatePath}.losses`]: newLosses,
-                [`${updatePath}.matchesPlayed`]: currentStats.matchesPlayed + 1,
-                [`${updatePath}.lastMatchDate`]: serverTimestamp(),
-                [`${updatePath}.lastUpdated`]: serverTimestamp(),
-            });
-        });
-
-        // Mark match as processed
-        const matchRef = doc(db, 'matchrooms', matchId);
-        batch.update(matchRef, { skillUpdateApplied: true });
-
-        await batch.commit();
-        return { ok: true };
-
-    } catch (e) {
-        console.error("Error applying skills", e);
-        return { ok: false };
-    }
-};
+//
+// Dynamic ELO from match results is computed and applied entirely on the
+// backend (convex/ratingEngine.ts + convex/matchrooms.ts finalizeMatchroomResult).
+// The client neither calculates deltas nor submits ratings/averages. The former
+// client-side `calculateRatingChange` / `applyMatchResult` helpers were removed
+// to eliminate client-trusted ELO. The 0-100 `rating` shown in the UI is a
+// projection of the server `elo` (rating = (elo - 500) / 10).

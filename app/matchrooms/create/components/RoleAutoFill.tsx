@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
-import { CS2_ROLES, INDOOR_CRICKET_BATTING_ORDER, INDOOR_CRICKET_BATTING_STYLES, INDOOR_CRICKET_BOWLING_ORDER, INDOOR_CRICKET_BOWLING_STYLES, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES } from '../../../../constants/profileOptions';
+import { Text, View } from 'react-native';
+import { CS2_ROLES, INDOOR_CRICKET_BATTING_ORDER, INDOOR_CRICKET_BATTING_STYLES, INDOOR_CRICKET_BOWLING_ORDER, INDOOR_CRICKET_BOWLING_STYLES, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES, VALORANT_ROLES } from '../../../../constants/profileOptions';
+import { AppIcon } from '../../../../src/components/AppIcon';
 import { COLORS, FONTS } from '../../../../src/theme';
+import { MotionPressable } from './MotionPressable';
 import styles from '../create.styles';
 
 // Import from userService - using the existing interface
@@ -22,11 +23,13 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
 
     if (!profile) return null;
 
-    // CS2 & Futsal & Indoor Cricket & Padel Specific Logic with Override
-    if (gameKey === 'cs2' || gameKey === 'futsal' || gameKey === 'indoor_cricket' || gameKey === 'padel' || gameKey === 'pickleball') {
+    // CS-style & sports role logic with override
+    if (gameKey === 'cs2' || gameKey === 'cs16' || gameKey === 'valorant' || gameKey === 'futsal' || gameKey === 'indoor_cricket' || gameKey === 'padel' || gameKey === 'pickleball') {
         const hasRole = !!selectedRole;
         const showAll = isEditing || !hasRole;
-        const rolesList = gameKey === 'cs2'
+        const rolesList = gameKey === 'valorant'
+            ? VALORANT_ROLES
+            : gameKey === 'cs2' || gameKey === 'cs16'
             ? CS2_ROLES
             : (gameKey === 'indoor_cricket'
                 ? INDOOR_CRICKET_ROLES
@@ -51,7 +54,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                             {rolesList.map((role) => {
                                 const isActive = selectedRole === role;
                                 return (
-                                    <TouchableOpacity
+                                    <MotionPressable
                                         key={role}
                                         style={[styles.optionChip, isActive && styles.optionChipActive]}
                                         onPress={() => {
@@ -65,7 +68,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                         <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
                                             {role}
                                         </Text>
-                                    </TouchableOpacity>
+                                    </MotionPressable>
                                 );
                             })}
                         </View>
@@ -73,13 +76,13 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                 ) : (
                     <View style={[styles.chipRow, styles.rolesContainer]}>
                         <View style={styles.roleChipReadOnly}>
-                            <MaterialIcons name="check-circle" size={14} color={COLORS.accent} style={{ marginRight: 4 }} />
+                            <AppIcon name="check-circle" size={14} color={COLORS.accent} style={{ marginRight: 4 }} />
                             <Text style={styles.roleChipTextReadOnly}>{selectedRole}</Text>
                         </View>
                         {onRoleChange && (
-                            <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.marginLeft8}>
-                                <MaterialIcons name="edit" size={16} color={COLORS.accent} />
-                            </TouchableOpacity>
+                            <MotionPressable onPress={() => setIsEditing(true)} style={styles.marginLeft8}>
+                                <AppIcon name="edit" size={16} color={COLORS.accent} />
+                            </MotionPressable>
                         )}
                     </View>
                 )}
@@ -97,7 +100,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                         {INDOOR_CRICKET_BATTING_ORDER.map((pref) => {
                                             const isActive = formData.battingOrder === pref;
                                             return (
-                                                <TouchableOpacity
+                                                <MotionPressable
                                                     key={pref}
                                                     style={[styles.optionChip, isActive && styles.optionChipActive]}
                                                     onPress={() => onChange('battingOrder', pref)}
@@ -105,7 +108,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                                     <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
                                                         {pref}
                                                     </Text>
-                                                </TouchableOpacity>
+                                                </MotionPressable>
                                             );
                                         })}
                                     </View>
@@ -117,7 +120,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                         {INDOOR_CRICKET_BATTING_STYLES.map((style) => {
                                             const isActive = formData.battingStyle === style;
                                             return (
-                                                <TouchableOpacity
+                                                <MotionPressable
                                                     key={style}
                                                     style={[styles.optionChip, isActive && styles.optionChipActive]}
                                                     onPress={() => onChange('battingStyle', style)}
@@ -125,7 +128,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                                     <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
                                                         {style}
                                                     </Text>
-                                                </TouchableOpacity>
+                                                </MotionPressable>
                                             );
                                         })}
                                     </View>
@@ -142,7 +145,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                         {INDOOR_CRICKET_BOWLING_STYLES.map((style) => {
                                             const isActive = formData.bowlingStyle === style;
                                             return (
-                                                <TouchableOpacity
+                                                <MotionPressable
                                                     key={style}
                                                     style={[styles.optionChip, isActive && styles.optionChipActive]}
                                                     onPress={() => onChange('bowlingStyle', style)}
@@ -150,7 +153,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                                     <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
                                                         {style}
                                                     </Text>
-                                                </TouchableOpacity>
+                                                </MotionPressable>
                                             );
                                         })}
                                     </View>
@@ -162,7 +165,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                         {INDOOR_CRICKET_BOWLING_ORDER.map((order) => {
                                             const isActive = formData.bowlingOrder === order;
                                             return (
-                                                <TouchableOpacity
+                                                <MotionPressable
                                                     key={order}
                                                     style={[styles.optionChip, isActive && styles.optionChipActive]}
                                                     onPress={() => onChange('bowlingOrder', order)}
@@ -170,7 +173,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                                                     <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
                                                         {order}
                                                     </Text>
-                                                </TouchableOpacity>
+                                                </MotionPressable>
                                             );
                                         })}
                                     </View>
@@ -216,7 +219,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
             <View style={[styles.chipRow, styles.rolesContainer]}>
                 {roles.map((role: string, index: number) => (
                     <View key={index} style={styles.roleChipReadOnly}>
-                        <MaterialIcons name="check-circle" size={14} color={COLORS.accent} style={{ marginRight: 4 }} />
+                        <AppIcon name="check-circle" size={14} color={COLORS.accent} style={{ marginRight: 4 }} />
                         <Text style={styles.roleChipTextReadOnly}>{role}</Text>
                     </View>
                 ))}

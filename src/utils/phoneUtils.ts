@@ -11,19 +11,24 @@
  *   phoneDigits: 3XXXXXXXXX (last 10 digits)
  */
 export const normalizePakistaniPhone = (value: string) => {
-    const numeric = value.replace(/\D/g, "");
+    const raw = String(value || "").trim();
+    const numeric = raw.replace(/\D/g, "");
 
     let digits = "";
-    if (numeric.startsWith("92")) {
+    if (!numeric) {
+        digits = "";
+    } else if (raw.startsWith("+")) {
+        digits = numeric.startsWith("92") ? numeric.slice(2) : "";
+    } else if (numeric.startsWith("0092")) {
+        digits = numeric.slice(4);
+    } else if (numeric.startsWith("92")) {
         digits = numeric.slice(2);
     } else if (numeric.startsWith("0")) {
         digits = numeric.slice(1);
     } else if (numeric.length === 10) {
         digits = numeric;
     } else {
-        // If it doesn't match standard prefixes but is roughly the right length, 
-        // we take the last 10 digits as a best-effort.
-        digits = numeric.slice(-10);
+        digits = "";
     }
 
     // Ensure we only have 10 digits for the main part
@@ -41,13 +46,21 @@ export const normalizePakistaniPhone = (value: string) => {
  * Formats a phone number for display (messy input -> +92 3XX XXX XXXX or 03XX XXX XXXX)
  */
 export const formatPakistaniPhone = (value: string) => {
-    const numeric = value.replace(/\D/g, "");
+    const raw = String(value || "").trim();
+    const numeric = raw.replace(/\D/g, "");
     if (!numeric) return value;
 
     let prefix = "";
     let rest = numeric;
 
-    if (numeric.startsWith("92")) {
+    if (raw.startsWith("+")) {
+        if (!numeric.startsWith("92")) return value;
+        prefix = "+92 ";
+        rest = numeric.slice(2);
+    } else if (numeric.startsWith("0092")) {
+        prefix = "+92 ";
+        rest = numeric.slice(4);
+    } else if (numeric.startsWith("92")) {
         prefix = "+92 ";
         rest = numeric.slice(2);
     } else if (numeric.startsWith("0")) {

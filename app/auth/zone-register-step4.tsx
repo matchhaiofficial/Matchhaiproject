@@ -1,67 +1,130 @@
-// app/auth/zone-register-step4.tsx
-import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
-import React, { useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import LogoHalo from "../../src/components/LogoHalo";
-import { useToast } from "../../src/hooks/useToast";
+import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
+import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import { AppIcon } from "../../src/components/AppIcon";
+import { AppButton } from "../../src/components/AppPrimitives";
+import Screen from "../../src/components/Screen";
+import { useAuth } from "../../src/context/AuthContext";
+import { APP_ROUTES } from "../../src/navigation/routes";
 import { signUpWithEmail } from "../../src/services/authService";
-import { saveZoneRegistration } from "../../src/services/zoneService";
+import { saveZoneRegistration } from "../../src/services/convex/zoneService";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
+import { useToast } from "../../src/hooks/useToast";
 import styles from "./register.styles";
+import {
+  DEFAULT_CITY,
+  normalizeKarachiAreaLabel,
+} from "../../constants/profileOptions";
 
 export default function AdminRegisterStep4() {
-  const { step1, branches, step4, setStep4, setCurrentStep, resetAll } =
-    useZoneOnboardingStore();
+  const {
+    step1,
+    branches,
+    step4,
+    setStep4,
+    setCurrentStep,
+    registrationPhase = "idle",
+    registrationSubStep = 0,
+    setRegistrationProgress,
+  } = useZoneOnboardingStore();
   const { showToast } = useToast();
+  const { refreshSession } = useAuth();
 
   const [submitting, setSubmitting] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
+  const [currentSubStep, setCurrentSubStep] = useState(0);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const visiblePhase = phase !== "idle" ? phase : registrationPhase;
+  const visibleSubStep = phase !== "idle" ? currentSubStep : registrationSubStep;
 
-  // ---- Derived helpers ----
+  useEffect(() => {
+    setCurrentStep(4);
+  }, [setCurrentStep]);
+
+  useEffect(() => {
+        // Don't redirect away if we're in success flow
+    if (visiblePhase === "success" || visiblePhase === "submitting") return;
+    if (
+      !step1.ownerFullName.trim() ||
+      !step1.venueBrandName.trim() ||
+      !step1.contactEmail.trim() ||
+      !step1.password
+    ) {
+      router.replace("/auth/zone-register");
+      return;
+    }
+
+    if (!branches.length) {
+      router.replace("/auth/zone-register-step2");
+    }
+  }, [branches.length, step1, visiblePhase]);
+
   const allAgreementsChecked = step4.agreeTerms && step4.agreeRevenueShare;
 
-  const toggleAgreeTerms = () => setStep4({ agreeTerms: !step4.agreeTerms });
-  const toggleAgreeRevenueShare = () =>
-    setStep4({ agreeRevenueShare: !step4.agreeRevenueShare });
+  const branchSummaries = useMemo(
+    () =>
+      branches.map((branch) => {
+        const items: string[] = [];
 
-  // ---- Keyboard container ----
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps =
-    Platform.OS === "ios"
-      ? {
-        style: styles.screen,
-        behavior: "padding" as const,
-        keyboardVerticalOffset: 0,
-      }
-      : { style: styles.screen };
+        const pcTotal =
+          Number(branch.pricing.pc?.regular?.count || 0) +
+          Number(branch.pricing.pc?.premium?.count || 0) +
+          Number(branch.pricing.pc?.elite?.count || 0);
+        if (branch.supportsCs2 && pcTotal > 0) items.push(`${pcTotal} PC setups`);
 
-  const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
-  const [currentSubStep, setCurrentSubStep] = useState<number>(0);
-  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+        const consoleTotal =
+          Number(branch.pricing.console?.regular?.count || 0) +
+          Number(branch.pricing.console?.premium?.count || 0) +
+          Number(branch.pricing.console?.elite?.count || 0) +
+          Number(branch.pricing.console?.ps5?.count || 0) +
+          Number(branch.pricing.console?.xbox?.count || 0);
+        if ((branch.supportsFc25 || branch.supportsTekken8) && consoleTotal > 0) {
+          items.push(`${consoleTotal} console units`);
+        }
 
-  // ---- Final submit: create auth user + Firestore zone ----
+        const sumCounts = (record?: Record<string, { count: string; price: string }>) =>
+          Object.values(record || {}).reduce((sum, item) => sum + Number(item.count || 0), 0);
+
+        // Physical sports are temporarily disabled.
+        // if (branch.supportsFutsal) { ... }
+        // if (branch.supportsIndoorCricket) { ... }
+        // if (branch.supportsPadel) { ... }
+        // if (branch.supportsPickleball) { ... }
+
+        return {
+          id: branch.id,
+          branchDisplayName: branch.branchDisplayName,
+          location: [normalizeKarachiAreaLabel(branch.areaLabel), DEFAULT_CITY].filter(Boolean).join(", "),
+          addressLine1: branch.addressLine1,
+          items,
+        };
+      }),
+    [branches],
+  );
+
+  useEffect(() => {
+    if (registrationPhase !== "success") return;
+    const timer = setTimeout(() => {
+      router.replace(APP_ROUTES.zoneHome as any);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [registrationPhase]);
+
   const handleFinish = async () => {
     if (!allAgreementsChecked) {
       showToast({
         type: "info",
         title: "Almost there",
         message:
-          "Please confirm you're authorised and agree to the zone policies to continue.",
+          "Please confirm authority and revenue-share agreement before submitting the zone.",
       });
       return;
     }
 
-    // Safety: ensure basic fields exist
     if (
       !step1.ownerFullName.trim() ||
       !step1.venueBrandName.trim() ||
@@ -72,8 +135,7 @@ export default function AdminRegisterStep4() {
       showToast({
         type: "error",
         title: "Missing details",
-        message:
-          "Some of your zone account details are missing. Please go back and complete all steps.",
+        message: "Some required zone details are missing. Please complete the previous steps.",
       });
       router.replace("/auth/zone-register");
       return;
@@ -81,446 +143,367 @@ export default function AdminRegisterStep4() {
 
     setSubmitting(true);
     setPhase("submitting");
+    setRegistrationProgress("submitting", 1);
     setErrorDetails(null);
 
     try {
-      // PHASE 1: Auth + Basic Profile
       if (currentSubStep <= 0) {
         setCurrentSubStep(1);
-        console.log("[ZoneStep4] Phase 1: Creating administrator account...");
+        setRegistrationProgress("submitting", 1);
         const resSignUp = await signUpWithEmail(
           step1.contactEmail.trim(),
           step1.password,
           step1.ownerFullName.trim(),
           undefined,
           step1.contactPhone.trim(),
-          'zone'
+          "zone",
         );
 
         if (!resSignUp || !resSignUp.ok) {
           throw { step: 1, message: resSignUp?.message || "Admin account creation failed." };
         }
+
+        const sessionReady = await refreshSession();
+        if (!sessionReady) {
+          throw {
+            step: 1,
+            message: "Account created, but session was not ready yet. Please retry once.",
+          };
+        }
       }
 
-      // PHASE 2: Zone + Branches Firestore Save
       if (currentSubStep <= 1) {
         setCurrentSubStep(2);
-        console.log("[ZoneStep4] Phase 2: Saving zone information...");
+        setRegistrationProgress("submitting", 2);
         const resZone = await saveZoneRegistration({ step1, branches });
-
         if (!resZone.ok) {
           throw { step: 2, message: resZone.message || "Failed to save zone data." };
         }
       }
 
-      // SUCCESS
       setCurrentSubStep(3);
+      setRegistrationProgress("submitting", 3);
+      const sessionReady = await refreshSession();
+      if (!sessionReady) {
+        throw {
+          step: 3,
+          message: "Account created, but session was not ready yet. Please try signing in.",
+        };
+      }
+
       setPhase("success");
-      console.log("[ZoneStep4] Zone registration complete!");
+      setRegistrationProgress("success", 3);
 
       setTimeout(() => {
-        setStep4({
-          agreeTerms: true,
-          agreeRevenueShare: true,
-        });
-        setCurrentStep(4);
-        resetAll();
-
         showToast({
           type: "success",
-          title: "Zone submitted",
-          message: "Wait for approval. We'll get back to you soon.",
+          title: "Zone account created",
+          message:
+            "Your dashboard is ready. The venue stays in review until a super admin approves it.",
         });
-        router.replace("/zone");
-      }, 2000);
-
-    } catch (err: any) {
-      console.error("[ZoneStep4] Submission error:", err);
-      const failedAt = err.step || currentSubStep;
-      setCurrentSubStep(failedAt);
+        router.replace(APP_ROUTES.zoneHome as any);
+      }, 650);
+    } catch (error: any) {
+      const failedAt = error.step || currentSubStep;
+      setCurrentSubStep(failedAt - 1); 
       setPhase("partial-fail");
-      setErrorDetails(err.message || "An unexpected error occurred.");
+      setRegistrationProgress("partial-fail", failedAt - 1);
+      setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);
-
       showToast({
         type: "error",
         title: "Submission incomplete",
-        message: err.message || "Something went wrong. You can try again to finish setup.",
+        message: error.message || "Something went wrong. You can try again to finish setup.",
       });
     }
   };
 
   const renderLoadingOverlay = () => {
-    if (phase === "idle") return null;
+    if (visiblePhase === "idle") return null;
 
     const steps = [
       { id: 1, label: "Creating administrator account" },
-      { id: 2, label: "Registering zone & branches" },
+      { id: 2, label: "Registering zone and branches" },
     ];
 
     return (
       <View style={styles.loadingOverlay}>
         <View style={styles.loadingContent}>
-          {phase !== "partial-fail" && phase !== "success" && (
-            <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
-          )}
+            {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
+              <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
+            ) : null}
+            {visiblePhase === "success" ? (
+              <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
+            ) : null}
+            {visiblePhase === "partial-fail" ? (
+              <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
+            ) : null}
 
-          {phase === "success" && (
-            <MaterialIcons name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
-          )}
-
-          {phase === "partial-fail" && (
-            <MaterialIcons name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
-          )}
-
-          <Text style={styles.loadingPhaseTitle}>
-            {phase === "submitting" ? "Registering your zone..." :
-              phase === "partial-fail" ? "Registration Interrupted" : "Zone Submitted!"}
-          </Text>
-
-          <View style={{ width: '100%', marginBottom: 20 }}>
-            {steps.map((s, idx) => {
-              const isDone = currentSubStep > s.id || (phase === 'success');
-              const isActive = currentSubStep === s.id && phase === 'submitting';
-              const isFailed = currentSubStep === s.id && phase === 'partial-fail';
-
-              return (
-                <View key={s.id}>
-                  <View style={styles.progressStep}>
-                    <View style={styles.progressIcon}>
-                      {isDone ? (
-                        <MaterialIcons name="check-circle" size={20} color={COLORS.success} />
-                      ) : isFailed ? (
-                        <MaterialIcons name="cancel" size={20} color={COLORS.error} />
-                      ) : isActive ? (
-                        <ActivityIndicator size="small" color={COLORS.accent} />
-                      ) : (
-                        <MaterialIcons name="radio-button-unchecked" size={20} color="rgba(255,255,255,0.2)" />
-                      )}
-                    </View>
-                    <Text style={[
-                      styles.progressText,
-                      isActive && styles.progressTextActive,
-                      isDone && styles.progressTextDone,
-                      isFailed && { color: COLORS.error }
-                    ]}>
-                      {s.label}
-                    </Text>
-                  </View>
-                  {idx < steps.length - 1 && <View style={styles.progressStepLine} />}
-                </View>
-              );
-            })}
-          </View>
-
-          {phase === "partial-fail" && (
-            <>
-              <Text style={[styles.helperText, styles.helperError, { textAlign: 'center', marginBottom: 20 }]}>
-                {errorDetails}
-              </Text>
-              <Pressable
-                onPress={handleFinish}
-                style={[styles.primaryBtn, { width: '100%', marginBottom: 12 }]}
-              >
-                <Text style={styles.primaryBtnText}>Retry submission</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { setPhase("idle"); setSubmitting(false); }}
-                style={{ padding: 10 }}
-              >
-                <Text style={{ color: COLORS.muted }}>Cancel</Text>
-              </Pressable>
-            </>
-          )}
-
-          {phase === "success" && (
-            <Text style={[styles.progressText, { textAlign: 'center' }]}>
-              Waiting for approval...
+            <Text style={styles.loadingPhaseTitle}>
+              {visiblePhase === "submitting"
+                ? "Registering your zone..."
+                : visiblePhase === "partial-fail"
+                  ? "Registration interrupted"
+                  : "Zone submitted"}
             </Text>
-          )}
+
+            <View style={{ width: "100%", marginBottom: 20 }}>
+              {steps.map((step, index) => {
+                const isDone = visibleSubStep > step.id || visiblePhase === "success";
+                const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
+                const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
+
+                return (
+                  <View key={step.id}>
+                    <View style={styles.progressStep}>
+                      <View style={styles.progressIcon}>
+                        {isDone ? (
+                          <AppIcon name="check-circle" size={20} color={COLORS.success} />
+                        ) : isFailed ? (
+                          <AppIcon name="cancel" size={20} color={COLORS.error} />
+                        ) : isActive ? (
+                          <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : (
+                          <AppIcon
+                            name="radio-button-unchecked"
+                            size={20}
+                            color="rgba(255,255,255,0.2)"
+                          />
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.progressText,
+                          isActive && styles.progressTextActive,
+                          isDone && styles.progressTextDone,
+                          isFailed && { color: COLORS.error },
+                        ]}
+                      >
+                        {step.label}
+                      </Text>
+                    </View>
+                    {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                  </View>
+                );
+              })}
+            </View>
+
+            {visiblePhase === "partial-fail" ? (
+              <>
+                <Text
+                  style={[
+                    styles.helperText,
+                    styles.helperError,
+                    { textAlign: "center", marginBottom: 20 },
+                  ]}
+                >
+                  {errorDetails}
+                </Text>
+                <AppButton onPress={handleFinish} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
+                  Retry submission
+                </AppButton>
+                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); setRegistrationProgress("idle", 0); }} style={{ padding: 10 }}>
+                  <Text style={{ color: COLORS.muted }}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            {visiblePhase === "success" ? (
+              <Text style={[styles.progressText, { textAlign: "center" }]}>
+                Redirecting to your zone dashboard...
+              </Text>
+            ) : null}
         </View>
       </View>
     );
   };
 
+  if (visiblePhase !== "idle") {
+    return (
+      <Screen
+        style={styles.screen}
+        contentStyle={styles.loadingScreenContainer}
+        routeKey="/auth/zone-register-step4"
+      >
+        {renderLoadingOverlay()}
+      </Screen>
+    );
+  }
+
   return (
-    <>
-      <Container {...containerProps}>
-        <ScrollView
-          contentContainerStyle={[styles.container, { paddingBottom: 32 }]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <LogoHalo />
+    <Screen
+      scroll
+      keyboardAvoiding
+      style={styles.screen}
+      contentStyle={styles.container}
+      routeKey="/auth/zone-register-step4"
+      scrollProps={{
+        showsVerticalScrollIndicator: false,
+        keyboardShouldPersistTaps: "handled",
+      }}
+    >
+      <RegistrationStepHeader
+        title="Review and Confirm"
+        subtitle=""
+        stepTitle="Step 4 of 4"
+        stepSubtitle="Final review"
+        progress="100%"
+        onBack={() => router.replace("/auth/zone-register-step3")}
+      />
 
-          {/* Stepper: Step 4 of 4 */}
-          <View style={styles.stepperWrapper}>
-            <View style={styles.stepperTopRow}>
-              <View>
-                <Text style={styles.stepperTitle}>Review & confirm</Text>
-                <Text style={styles.stepperSubtitle}>
-                  Step 4 of 4 · Check your zone details before submitting
-                </Text>
-              </View>
-            </View>
-            <View style={styles.stepperBar}>
-              <View style={[styles.stepperBarFill, { width: "100%" }]} />
-            </View>
-            <View style={styles.stepperDotsRow}>
-              <View style={[styles.stepperDot, styles.stepperDotActive]} />
-              <View style={[styles.stepperDot, styles.stepperDotActive]} />
-              <View style={[styles.stepperDot, styles.stepperDotActive]} />
-              <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            </View>
+      <Text style={styles.heading}>Review the zone setup</Text>
+      <Text style={styles.sub}>
+        This summary is what your team will manage once the zone is created and sent for moderation.
+      </Text>
+
+      <View style={styles.reviewSectionCard}>
+        <View style={styles.reviewSectionHeaderRow}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <AppIcon name="storefront" size={16} color={COLORS.accent} style={{ marginRight: 6 }} />
+            <Text style={styles.reviewSectionTitle}>Zone account and brand</Text>
           </View>
-
-          {/* Headings */}
-          <Text style={styles.heading}>Almost ready</Text>
-          <Text style={styles.sub}>
-            Confirm your zone account and branches before sending your zone for approval.
-          </Text>
-
-          {/* Zone account & brand review */}
-          <View style={styles.reviewSectionCard}>
-            <View style={styles.reviewSectionHeaderRow}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <MaterialIcons
-                  name="storefront"
-                  size={16}
-                  color={COLORS.accent}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.reviewSectionTitle}>
-                  Zone account & brand
-                </Text>
-              </View>
-              <Pressable onPress={() => router.replace("/auth/zone-register")}>
-                <Text style={styles.reviewEditLink}>Edit</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Owner / main contact</Text>
-              <Text
-                style={[
-                  styles.reviewValue,
-                  !step1.ownerFullName && styles.reviewValueMuted,
-                ]}
-                numberOfLines={1}
-              >
-                {step1.ownerFullName || "Not set"}
-              </Text>
-            </View>
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Venue brand</Text>
-              <Text
-                style={[
-                  styles.reviewValue,
-                  !step1.venueBrandName && styles.reviewValueMuted,
-                ]}
-                numberOfLines={1}
-              >
-                {step1.venueBrandName || "Not set"}
-              </Text>
-            </View>
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Business Type</Text>
-              <Text style={styles.reviewValue}>
-                {step1.type === 'gaming' ? 'Zone (Gaming)' : step1.type === 'sports' ? 'Court (Sports)' : 'Both (Hybrid)'}
-              </Text>
-            </View>
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Contact email</Text>
-              <Text
-                style={[
-                  styles.reviewValue,
-                  !step1.contactEmail && styles.reviewValueMuted,
-                ]}
-                numberOfLines={1}
-              >
-                {step1.contactEmail || "Not set"}
-              </Text>
-            </View>
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Contact phone</Text>
-              <Text
-                style={[
-                  styles.reviewValue,
-                  !step1.contactPhone && styles.reviewValueMuted,
-                ]}
-                numberOfLines={1}
-              >
-                {step1.contactPhone || "Not set"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Branches Review */}
-          <View style={styles.reviewSectionCard}>
-            <View style={styles.reviewSectionHeaderRow}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <MaterialIcons
-                  name="map"
-                  size={16}
-                  color={COLORS.accent}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.reviewSectionTitle}>
-                  Branches ({branches.length})
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => router.replace("/auth/zone-register-step2")}
-              >
-                <Text style={styles.reviewEditLink}>Edit</Text>
-              </Pressable>
-            </View>
-
-            {branches.map((branch, index) => (
-              <View key={branch.id} style={{ marginTop: index > 0 ? 16 : 0, paddingTop: index > 0 ? 16 : 0, borderTopWidth: index > 0 ? 1 : 0, borderTopColor: '#333' }}>
-                <Text style={{ color: COLORS.accent, fontWeight: 'bold', marginBottom: 8 }}>
-                  {branch.branchDisplayName}
-                </Text>
-                <Text style={{ color: COLORS.muted, fontSize: 12 }}>
-                  {branch.addressLine1}, {branch.areaLabel}, {branch.city}
-                </Text>
-
-                {/* Inventory Summary */}
-                <View style={{ marginTop: 8 }}>
-                  {branch.supportsCs2 && (
-                    <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                      • PC Setups: {[
-                        branch.pricing.pc?.regular?.count ? `Regular (${branch.pricing.pc.regular.count})` : null,
-                        branch.pricing.pc?.premium?.count ? `Premium (${branch.pricing.pc.premium.count})` : null,
-                        branch.pricing.pc?.elite?.count ? `Elite (${branch.pricing.pc.elite.count})` : null,
-                      ].filter(Boolean).join(', ') || 'N/A'}
-                    </Text>
-                  )}
-                  {branch.supportsFc25 && branch.pricing.console?.ps5 && (
-                    <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                      • PS5 Consoles: {branch.pricing.console.ps5.count}
-                    </Text>
-                  )}
-                  {branch.supportsFutsal && (
-                    <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                      • Futsal Courts: {Object.values(branch.pricing.futsal || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
-                    </Text>
-                  )}
-                  {branch.supportsIndoorCricket && (
-                    <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                      • Cricket Nets: {Object.values(branch.pricing.indoor_cricket || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
-                    </Text>
-                  )}
-                  {branch.supportsPadel && (
-                    <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                      • Padel Courts: {Object.values(branch.pricing.padel || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
-                    </Text>
-                  )}
-                  {branch.supportsPickleball && (
-                    <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                      • Pickleball Courts: {Object.values(branch.pricing.pickleball || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Agreements */}
-          <View style={styles.termsWrapper}>
-            <Text style={styles.termsHeading}>Agreements</Text>
-
-            <Pressable onPress={toggleAgreeTerms} style={styles.termRow}>
-              <View
-                style={[
-                  styles.termBox,
-                  step4.agreeTerms && styles.termBoxChecked,
-                ]}
-              >
-                {step4.agreeTerms && <View style={styles.termBoxInner} />}
-              </View>
-              <Text style={styles.termText}>
-                I confirm that I own or am authorised to manage this zone and all branches on MatchHai.
-              </Text>
-            </Pressable>
-
-            <Pressable onPress={toggleAgreeRevenueShare} style={styles.termRow}>
-              <View
-                style={[
-                  styles.termBox,
-                  step4.agreeRevenueShare && styles.termBoxChecked,
-                ]}
-              >
-                {step4.agreeRevenueShare && <View style={styles.termBoxInner} />}
-              </View>
-              <Text style={styles.termText}>
-                I agree to MatchHai's{" "}
-                <Text style={styles.termLink}>zone policies & revenue model</Text>
-                . (You can set payout method later.)
-              </Text>
-            </Pressable>
-
-            {!allAgreementsChecked && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  Please tick both checkboxes to continue.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Back to Step 3 */}
-          <Pressable
-            onPress={() => router.replace("/auth/zone-register-step3")}
-            style={{ alignSelf: "center", marginBottom: 12 }}
-          >
-            <Text style={{ color: COLORS.accent }}>← Back to branch inventory</Text>
+          <Pressable onPress={() => router.replace("/auth/zone-register")}>
+            <Text style={styles.reviewEditLink}>Edit</Text>
           </Pressable>
+        </View>
 
-          {/* Final Submit button */}
-          <View
-            style={[
-              styles.buttonShadowWrapper,
-              allAgreementsChecked &&
-              !submitting &&
-              styles.buttonShadowWrapperActive,
-            ]}
-          >
-            <Pressable
-              onPress={handleFinish}
-              disabled={submitting || !allAgreementsChecked}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                (!allAgreementsChecked || submitting) &&
-                styles.primaryBtnDisabled,
-                pressed &&
-                !submitting &&
-                allAgreementsChecked && { opacity: 0.92 },
-              ]}
-              android_ripple={{ color: "rgba(255,255,255,0.08)" }}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryBtnText}>Submit zone for review</Text>
-              )}
-            </Pressable>
+        <View style={styles.summaryCardList}>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Owner / primary contact</Text>
+            <Text style={styles.reviewValue}>{step1.ownerFullName || "Not set"}</Text>
           </View>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Venue brand</Text>
+            <Text style={styles.reviewValue}>{step1.venueBrandName || "Not set"}</Text>
+          </View>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Contact email</Text>
+            <Text style={styles.reviewValue}>{step1.contactEmail || "Not set"}</Text>
+          </View>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Contact phone</Text>
+            <Text style={styles.reviewValue}>{step1.contactPhone || "Not set"}</Text>
+          </View>
+        </View>
+      </View>
 
-          {/* Safety link to login */}
-          <Text style={styles.bottomText}>
-            Already manage a zone?{" "}
-            <Link href="/auth/login" style={{ color: COLORS.accent }}>
-              Sign in
-            </Link>
+      <View style={styles.reviewSectionCard}>
+        <View style={styles.reviewSectionHeaderRow}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <AppIcon name="map" size={16} color={COLORS.accent} style={{ marginRight: 6 }} />
+            <Text style={styles.reviewSectionTitle}>Branches</Text>
+          </View>
+          <Pressable onPress={() => router.replace("/auth/zone-register-step2")}>
+            <Text style={styles.reviewEditLink}>Edit</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.summaryCardList}>
+          {branchSummaries.map((branch) => (
+            <View key={branch.id} style={styles.reviewCard}>
+              <Text style={styles.reviewSectionTitle}>{branch.branchDisplayName}</Text>
+              <Text style={styles.reviewValue}>{branch.location}</Text>
+              <Text style={[styles.reviewValueMuted, { marginTop: 4 }]}>{branch.addressLine1}</Text>
+
+              {branch.items.length ? (
+                <View style={[styles.chipRow, { marginTop: 10 }]}>
+                  {branch.items.map((item) => (
+                    <View key={`${branch.id}-${item}`} style={styles.summaryChip}>
+                      <Text style={styles.summaryChipText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={[styles.reviewValueMuted, { marginTop: 10 }]}>No inventory configured yet</Text>
+              )}
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.reviewSectionCard}>
+        <View style={styles.reviewSectionHeaderRow}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <AppIcon name="inventory" size={16} color={COLORS.accent} style={{ marginRight: 6 }} />
+            <Text style={styles.reviewSectionTitle}>Inventory and pricing</Text>
+          </View>
+          <Pressable onPress={() => router.replace("/auth/zone-register-step3")}>
+            <Text style={styles.reviewEditLink}>Edit</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.reviewValueMuted}>
+          Pricing and inventory are configured per branch and will drive availability across bookings,
+          counters, and zone detail views.
+        </Text>
+      </View>
+
+      <View style={styles.termsWrapper}>
+        <RegistrationFieldLabel label="Agreements" required style={styles.termsHeading} />
+
+        <Pressable onPress={() => setStep4({ agreeTerms: !step4.agreeTerms })} style={styles.termRow}>
+          <View style={[styles.termBox, step4.agreeTerms && styles.termBoxChecked]}>
+            {step4.agreeTerms ? <View style={styles.termBoxInner} /> : null}
+          </View>
+          <Text style={styles.termText}>
+            I confirm that I own or am authorised to manage this zone and all listed branches.
           </Text>
-        </ScrollView>
-      </Container>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setStep4({ agreeRevenueShare: !step4.agreeRevenueShare })}
+          style={styles.termRow}
+        >
+          <View style={[styles.termBox, step4.agreeRevenueShare && styles.termBoxChecked]}>
+            {step4.agreeRevenueShare ? <View style={styles.termBoxInner} /> : null}
+          </View>
+          <Text style={styles.termText}>
+            I agree to MatchHai&apos;s <Text style={styles.termLink}>zone policies and revenue model</Text>.
+          </Text>
+        </Pressable>
+
+        {!allAgreementsChecked ? (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, styles.helperWarning]}>
+              Tick both confirmations before submitting the zone.
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <Pressable
+        onPress={() => router.replace("/auth/zone-register-step3")}
+        style={styles.backLinkWrapper}
+      >
+        <Text style={styles.backLinkText}>Back to branch inventory</Text>
+      </Pressable>
+
+      <View
+        style={[
+          styles.buttonShadowWrapper,
+          allAgreementsChecked && !submitting && styles.buttonShadowWrapperActive,
+        ]}
+      >
+        <AppButton
+          onPress={handleFinish}
+          disabled={submitting || !allAgreementsChecked}
+          size="lg"
+          style={[
+            styles.primaryBtn,
+            !allAgreementsChecked || submitting ? styles.primaryBtnDisabled : null,
+          ]}
+        >
+          {submitting ? "Submitting..." : "Submit zone for review"}
+        </AppButton>
+      </View>
+
+      <Text style={styles.bottomText}>
+        Already manage a zone?{" "}
+        <Link href="/auth/login" style={{ color: COLORS.accent }}>
+          Sign in
+        </Link>
+      </Text>
+
       {renderLoadingOverlay()}
-    </>
+    </Screen>
   );
 }

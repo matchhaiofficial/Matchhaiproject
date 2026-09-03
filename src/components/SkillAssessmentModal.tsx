@@ -1,9 +1,10 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { SKILL_ASSESSMENT_CONFIG } from '../constants/skillQuestions';
+import { useToast } from '../hooks/useToast';
 import { GameKey, saveSelfAssessment } from '../services/skillRatingService';
-import { COLORS } from '../theme';
+import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from './AppModalPrimitives';
+import { AppButton } from './AppPrimitives';
 import styles from './SkillAssessmentModal.styles';
 
 interface Props {
@@ -11,11 +12,13 @@ interface Props {
     onClose: () => void;
     gameKey: string;
     userId: string;
-    onSuccess: (rating: number) => void;
+    onSuccess: (rating: number, tier: string) => void | Promise<void | boolean>;
 }
 
 export default function SkillAssessmentModal({ visible, onClose, gameKey, userId, onSuccess }: Props) {
+    const { showToast } = useToast();
     const [answers, setAnswers] = useState<Record<string, number>>({});
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
     const config = SKILL_ASSESSMENT_CONFIG[gameKey];
@@ -24,6 +27,7 @@ export default function SkillAssessmentModal({ visible, onClose, gameKey, userId
     useEffect(() => {
         if (visible) {
             setAnswers({});
+            setErrorMessage(null);
             setLoading(false);
         }
     }, [visible, gameKey]);
@@ -31,6 +35,7 @@ export default function SkillAssessmentModal({ visible, onClose, gameKey, userId
     if (!config) return null;
 
     const handleSelect = (questionId: string, value: number) => {
+        setErrorMessage(null);
         setAnswers(prev => ({ ...prev, [questionId]: value }));
     };
 
@@ -38,91 +43,107 @@ export default function SkillAssessmentModal({ visible, onClose, gameKey, userId
 
     const handleSubmit = async () => {
         if (!isComplete) return;
+        if (!userId) {
+            const message = "Please sign in again before saving your skill check.";
+            setErrorMessage(message);
+            showToast({
+                message,
+                title: "Session required",
+                type: "error",
+            });
+            return;
+        }
 
         setLoading(true);
+        setErrorMessage(null);
         try {
             const result = await saveSelfAssessment(userId, gameKey as GameKey, answers);
-            if (result.ok && result.rating) {
-                onSuccess(result.rating);
-                onClose();
-            } else {
-                // Handle error
-                console.error('Failed to save assessment');
+            if (!result.ok) {
+                setErrorMessage(result.message);
+                showToast({
+                    message: result.message,
+                    title: "Skill check not saved",
+                    type: "error",
+                });
+                return;
             }
+
+            await onSuccess(result.rating, result.tier);
+            onClose();
         } catch (error) {
             console.error(error);
+            const message = "Your skill was saved, but MatchHai could not continue. Please tap Create again.";
+            setErrorMessage(message);
+            showToast({
+                message,
+                title: "Could not continue",
+                type: "error",
+            });
+            onClose();
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <Modal
+        <AppBottomSheet
             visible={visible}
-            transparent
-            animationType="slide"
-            onRequestClose={onClose}
+            onClose={onClose}
+            dismissDisabled={loading}
+            sheetStyle={styles.container}
         >
-            <View style={styles.overlay}>
-                <View style={styles.container}>
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <View>
-                            <Text style={styles.title}>One-time Setup</Text>
-                            <Text style={styles.subtitle}>Rate your skill to continue</Text>
+            <AppModalHeader
+                title="One-time Setup"
+                subtitle="Rate your skill to continue"
+                onClose={onClose}
+                closeDisabled={loading}
+            />
+
+            <AppModalBody scroll contentContainerStyle={styles.content}>
+                {config.questions.map((q) => (
+                    <View key={q.id} style={styles.questionSection}>
+                        <Text style={styles.questionLabel}>{q.label}</Text>
+                        <View style={styles.optionsGrid}>
+                            {q.options.map((opt, index) => {
+                                const selected = answers[q.id] === opt.value;
+                                return (
+                                    <Pressable
+                                        key={`${q.id}:${index}:${opt.label}`}
+                                        onPress={() => handleSelect(q.id, opt.value)}
+                                        style={[
+                                            styles.option,
+                                            selected && styles.optionSelected
+                                        ]}
+                                    >
+                                        <Text style={[
+                                            styles.optionText,
+                                            selected && styles.optionTextSelected
+                                        ]}>
+                                            {opt.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
                         </View>
-                        <Pressable onPress={onClose} style={styles.closeButton}>
-                            <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
-                        </Pressable>
                     </View>
+                ))}
+            </AppModalBody>
 
-                    <ScrollView contentContainerStyle={styles.content}>
-                        {config.questions.map((q) => (
-                            <View key={q.id} style={styles.questionSection}>
-                                <Text style={styles.questionLabel}>{q.label}</Text>
-                                <View style={styles.optionsGrid}>
-                                    {q.options.map((opt) => {
-                                        const selected = answers[q.id] === opt.value;
-                                        return (
-                                            <Pressable
-                                                key={opt.value}
-                                                onPress={() => handleSelect(q.id, opt.value)}
-                                                style={[
-                                                    styles.option,
-                                                    selected && styles.optionSelected
-                                                ]}
-                                            >
-                                                <Text style={[
-                                                    styles.optionText,
-                                                    selected && styles.optionTextSelected
-                                                ]}>
-                                                    {opt.label}
-                                                </Text>
-                                            </Pressable>
-                                        );
-                                    })}
-                                </View>
-                            </View>
-                        ))}
-                    </ScrollView>
-
-                    {/* Footer */}
-                    <View style={styles.footer}>
-                        <Pressable
-                            style={[styles.submitButton, (!isComplete || loading) && styles.submitButtonDisabled]}
-                            onPress={handleSubmit}
-                            disabled={!isComplete || loading}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#FFF" />
-                            ) : (
-                                <Text style={styles.submitButtonText}>Save & Continue</Text>
-                            )}
-                        </Pressable>
-                    </View>
-                </View>
-            </View>
-        </Modal>
+            <AppModalFooter style={styles.footer}>
+                {errorMessage ? (
+                    <Text style={styles.errorText}>{errorMessage}</Text>
+                ) : null}
+                <AppButton
+                    variant="primary"
+                    style={[styles.submitButton, (!isComplete || loading) && styles.submitButtonDisabled]}
+                    onPress={handleSubmit}
+                    disabled={!isComplete || loading}
+                    loading={loading}
+                >
+                    Save & Continue
+                </AppButton>
+            </AppModalFooter>
+        </AppBottomSheet>
     );
 }
 

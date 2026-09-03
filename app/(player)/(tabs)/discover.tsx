@@ -1,47 +1,34 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import {
-    Pressable,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, Text, TextInput, View } from "react-native";
+import Animated from "react-native-reanimated";
+
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import Screen from "../../../src/components/Screen";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
-import { useScreenPadding } from "../../../src/hooks/useScreenPadding";
-
+import DiscoverFilterDrawer from "../../../src/features/discover/components/DiscoverFilterDrawer";
 import DiscoverMatchroomList from "../../../src/features/discover/components/DiscoverMatchroomList";
 import DiscoverPlayerList from "../../../src/features/discover/components/DiscoverPlayerList";
 import DiscoverTeamList from "../../../src/features/discover/components/DiscoverTeamList";
 import DiscoverZoneList from "../../../src/features/discover/components/DiscoverZoneList";
-import { DiscoverSegment, GameKey } from "../../../src/features/discover/types";
+import {
+  DEFAULT_DISCOVER_FILTERS,
+  DEFAULT_MATCHROOM_FILTERS,
+  DEFAULT_PLAYER_FILTERS,
+  DEFAULT_TEAM_FILTERS,
+  DEFAULT_ZONE_FILTERS,
+  getActiveFilterCount,
+  SEGMENT_LABELS,
+  type DiscoverFiltersState,
+} from "../../../src/features/discover/filterConfig";
+import { DiscoverSegment } from "../../../src/features/discover/types";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useEntrance } from "../../../src/motion/useEntrance";
+import { usePressScale } from "../../../src/motion/usePressScale";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./discover.styles";
-
-// Global Game Configuration
-const GAMES: { key: GameKey; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "cs2", label: "CS2" },
-  { key: "fc26", label: "FC26" },
-  { key: "tekken8", label: "Tekken 8" },
-  { key: "futsal", label: "Futsal" },
-  { key: "indoor_cricket", label: "Cricket" },
-  { key: "padel", label: "Padel" },
-  { key: "pickleball", label: "Pickleball" },
-];
-
-const VENUE_TYPES: { key: "all" | "zones" | "courts"; label: string }[] = [
-  { key: "all", label: "All Venues" },
-  { key: "zones", label: "Gaming Zones" },
-  { key: "courts", label: "Sports Courts" },
-];
 
 const ALLOWED_SEGMENTS: DiscoverSegment[] = [
   "matchrooms",
@@ -55,13 +42,67 @@ const SEGMENT_ITEMS: { key: DiscoverSegment; label: string }[] = [
   { key: "teams", label: "Teams" },
   { key: "zones", label: "Venues" },
 ];
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
+function IconButton({
+  icon,
+  color,
+  onPress,
+  hitSlop,
+}: {
+  icon: React.ComponentProps<typeof AppIcon>["name"];
+  color: string;
+  onPress: () => void;
+  hitSlop?: { top: number; bottom: number; left: number; right: number };
+}) {
+  const { animatedStyle, onPressIn, onPressOut } = usePressScale({
+    activeScale: 0.98,
+  });
 
-const getValidSegment = (s?: string): DiscoverSegment | null => {
-  if (!s) return null;
-  return ALLOWED_SEGMENTS.includes(s as DiscoverSegment)
-    ? (s as DiscoverSegment)
+  return (
+    <AnimatedPressable
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      hitSlop={hitSlop}
+      style={animatedStyle}
+    >
+      <AppIcon name={icon} size={20} color={color} />
+    </AnimatedPressable>
+  );
+}
+
+function Fab({
+  onPress,
+  onPressIn,
+}: {
+  onPress: () => void;
+  onPressIn?: () => void;
+}) {
+  const { animatedStyle, onPressIn: motionPressIn, onPressOut } = usePressScale({
+    activeScale: 0.985,
+  });
+
+  return (
+    <AnimatedPressable
+      onPress={onPress}
+      onPressIn={() => {
+        motionPressIn();
+        onPressIn?.();
+      }}
+      onPressOut={onPressOut}
+      style={[styles.fab, animatedStyle]}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+    >
+      <AppIcon name="create" size={28} color="#FFF" />
+    </AnimatedPressable>
+  );
+}
+
+const getValidSegment = (segment?: string): DiscoverSegment | null => {
+  if (!segment) return null;
+  return ALLOWED_SEGMENTS.includes(segment as DiscoverSegment)
+    ? (segment as DiscoverSegment)
     : null;
 };
 
@@ -72,28 +113,49 @@ export default function DiscoverScreen() {
     mode?: string;
     t?: string;
   }>();
-  const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const touchDebugEnabled =
+    __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
+  const bottomPadding = 96;
+  // Tab layouts now reserve space for the floating navbar via `sceneStyle.paddingBottom`,
+  // so we should NOT add tab-bar clearance again here.
+  const fabBottom = 20;
 
-  // Global State
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedGame, setSelectedGame] = useState<GameKey>("all");
-  const [selectedVenueType, setSelectedVenueType] = useState<
-    "all" | "zones" | "courts"
-  >("all");
-  const screenPadding = useScreenPadding();
-
-  // Segment State
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [filters, setFilters] = useState<DiscoverFiltersState>(
+    DEFAULT_DISCOVER_FILTERS,
+  );
   const [activeSegment, setActiveSegment] = useState<DiscoverSegment>(
     getValidSegment(params.segment) || "matchrooms",
   );
-
-  // Lazy Loading State
   const [visitedSegments, setVisitedSegments] = useState<Set<DiscoverSegment>>(
     new Set([activeSegment]),
   );
 
-  // Sync activeSegment with URL params (handling navigation to same screen with different params)
+  const { animatedStyle: contentEntranceStyle } = useEntrance({
+    axis: "y",
+    distance: 10,
+    initialScale: 0.995,
+  });
+
+  const activeFilterCount = useMemo(
+    () => getActiveFilterCount(activeSegment, filters),
+    [activeSegment, filters],
+  );
+  const activePrimaryLabel = useMemo(() => {
+    if (activeSegment === "zones") {
+      return filters.zones.venueType;
+    }
+    return filters[activeSegment].game;
+  }, [activeSegment, filters]);
+
+  useRouteLogger("DiscoverScreen", {
+    segment: activeSegment,
+    primaryContext: activePrimaryLabel,
+    activeFilterCount,
+    searchQueryLength: searchQuery.trim().length,
+  });
+
   useEffect(() => {
     const validSegment = getValidSegment(params.segment);
     Logger.info("Discover", "Sync Effect", {
@@ -101,6 +163,7 @@ export default function DiscoverScreen() {
       validSegment,
       currentActive: activeSegment,
       intentTime: params.t,
+      mode: params.mode,
     });
 
     if (validSegment && validSegment !== activeSegment) {
@@ -109,42 +172,197 @@ export default function DiscoverScreen() {
       });
       setActiveSegment(validSegment);
     } else if (params.mode === "my" && activeSegment !== "teams") {
-      // Special Case: Direct link to My Teams
       Logger.info("Discover", "Switching to teams for mode=my");
       setActiveSegment("teams");
-    } else if (validSegment === activeSegment && params.t) {
-      // Force re-trigger of any child effects or logic if needed
-      Logger.info("Discover", "Segment already active, but intent refreshed", {
-        segment: validSegment,
-      });
     }
-  }, [params.segment, params.mode, params.t]);
 
-  // Log every state change for activeSegment
+    if (params.mode === "my") {
+      setFilters((previous) => ({
+        ...previous,
+        teams: {
+          ...previous.teams,
+          mode: "my",
+        },
+      }));
+    }
+  }, [activeSegment, params.mode, params.segment, params.t]);
+
   useEffect(() => {
     Logger.info("Discover", "activeSegment state changed", { activeSegment });
   }, [activeSegment]);
 
-  // Update visited segments when active segment changes
   useEffect(() => {
-    setVisitedSegments((prev) => {
-      if (prev.has(activeSegment)) return prev;
-      const newSet = new Set(prev);
-      newSet.add(activeSegment);
-      return newSet;
+    setVisitedSegments((previous) => {
+      if (previous.has(activeSegment)) return previous;
+      const next = new Set(previous);
+      next.add(activeSegment);
+      return next;
     });
   }, [activeSegment]);
 
-  const fullBleed = { marginHorizontal: -screenPadding };
-  const fullBleedContent = { paddingHorizontal: screenPadding };
-  const touchDebugEnabled =
-    __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
-  const bottomPadding = HIDE_PLAYER_TAB_BAR ? insets.bottom + 16 : 16;
+  const handleSegmentChange = useCallback(
+    (segment: DiscoverSegment) => {
+      setActiveSegment(segment);
+      router.setParams({ segment, mode: undefined } as any);
+    },
+    [router],
+  );
 
-  const handleSegmentChange = (segment: DiscoverSegment) => {
-    setActiveSegment(segment);
-    router.setParams({ segment, mode: undefined } as any);
-  };
+  const updateMatchrooms = useCallback(
+    (patch: Partial<DiscoverFiltersState["matchrooms"]>) => {
+      setFilters((previous) => {
+        if (
+          patch.game &&
+          patch.game !== previous.matchrooms.game
+        ) {
+          return {
+            ...previous,
+            matchrooms: {
+              ...DEFAULT_MATCHROOM_FILTERS,
+              game: patch.game,
+            },
+          };
+        }
+
+        return {
+          ...previous,
+          matchrooms: {
+            ...previous.matchrooms,
+            ...patch,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const updatePlayers = useCallback(
+    (patch: Partial<DiscoverFiltersState["players"]>) => {
+      setFilters((previous) => {
+        if (patch.game && patch.game !== previous.players.game) {
+          return {
+            ...previous,
+            players: {
+              ...DEFAULT_PLAYER_FILTERS,
+              game: patch.game,
+            },
+          };
+        }
+
+        return {
+          ...previous,
+          players: {
+            ...previous.players,
+            ...patch,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const updateTeams = useCallback(
+    (patch: Partial<DiscoverFiltersState["teams"]>) => {
+      setFilters((previous) => {
+        if (patch.game && patch.game !== previous.teams.game) {
+          return {
+            ...previous,
+            teams: {
+              ...DEFAULT_TEAM_FILTERS,
+              game: patch.game,
+              mode: previous.teams.mode,
+            },
+          };
+        }
+
+        return {
+          ...previous,
+          teams: {
+            ...previous.teams,
+            ...patch,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const updateZones = useCallback(
+    (patch: Partial<DiscoverFiltersState["zones"]>) => {
+      setFilters((previous) => {
+        if (patch.venueType && patch.venueType !== previous.zones.venueType) {
+          return {
+            ...previous,
+            zones: {
+              ...DEFAULT_ZONE_FILTERS,
+              venueType: patch.venueType,
+            },
+          };
+        }
+
+        return {
+          ...previous,
+          zones: {
+            ...previous.zones,
+            ...patch,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const handleTeamsModeChange = useCallback((mode: DiscoverFiltersState["teams"]["mode"]) => {
+    updateTeams({ mode });
+  }, [updateTeams]);
+
+  const handleResetActiveFilters = useCallback(() => {
+    setFilters((previous) => {
+      if (activeSegment === "matchrooms") {
+        return {
+          ...previous,
+          matchrooms: {
+            ...DEFAULT_MATCHROOM_FILTERS,
+            game: previous.matchrooms.game,
+          },
+        };
+      }
+
+      if (activeSegment === "players") {
+        return {
+          ...previous,
+          players: {
+            ...DEFAULT_PLAYER_FILTERS,
+            game: previous.players.game,
+          },
+        };
+      }
+
+      if (activeSegment === "teams") {
+        return {
+          ...previous,
+          teams: {
+            ...DEFAULT_TEAM_FILTERS,
+            game: previous.teams.game,
+            mode: previous.teams.mode,
+          },
+        };
+      }
+
+      return {
+        ...previous,
+        zones: {
+          ...DEFAULT_ZONE_FILTERS,
+          venueType: previous.zones.venueType,
+        },
+      };
+    });
+  }, [activeSegment]);
+
+  const currentSearchLabel = useMemo(
+    () => SEGMENT_LABELS[activeSegment].toLowerCase(),
+    [activeSegment],
+  );
 
   return (
     <Screen
@@ -153,210 +371,135 @@ export default function DiscoverScreen() {
       contentStyle={styles.screenContent}
       edges={["top"]}
     >
-            <AppHeader
-                title="Discover"
-                inlineTitle
-                rightAction={<View style={styles.headerGhostAction} />}
-            />
+      <AppHeader
+        title="Discover"
+        inlineTitle
+        rightAction={<View style={styles.headerGhostAction} />}
+      />
 
-      {/* Header Section */}
       <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "flex-start",
-              alignItems: "center",
-            }}
-          >
-            {activeSegment === "teams" && (
-              <View /> // Placeholder where button used to be
-            )}
-          </View>
-
-          {/* Search Bar */}
+        <View style={styles.searchRow}>
           <View style={styles.searchBar}>
-            <MaterialIcons name="search" size={20} color={COLORS.muted} />
+            <AppIcon name="search" size={20} color={COLORS.muted} />
             <TextInput
               style={styles.searchInput}
-              placeholder={`Search ${activeSegment}...`}
+              placeholder={`Search ${currentSearchLabel}...`}
               placeholderTextColor={COLORS.muted}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery("")}>
-                <MaterialIcons name="close" size={20} color={COLORS.muted} />
-              </TouchableOpacity>
-            )}
+            {searchQuery.length > 0 ? (
+              <IconButton
+                icon="close"
+                color={COLORS.muted}
+                onPress={() => setSearchQuery("")}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              />
+            ) : null}
           </View>
+
+          <Pressable
+            onPress={() => setFilterDrawerOpen(true)}
+            style={({ pressed }) => [
+              styles.filterButton,
+              pressed && styles.filterButtonPressed,
+            ]}
+          >
+            <AppIcon name="filters" size={22} color={COLORS.text} />
+            {activeFilterCount > 0 ? (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>
+                  {activeFilterCount > 9 ? "9+" : activeFilterCount}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
         </View>
 
-        {/* Internal Segment Tabs (Now using View for full width/tab style) */}
         <SegmentedTabs
           items={SEGMENT_ITEMS}
           value={activeSegment}
           onChange={handleSegmentChange}
           style={styles.segmentTabs}
         />
-
-        {/* Global Game Chips - Hidden for Venues tab (has its own filter system) */}
-        {activeSegment !== "zones" && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={[styles.itemFiltersScroll, { marginTop: 12 }, fullBleed]}
-            contentContainerStyle={[
-              styles.itemFiltersContent,
-              fullBleedContent,
-            ]}
-          >
-            {GAMES.map((game) => (
-              <TouchableOpacity
-                key={game.key}
-                onPress={() => setSelectedGame(game.key)}
-                style={[
-                  styles.optionChip,
-                  selectedGame === game.key && styles.optionChipActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.optionChipText,
-                    selectedGame === game.key && styles.optionChipTextActive,
-                  ]}
-                >
-                  {game.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        {activeSegment === "zones" && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={[styles.itemFiltersScroll, { marginTop: 12 }, fullBleed]}
-            contentContainerStyle={[
-              styles.itemFiltersContent,
-              fullBleedContent,
-            ]}
-          >
-            {VENUE_TYPES.map((type) => (
-              <TouchableOpacity
-                key={type.key}
-                onPress={() => setSelectedVenueType(type.key)}
-                style={[
-                  styles.optionChip,
-                  selectedVenueType === type.key && styles.optionChipActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.optionChipText,
-                    selectedVenueType === type.key &&
-                      styles.optionChipTextActive,
-                  ]}
-                >
-                  {type.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
       </View>
 
-      {/* Content Area - Lazy Mounted & Persisted */}
-      <View style={{ flex: 1 }}>
-        {visitedSegments.has("matchrooms") && (
+      <Animated.View style={[styles.contentArea, contentEntranceStyle]}>
+        {visitedSegments.has("matchrooms") ? (
           <View
-            style={{
-              flex: 1,
-              display: activeSegment === "matchrooms" ? "flex" : "none",
-            }}
+            style={[
+              styles.segmentPanel,
+              activeSegment !== "matchrooms" && styles.segmentPanelHidden,
+            ]}
           >
             <DiscoverMatchroomList
-              selectedGame={selectedGame}
+              filters={filters.matchrooms}
               searchQuery={searchQuery}
-              edgePadding={screenPadding}
               bottomPadding={bottomPadding}
             />
           </View>
-        )}
+        ) : null}
 
-        {visitedSegments.has("players") && (
+        {visitedSegments.has("players") ? (
           <View
-            style={{
-              flex: 1,
-              display: activeSegment === "players" ? "flex" : "none",
-            }}
+            style={[
+              styles.segmentPanel,
+              activeSegment !== "players" && styles.segmentPanelHidden,
+            ]}
           >
             <DiscoverPlayerList
-              selectedGame={selectedGame}
+              filters={filters.players}
               searchQuery={searchQuery}
-              edgePadding={screenPadding}
               bottomPadding={bottomPadding}
             />
           </View>
-        )}
+        ) : null}
 
-        {visitedSegments.has("teams") && (
+        {visitedSegments.has("teams") ? (
           <View
-            style={{
-              flex: 1,
-              display: activeSegment === "teams" ? "flex" : "none",
-            }}
+            style={[
+              styles.segmentPanel,
+              activeSegment !== "teams" && styles.segmentPanelHidden,
+            ]}
           >
             <DiscoverTeamList
-              selectedGame={selectedGame}
+              filters={filters.teams}
               searchQuery={searchQuery}
-              initialMode={params.mode as any}
-              intentTime={params.t}
-              edgePadding={screenPadding}
+              onModeChange={handleTeamsModeChange}
               bottomPadding={bottomPadding}
             />
           </View>
-        )}
+        ) : null}
 
-        {visitedSegments.has("zones") && (
+        {visitedSegments.has("zones") ? (
           <View
-            style={{
-              flex: 1,
-              display: activeSegment === "zones" ? "flex" : "none",
-            }}
+            style={[
+              styles.segmentPanel,
+              activeSegment !== "zones" && styles.segmentPanelHidden,
+            ]}
           >
             <DiscoverZoneList
-              selectedGame={selectedGame}
+              filters={filters.zones}
               searchQuery={searchQuery}
-              selectedVenueType={selectedVenueType}
-              edgePadding={screenPadding}
               bottomPadding={bottomPadding}
             />
           </View>
-        )}
-      </View>
+        ) : null}
+      </Animated.View>
 
-      {/* Floating Action Button (FAB) - Contextual for Rooms and Teams */}
-      {(activeSegment === "matchrooms" || activeSegment === "teams") && (
+      {(activeSegment === "matchrooms" || activeSegment === "teams") ? (
         <View
           style={[
             styles.fabWrapper,
-            {
-              bottom: Math.max(
-                insets.bottom + 16,
-                (HIDE_PLAYER_TAB_BAR ? 0 : tabBarHeight) + 12,
-              ),
-            },
+            { bottom: fabBottom },
           ]}
         >
-          <Pressable
+          <Fab
             onPressIn={() => {
-              if (touchDebugEnabled) {
-                Logger.debug("TouchDebug", "pressIn", {
-                  tag: `discover_fab_${activeSegment}`,
-                });
-              }
+              if (!touchDebugEnabled) return;
+              Logger.debug("TouchDebug", "pressIn", {
+                tag: `discover_fab_${activeSegment}`,
+              });
             }}
             onPress={() => {
               if (touchDebugEnabled) {
@@ -364,19 +507,29 @@ export default function DiscoverScreen() {
                   tag: `discover_fab_${activeSegment}`,
                 });
               }
+
               if (activeSegment === "matchrooms") {
                 router.push("/matchrooms/create" as any);
               } else {
                 router.push("/teams/create" as any);
               }
             }}
-            style={({ pressed }) => [styles.fab, pressed && { opacity: 0.88 }]}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <MaterialIcons name="add" size={28} color="#FFF" />
-          </Pressable>
+          />
         </View>
-      )}
+      ) : null}
+
+      <DiscoverFilterDrawer
+        visible={filterDrawerOpen}
+        onClose={() => setFilterDrawerOpen(false)}
+        activeSegment={activeSegment}
+        filters={filters}
+        activeCount={activeFilterCount}
+        onReset={handleResetActiveFilters}
+        onUpdateMatchrooms={updateMatchrooms}
+        onUpdatePlayers={updatePlayers}
+        onUpdateTeams={updateTeams}
+        onUpdateZones={updateZones}
+      />
     </Screen>
   );
 }

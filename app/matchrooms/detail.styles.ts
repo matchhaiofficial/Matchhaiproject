@@ -1,16 +1,19 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
 
 export default StyleSheet.create({
     screen: {
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingBottom: 0,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 18,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.cardBorder,
     },
@@ -24,10 +27,13 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
     },
     content: {
-        paddingBottom: 120,
+        paddingBottom: 0,
+    },
+    contentWithBottomAction: {
+        paddingBottom: 140,
     },
     adminContent: {
-        paddingBottom: 280,
+        paddingBottom: 0,
     },
 
     // Main Info Card
@@ -120,6 +126,18 @@ export default StyleSheet.create({
     lockedBanner: {
         backgroundColor: COLORS.warning,
     },
+    fullBanner: {
+        backgroundColor: COLORS.accent,
+    },
+    successBanner: {
+        backgroundColor: COLORS.successBright,
+    },
+    infoBanner: {
+        backgroundColor: COLORS.accent,
+    },
+    actionBanner: {
+        backgroundColor: '#F57C00',
+    },
     qrCard: {
         backgroundColor: COLORS.cardDark,
         borderRadius: 16,
@@ -176,6 +194,22 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontWeight: '500',
     },
+    bannerTextWrap: {
+        flex: 1,
+        gap: 2,
+    },
+    bannerTitle: {
+        color: '#FFF',
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.heading,
+        fontWeight: '500',
+    },
+    bannerSubText: {
+        color: '#FFF',
+        opacity: 0.9,
+        fontSize: 12,
+        fontFamily: FONTS.body,
+    },
 
     // Section Headers
     sectionTitle: {
@@ -183,6 +217,11 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
         marginBottom: SPACING.md,
+    },
+    sectionMetaText: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
     },
 
     // Roles / Players
@@ -243,23 +282,41 @@ export default StyleSheet.create({
     },
 
     // Footer Actions
-    footer: {
+    body: {
+        flex: 1,
+    },
+    buttonWrapper: {
+        marginTop: SPACING.md,
+    },
+    buttonContent: {
+        width: '100%',
+    },
+    floatingActionBar: {
         position: 'absolute',
-        bottom: 0,
         left: 0,
         right: 0,
-        backgroundColor: COLORS.cardDark,
-        padding: SPACING.screenPadding,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.overlayLight,
-        paddingBottom: SPACING.lg + 20,
-        zIndex: 10000,
-        elevation: 10000,
+        zIndex: 100,
+        elevation: 100,
+    },
+    headerActionButton: {
+        padding: 2,
+    },
+    headerActionPressed: {
+        opacity: 0.72,
+    },
+    footerButtonPressed: {
+        ...CTA.primaryButtonPressed,
     },
     footerRow: {
         flexDirection: 'row',
         gap: SPACING.md,
         alignItems: 'center',
+    },
+    footerAction: {
+        flex: 1,
+    },
+    pendingRequestsCard: {
+        marginTop: SPACING.lg,
     },
     joinButton: {
         backgroundColor: COLORS.accent,
@@ -275,15 +332,15 @@ export default StyleSheet.create({
         fontWeight: 'bold',
     },
     joinedButton: {
-        backgroundColor: COLORS.success + '15',
+        backgroundColor: COLORS.overlayLight,
         paddingVertical: 14,
         borderRadius: RADII.md,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: COLORS.success + '50',
+        borderColor: COLORS.cardBorder,
     },
     joinedText: {
-        color: COLORS.success,
+        color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: 14,
         fontWeight: 'bold',
@@ -302,6 +359,19 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontWeight: 'bold', // Match weight with primary buttons
     },
+    warningActionButton: {
+        borderColor: `${COLORS.warning}55`,
+        backgroundColor: `${COLORS.warning}14`,
+    },
+    warningActionText: {
+        color: COLORS.warning,
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
+    },
+    forceCancelButton: {
+        marginTop: SPACING.xs,
+    },
     fullButton: {
         backgroundColor: COLORS.overlayMedium,
         paddingVertical: 14,
@@ -313,27 +383,22 @@ export default StyleSheet.create({
         fontWeight: 'bold',
     },
     getRequestButton: {
-        backgroundColor: COLORS.accent,
-        paddingVertical: 14,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        ...SHADOWS.accentStrong,
+        width: '100%',
+        ...CTA.primaryButton,
     },
     getRequestButtonText: {
-        color: '#FFF',
-        fontSize: TEXT_SIZES.body,
-        fontFamily: FONTS.heading,
-        fontWeight: 'bold',
-        letterSpacing: 1,
-        textTransform: 'uppercase',
+        ...CTA.primaryButtonText,
     },
     cancelRequestButton: {
         backgroundColor: COLORS.error + '15',
+        width: '100%',
+        minHeight: 56,
         borderWidth: 1.5,
         borderColor: COLORS.error + '60',
         paddingVertical: 14,
         borderRadius: RADII.md,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     cancelRequestButtonText: {
         color: COLORS.error,
@@ -353,9 +418,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
-        minHeight: '60%',
-        maxHeight: '90%',
-        paddingBottom: 40,
     },
     modalHeader: {
         flexDirection: 'row',
@@ -452,7 +514,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     // Team Comparison / Slot System
     teamsWrapper: {
@@ -553,31 +615,56 @@ export default StyleSheet.create({
         opacity: 0.6,
     },
     joinSlotButton: {
-        backgroundColor: COLORS.accent,
-        paddingHorizontal: 14,
-        paddingVertical: 6,
-        borderRadius: 8,
-        elevation: 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.cardDark,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.accent,
+        minWidth: 0,
+    },
+    requestedSlotButton: {
+        backgroundColor: COLORS.cardDark,
+        borderColor: COLORS.accent,
+    },
+    requestedSlotText: {
+        color: COLORS.text,
+        fontWeight: 'bold',
+    },
+    rejectedSlotButton: {
+        backgroundColor: COLORS.cardDark,
+        borderColor: COLORS.error,
+    },
+    rejectedSlotText: {
+        color: COLORS.error,
+        fontWeight: 'bold',
     },
     joinSlotText: {
-        color: '#FFF',
-        fontSize: 11,
-        fontFamily: FONTS.heading,
+        color: COLORS.text,
+        fontSize: 13,
+        fontFamily: FONTS.body,
         fontWeight: 'bold',
     },
     inviteSlotButton: {
-        backgroundColor: 'rgba(66, 165, 245, 0.1)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.cardDark,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 999,
         borderWidth: 1,
-        borderColor: 'rgba(66, 165, 245, 0.3)',
+        borderColor: COLORS.accent,
+        minWidth: 0,
     },
     inviteSlotText: {
-        color: COLORS.accent,
-        fontSize: 11,
-        fontFamily: FONTS.heading,
-        fontWeight: '600',
+        color: COLORS.text,
+        fontSize: 13,
+        fontFamily: FONTS.body,
+        fontWeight: 'bold',
     },
     friendItem: {
         flexDirection: 'row',
@@ -634,6 +721,8 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        width: '100%',
+        minHeight: 56,
         backgroundColor: COLORS.error + '10',
         borderWidth: 1,
         borderColor: COLORS.error + '40',
@@ -667,21 +756,49 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
     },
+    modalFormContent: {
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+        gap: SPACING.md,
+    },
+    modalSectionCard: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.lg,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        padding: SPACING.lg,
+        gap: SPACING.sm,
+    },
+    modalHelperText: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+        lineHeight: 18,
+    },
+    modalChipWrap: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        marginTop: 2,
+    },
     textArea: {
         minHeight: 120,
         textAlignVertical: 'top',
     },
+    modalTextArea: {
+        minHeight: 96,
+        textAlignVertical: "top",
+    },
+    modalFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    modalActionsRow: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
     modalActionButton: {
-        backgroundColor: COLORS.error,
-        padding: 16,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        marginTop: SPACING.xl,
-        shadowColor: COLORS.error,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 4,
+        flex: 1,
+        minHeight: 50,
     },
     modalActionText: {
         color: '#FFF',
@@ -756,3 +873,4 @@ export default StyleSheet.create({
         elevation: 4,
     },
 });
+

@@ -1,10 +1,55 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
 
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
+    },
+    screenContent: {
+        paddingBottom: 0,
+        paddingHorizontal: 0,
+    },
+    pageHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+    },
+    headerActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.md,
+    },
+    body: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
+    deletedBanner: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: SPACING.md,
+        backgroundColor: `${COLORS.warning}14`,
+        borderWidth: 1,
+        borderColor: `${COLORS.warning}55`,
+        borderRadius: RADII.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    deletedBannerTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    deletedBannerTitle: {
+        color: COLORS.warning,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+        marginBottom: 2,
+    },
+    deletedBannerText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
     },
     header: {
         flexDirection: 'row',
@@ -28,7 +73,7 @@ export default StyleSheet.create({
     },
     loadingContainer: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         alignItems: "center",
         justifyContent: "center",
     },
@@ -48,61 +93,85 @@ export default StyleSheet.create({
     },
     teamHeader: {
         marginTop: SPACING.md,
-        padding: SPACING.xl,
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.xl + 4,
+        paddingBottom: SPACING.xl,
         alignItems: 'center',
-        backgroundColor: COLORS.cardDark,
-        borderRadius: RADII.lg,
+        backgroundColor: '#1C1C1F',
+        borderRadius: RADII.xl,
         borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        ...SHADOWS.cardSoft,
+        borderColor: 'rgba(255,255,255,0.11)',
+        shadowColor: '#000',
+        shadowOpacity: 0.34,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: 5,
         width: '100%',
     },
+    teamHeaderAccent: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 4,
+        backgroundColor: COLORS.accent,
+        opacity: 0.8,
+        borderTopLeftRadius: RADII.xl,
+        borderTopRightRadius: RADII.xl,
+    },
     teamLogoLarge: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: COLORS.background,
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+        backgroundColor: '#121316',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: SPACING.lg,
-        borderWidth: 2,
-        borderColor: COLORS.divider,
-        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.10)",
+        // Allow the edit badge to sit slightly outside the circle (like profile avatar).
+        overflow: 'visible',
     },
     teamLogoLargeCaptain: {
         borderColor: COLORS.accent,
     },
+    logoPressed: {
+        opacity: 0.88,
+    },
     logoEditBadge: {
         position: 'absolute',
-        bottom: 0,
-        right: 0,
+        right: -2,
+        bottom: -2,
         backgroundColor: COLORS.accent,
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: 30,
+        height: 30,
+        borderRadius: 15,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-        borderColor: COLORS.background,
+        borderColor: COLORS.backgroundDark,
     },
     teamLogoImage: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+        overflow: "hidden",
     },
     teamLogoTextLarge: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: 32,
+        fontSize: 34,
+        letterSpacing: 0,
     },
     teamNameLarge: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.heading,
-        marginBottom: SPACING.sm,
+        fontSize: 28,
+        marginBottom: SPACING.xs,
         textAlign: 'center',
         flexShrink: 1,
         maxWidth: '100%',
+        letterSpacing: 0,
     },
     gameBadge: {
         backgroundColor: COLORS.accent,
@@ -117,13 +186,17 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
     },
     description: {
-        color: COLORS.muted,
+        color: COLORS.textSecondary,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.body,
+        fontSize: 15,
         textAlign: 'center',
-        maxWidth: 300,
-        lineHeight: 20,
-        marginBottom: SPACING.md,
+        maxWidth: 290,
+        lineHeight: 21,
+        marginBottom: SPACING.lg,
+    },
+    deletedPill: {
+        marginTop: SPACING.sm,
+        marginBottom: SPACING.sm,
     },
     occupancyRow: {
         flexDirection: 'row',
@@ -131,10 +204,62 @@ export default StyleSheet.create({
         gap: SPACING.xs,
         marginTop: SPACING.sm,
     },
+    occupancyActionRow: {
+        width: '100%',
+        marginTop: SPACING.sm,
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        gap: SPACING.sm,
+    },
+    occupancyInfoPill: {
+        flex: 1,
+        minWidth: 0,
+        minHeight: 50,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: SPACING.xs,
+        backgroundColor: 'rgba(255,255,255,0.07)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+        borderRadius: RADII.lg,
+        paddingHorizontal: SPACING.md,
+    },
+    reportActionSlot: {
+        width: 54,
+        flexShrink: 0,
+    },
+    reportIconButton: {
+        width: '100%',
+        minHeight: 50,
+        backgroundColor: 'rgba(239, 83, 80, 0.11)',
+        borderWidth: 1,
+        borderColor: 'rgba(239, 83, 80, 0.32)',
+        borderRadius: RADII.lg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 0,
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 0,
+    },
     occupancyText: {
-        color: COLORS.muted,
+        color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.label,
+        letterSpacing: 0,
+    },
+    occupancyFullPill: {
+        marginLeft: SPACING.sm,
+        alignSelf: "center",
+        minHeight: 24,
+        paddingVertical: 4,
+        paddingHorizontal: SPACING.sm,
+    },
+    occupancyFullPillText: {
+        fontSize: 10,
+        letterSpacing: 0.2,
     },
     fullBadge: {
         marginLeft: SPACING.sm,
@@ -226,7 +351,7 @@ export default StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: SPACING.md,
@@ -273,14 +398,13 @@ export default StyleSheet.create({
     },
     leaveButton: {
         backgroundColor: COLORS.error,
-        paddingVertical: SPACING.lg,
-        borderRadius: RADII.md,
+        minHeight: CTA.primaryButton.minHeight,
+        borderRadius: CTA.primaryButton.borderRadius,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     leaveButtonText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
+        ...CTA.primaryButtonText,
     },
 
     // Modal
@@ -304,10 +428,13 @@ export default StyleSheet.create({
 
     // New Requests Section
     requestSection: {
+        marginTop: SPACING.lg,
         padding: SPACING.lg,
-        backgroundColor: 'rgba(74, 158, 255, 0.05)',
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
+        backgroundColor: COLORS.cardDark,
+        borderRadius: RADII.lg,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        ...SHADOWS.cardSoft,
     },
     requestTitle: {
         color: COLORS.text,
@@ -417,25 +544,27 @@ export default StyleSheet.create({
         marginLeft: SPACING.sm,
     },
 
-    // Modern Action Bar (Bottom Sticky)
+    // Bottom Action Bar
     actionBar: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        backgroundColor: COLORS.surface,
-        padding: SPACING.lg,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.divider,
-        ...SHADOWS.cardElevated,
+        width: '100%',
+    },
+    actionBarSpacing: {
+        marginTop: SPACING.lg,
+    },
+    actionBarContent: {
+        width: '100%',
+    },
+    footerActionRow: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        gap: SPACING.sm,
+    },
+    footerActionButton: {
+        flex: 1,
+        marginBottom: 0,
     },
     actionButton: {
-        backgroundColor: COLORS.accent,
-        paddingVertical: SPACING.lg,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...SHADOWS.accentSoft,
+        ...CTA.primaryButton,
     },
     actionButtonDisabled: {
         backgroundColor: COLORS.surfaceHighlight,
@@ -448,19 +577,21 @@ export default StyleSheet.create({
         borderColor: COLORS.divider,
     },
     actionButtonText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.subheading,
+        ...CTA.primaryButtonText,
     },
     challengeButton: {
         backgroundColor: "rgba(0, 230, 118, 0.18)",
         borderWidth: 1,
         borderColor: COLORS.successBright,
-        paddingVertical: SPACING.md,
-        borderRadius: RADII.md,
+        minHeight: CTA.primaryButton.minHeight,
+        borderRadius: CTA.primaryButton.borderRadius,
         alignItems: "center",
         justifyContent: "center",
         marginBottom: SPACING.sm,
+    },
+    challengeButtonDisabled: {
+        opacity: 0.55,
+        borderColor: COLORS.divider,
     },
     challengeButtonText: {
         color: COLORS.successBright,
@@ -481,10 +612,32 @@ export default StyleSheet.create({
     },
     // Inline style replacements
     headerIcon: {
-        marginRight: 16,
+        padding: 0,
     },
-    footerSpacer: {
-        height: 120,
+    headerIconPressed: {
+        opacity: 0.7,
+    },
+    gamePill: {
+        alignSelf: 'center',
+        marginBottom: SPACING.md,
+        paddingHorizontal: SPACING.md,
+        minHeight: 30,
+        backgroundColor: 'rgba(33, 150, 243, 0.12)',
+    },
+    memberPill: {
+        alignSelf: 'center',
+        marginTop: SPACING.md,
+        minHeight: 28,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 5,
+        backgroundColor: 'rgba(0, 230, 118, 0.09)',
+        borderColor: 'rgba(0, 230, 118, 0.28)',
+    },
+    memberPillText: {
+        color: COLORS.successBright,
+        fontFamily: FONTS.heading,
+        fontSize: 12,
+        letterSpacing: 0,
     },
     statPrimary: {
         color: COLORS.accent,
@@ -496,7 +649,92 @@ export default StyleSheet.create({
         color: COLORS.error,
     },
     scrollContent: {
-        paddingBottom: SPACING.xxl,
+        paddingHorizontal: SPACING.screenPadding,
+        paddingBottom: SPACING.xl,
+    },
+    scrollContentWithBottomAction: {
+        paddingBottom: 112,
+    },
+    renameDialogCard: {
+        width: "85%",
+        backgroundColor: COLORS.surfaceHighlight,
+    },
+    renameDialogContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    renameInput: {
+        backgroundColor: COLORS.backgroundDark,
+        color: COLORS.text,
+        padding: 14,
+        borderRadius: RADII.md,
+        marginBottom: SPACING.xl,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        fontSize: 16,
+    },
+    renameActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    memberDialogCard: {
+        width: "88%",
+        backgroundColor: COLORS.surfaceHighlight,
+    },
+    memberDialogContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.lg + SPACING.sm,
+        gap: SPACING.sm,
+    },
+    confirmationDialogContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    confirmationMessage: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 22,
+    },
+    confirmationActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    confirmationActionButton: {
+        flex: 1,
+        minHeight: 44,
+    },
+    confirmationCancelButton: {
+        backgroundColor: COLORS.overlayLight,
+        borderColor: COLORS.overlayLight,
+    },
+    dialogFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    roleRequiredSheet: {
+        backgroundColor: COLORS.surfaceHighlight,
+    },
+    roleRequiredContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.lg,
+    },
+    roleRequiredMessage: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 22,
+    },
+    roleRequiredFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    roleRequiredActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    roleRequiredActionButton: {
+        flex: 1,
+        minHeight: 52,
     },
 });
+
 

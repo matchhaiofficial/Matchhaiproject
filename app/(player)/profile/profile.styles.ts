@@ -1,32 +1,22 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: SPACING.screenPadding,
-        paddingTop: SPACING.md,
-        paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+    screenContent: {
+        paddingBottom: 0,
     },
-    backButton: {
-        marginRight: SPACING.md,
-        padding: SPACING.xs,
-        borderRadius: RADII.sm,
-    },
-    headerTitle: {
+    body: {
         flex: 1,
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.heading,
+    },
+    scroll: {
+        flex: 1,
     },
     scrollContent: {
-        paddingBottom: 100,
+        paddingBottom: SPACING.xxl,
     },
 
     // Profile Card
@@ -34,23 +24,29 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderRadius: RADII.lg,
         padding: SPACING.lg,
-        marginHorizontal: SPACING.screenPadding,
-        marginTop: SPACING.lg,
+        marginTop: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        alignItems: 'center',
-        ...SHADOWS.cardElevated,
+        width: '100%',
+        ...SHADOWS.cardSoft,
+    },
+    profileHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        width: '100%',
+        minWidth: 0,
     },
     avatar: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
+        width: 72,
+        height: 72,
+        borderRadius: 36,
         backgroundColor: COLORS.accent,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: SPACING.md,
+        marginRight: SPACING.lg,
         borderWidth: 2,
         borderColor: COLORS.divider,
+        flexShrink: 0,
     },
     avatarImage: {
         width: '100%',
@@ -73,61 +69,199 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
         fontWeight: '600',
-        marginBottom: SPACING.xs,
     },
     profileUsername: {
         color: COLORS.muted,
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.body,
-        marginBottom: SPACING.xs,
+        marginTop: 2,
     },
-    profileMeta: {
+    profileHeaderContent: {
+        flex: 1,
+        minWidth: 0,
+    },
+    profileIdentityBlock: {
+        minWidth: 0,
+    },
+    profileBadgeRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: SPACING.sm,
-        gap: SPACING.md,
+        marginTop: SPACING.xs,
+        gap: SPACING.sm,
+        flexWrap: 'wrap',
+        minWidth: 0,
     },
-    profileMetaItem: {
+    summaryBadge: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: 6,
+        minHeight: 30,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 6,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        minWidth: 0,
     },
-    profileMetaText: {
+    summaryBadgeAccent: {
+        backgroundColor: 'rgba(66, 165, 245, 0.12)',
+        borderColor: 'rgba(66, 165, 245, 0.28)',
+    },
+    summaryBadgeSuccess: {
+        backgroundColor: 'rgba(76, 175, 80, 0.12)',
+        borderColor: 'rgba(76, 175, 80, 0.32)',
+    },
+    summaryBadgeNeutral: {
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        borderColor: COLORS.cardBorder,
+    },
+    summaryBadgeText: {
+        color: COLORS.text,
+        fontSize: 11,
+        fontFamily: FONTS.bold,
+        textTransform: 'uppercase',
+        flexShrink: 1,
+        minWidth: 0,
+    },
+    summaryDivider: {
+        width: '100%',
+        height: 1,
+        backgroundColor: COLORS.divider,
+        opacity: 0.6,
+        marginTop: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    summaryMetricRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: SPACING.sm,
+        width: '100%',
+    },
+    summaryMetricCard: {
+        flex: 1,
+        minWidth: 140,
+        backgroundColor: 'rgba(255, 255, 255, 0.035)',
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+    },
+    summaryMetricLabel: {
+        color: COLORS.muted,
+        fontSize: 10,
+        fontFamily: FONTS.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 6,
+    },
+    summaryMetricInline: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+        gap: 6,
+    },
+    summaryMetricValue: {
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+        fontWeight: '600',
+        flexShrink: 1,
+        minWidth: 0,
+    },
+    infoPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 34,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: RADII.pill,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        minWidth: 0,
+        flexShrink: 1,
+    },
+    infoPillText: {
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
-        marginLeft: SPACING.xs,
         fontFamily: FONTS.body,
         fontWeight: '500',
+        flexShrink: 1,
+        minWidth: 0,
     },
 
     // Action Section
     actionContainer: {
         width: '100%',
-        marginTop: SPACING.lg,
+        marginTop: SPACING.md,
+    },
+    actionRow: {
+        width: '100%',
+        marginTop: SPACING.md,
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        gap: SPACING.sm,
+    },
+    primaryActionSlot: {
+        flex: 4,
+        minWidth: 0,
+    },
+    secondaryActionSlot: {
+        flex: 1,
+        minWidth: 0,
+    },
+    primaryActionButton: {
+        width: '100%',
+    },
+    primaryActionSurface: {
+        width: '100%',
+    },
+    reportButton: {
+        marginTop: 12,
+        backgroundColor: 'rgba(239, 83, 80, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(239, 83, 80, 0.28)',
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 0,
+    },
+    reportButtonText: {
+        color: COLORS.error,
+    },
+    reportIconButton: {
+        width: '100%',
+        minHeight: 54,
+        backgroundColor: 'rgba(239, 83, 80, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(239, 83, 80, 0.28)',
+        paddingHorizontal: 0,
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 0,
     },
     mainButton: {
-        height: 44,
-        borderRadius: RADII.md,
-        backgroundColor: COLORS.accent,
+        width: '100%',
+        ...CTA.primaryButton,
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        ...SHADOWS.accentSoft,
     },
     mainButtonText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.label,
+        ...CTA.primaryButtonText,
         textTransform: 'uppercase',
         marginLeft: SPACING.sm,
-        fontWeight: '700',
     },
     statusBadge: {
-        height: 44,
+        minHeight: 54,
         borderRadius: RADII.md,
         borderWidth: 1,
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
+        paddingHorizontal: SPACING.md,
     },
     friendBadge: {
         backgroundColor: 'rgba(76, 175, 80, 0.1)',
@@ -149,10 +283,9 @@ export default StyleSheet.create({
         marginTop: SPACING.xl,
     },
     sectionPadding: {
-        paddingHorizontal: SPACING.screenPadding,
+        width: '100%',
     },
     gamesScrollContainer: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: SPACING.sm,
     },
     sectionHeader: {
@@ -160,7 +293,6 @@ export default StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: SPACING.md,
-        paddingHorizontal: SPACING.screenPadding,
     },
     sectionTitle: {
         color: COLORS.text,
@@ -195,7 +327,7 @@ export default StyleSheet.create({
     // Empty State
     emptyState: {
         alignItems: 'center',
-        backgroundColor: COLORS.cardBackground,
+        backgroundColor: COLORS.cardDark,
         borderRadius: RADII.md,
         padding: SPACING.lg,
         borderWidth: 1,
@@ -230,7 +362,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
 
     // Chip-based Game Selection
@@ -267,6 +399,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderRadius: RADII.lg,
         padding: SPACING.lg,
+        marginTop: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
     },
@@ -368,11 +501,12 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderRadius: RADII.lg,
         padding: SPACING.lg,
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.md,
+        marginBottom: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        ...SHADOWS.cardElevated,
+        width: '100%',
+        ...SHADOWS.cardSoft,
     },
     skillTitleRow: {
         flexDirection: 'row',
@@ -456,22 +590,6 @@ export default StyleSheet.create({
         fontWeight: '700',
     },
 
-    // Recent Activity
-    activityCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
-        borderRadius: RADII.md,
-        padding: SPACING.md,
-        marginTop: SPACING.sm,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.sm,
-    },
-    activityText: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        fontFamily: FONTS.body,
-    },
-
     // Mutual Context Chips
     contextChip: {
         backgroundColor: 'rgba(66, 165, 245, 0.08)',
@@ -483,11 +601,14 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
+        maxWidth: '100%',
+        minWidth: 0,
     },
     contextText: {
         color: COLORS.accent,
         fontSize: 11,
         fontFamily: FONTS.bold,
+        flexShrink: 1,
     },
 
     // Enhanced Platform Styles
@@ -532,8 +653,10 @@ export default StyleSheet.create({
     // New Styles
     mutualContextRow: {
         flexDirection: 'row',
-        marginTop: SPACING.sm,
-        justifyContent: 'center',
+        flexWrap: 'wrap',
+        width: '100%',
+        marginTop: SPACING.md,
+        justifyContent: 'flex-start',
         gap: SPACING.sm,
     },
     notFoundContainer: {
@@ -555,8 +678,5 @@ export default StyleSheet.create({
         color: COLORS.accent,
         fontSize: 16,
         fontFamily: FONTS.bold,
-    },
-    backgroundHeader: {
-        backgroundColor: COLORS.background,
     },
 });

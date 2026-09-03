@@ -1,59 +1,101 @@
-// app/auth/register-step4.tsx
-import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
-import React, { useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import LogoHalo from "../../src/components/LogoHalo";
+import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
+import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import { AppIcon } from "../../src/components/AppIcon";
+import { AppButton } from "../../src/components/AppPrimitives";
+import Screen from "../../src/components/Screen";
+import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
-import { signUpWithEmail } from "../../src/services/authService";
+import { APP_ROUTES } from "../../src/navigation/routes";
+import { signUpWithEmail } from "../../src/services/convex/authService";
 import {
+  completeOnboarding,
   saveOnboardingStep2,
   saveOnboardingStep3Platforms,
-} from "../../src/services/userService";
+  waitForRegistrationSession,
+} from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
+import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 import styles from "./register.styles";
+import { DEFAULT_CITY, normalizeKarachiAreaList } from "../../constants/profileOptions";
 
 export default function RegisterStep4() {
-  const { step1, step2, step3, step4, setStep4, resetAll } =
+  const {
+    step1,
+    step2,
+    step3,
+    step4,
+    setStep4,
+    setCurrentStep,
+    registrationPhase = "idle",
+    registrationSubStep = 0,
+    setRegistrationProgress,
+  } =
     useOnboardingStore();
-  const { showToast } = useToast();
-
-  console.log("[Step4] mounted", { step1, step2, step3, step4 });
+  const { showToast, hideToast } = useToast();
+  const { refreshSession } = useAuth();
 
   const [submitting, setSubmitting] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
+  const [currentSubStep, setCurrentSubStep] = useState<number>(0);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [registeredUserId, setRegisteredUserId] = useState<string | null>(null);
+  const visiblePhase = phase !== "idle" ? phase : registrationPhase;
+  const visibleSubStep = phase !== "idle" ? currentSubStep : registrationSubStep;
 
-  // ---- Derived helpers ----
-  // Games + offline sports summary (same idea as Step 3)
+  useEffect(() => {
+    setCurrentStep(4);
+  }, [setCurrentStep]);
+
+  useEffect(() => {
+    // Don't redirect away if we're in success flow
+    if (visiblePhase === "success" || visiblePhase === "submitting") return;
+    const { phoneE164 } = normalizePakistaniPhone(step1.phone || "");
+    const phoneVerified =
+      Boolean(step1.phoneVerified) &&
+      Boolean(phoneE164) &&
+      step1.phoneVerifiedE164 === phoneE164;
+    if (
+      !step1.fullName.trim() ||
+      !step1.username.trim() ||
+      !step1.email.trim() ||
+      !step1.password ||
+      !phoneVerified
+    ) {
+      router.replace("/auth/register");
+      return;
+    }
+    const hasActivity =
+      step2.playsCs2 ||
+      (step2 as any).playsCs16 ||
+      (step2 as any).playsValorant ||
+      step2.playsFc ||
+      step2.playsTekken;
+    if (!step2.selectedAreas.length || !hasActivity) {
+      router.replace("/auth/register-step2");
+    }
+  }, [step1, step2, visiblePhase]);
+
   const { selectedActivities, sportsSummary } = useMemo(() => {
     const items: string[] = [];
     if (step2.playsCs2) items.push("CS2");
-    if (step2.playsFc) items.push("FC 26");
+    if ((step2 as any).playsCs16) items.push("CS 1.6");
+    if ((step2 as any).playsValorant) items.push("Valorant");
+    if (step2.playsFc) items.push("FC26");
     if (step2.playsTekken) items.push("Tekken 8");
+    // Physical sports are temporarily disabled.
+    // if ((step2 as any).playsFutsal) items.push("Futsal");
+    // if ((step2 as any).playsIndoorCricket) items.push("Indoor Cricket");
+    // if ((step2 as any).playsPadel) items.push("Padel");
+    // if ((step2 as any).playsPickleball) items.push("Pickleball");
 
-    const playsFutsal = (step2 as any).playsFutsal ?? false;
-    const playsIndoorCricket = (step2 as any).playsIndoorCricket ?? false;
-    const playsPadel = (step2 as any).playsPadel ?? false;
-    const playsPickleball = (step2 as any).playsPickleball ?? false;
-
-    if (playsFutsal) items.push("Futsal");
-    if (playsIndoorCricket) items.push("Indoor Cricket");
-    if (playsPadel) items.push("Padel");
-    if (playsPickleball) items.push("Pickleball");
-
-    const futsalPositions =
-      (((step2 as any).futsalPositions ?? []) as string[]) || [];
-    const indoorCricketRole =
-      ((step2 as any).indoorCricketRole as string) ?? null;
+    const details: string[] = [];
+    const futsalPositions = (((step2 as any).futsalPositions ?? []) as string[]) || [];
+    const indoorCricketRole = ((step2 as any).indoorCricketRole as string) ?? null;
     const indoorCricketBowlingStyle =
       ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
     const indoorCricketBattingStyle =
@@ -61,33 +103,15 @@ export default function RegisterStep4() {
     const padelRole = ((step2 as any).padelRole as string) ?? null;
     const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
 
-    const details: string[] = [];
-
-    if (playsFutsal && futsalPositions.length) {
-      details.push(`Futsal: ${futsalPositions.join(" / ")}`);
-    }
-
-    if (playsIndoorCricket && indoorCricketRole) {
-      let roleLabel = indoorCricketRole;
-      if (indoorCricketRole === "Bowler" && indoorCricketBowlingStyle) {
-        roleLabel += ` (${indoorCricketBowlingStyle})`;
-      } else if (indoorCricketRole === "Batsman" && indoorCricketBattingStyle) {
-        roleLabel += ` (${indoorCricketBattingStyle})`;
-      }
-      details.push(`Indoor Cricket: ${roleLabel}`);
-    }
-
-    if (playsPadel && padelRole) {
-      details.push(`Padel: ${padelRole}`);
-    }
-
-    if (playsPickleball && pickleballRole) {
-      details.push(`Pickleball: ${pickleballRole}`);
-    }
+    // Physical sports are temporarily disabled.
+    // if (futsalPositions.length) details.push(`Futsal: ${futsalPositions.join(" / ")}`);
+    // if (indoorCricketRole) { ... }
+    // if (padelRole) details.push(`Padel: ${padelRole}`);
+    // if (pickleballRole) details.push(`Pickleball: ${pickleballRole}`);
 
     return {
       selectedActivities: items,
-      sportsSummary: details.join(" · "),
+      sportsSummary: details.join(" | "),
     };
   }, [step2]);
 
@@ -101,48 +125,53 @@ export default function RegisterStep4() {
     return platforms;
   }, [step3]);
 
+  const hasAnyStep3Data = useMemo(
+    () =>
+      Boolean(
+        step3.steamProfileUrl?.trim() ||
+        step3.faceitProfileUrl?.trim() ||
+        step3.eaProfileUrl?.trim() ||
+        step3.xboxGamertag?.trim() ||
+        step3.psnOnlineId?.trim() ||
+        step3.steamProfile ||
+        step3.faceitProfile ||
+        step3.psnProfile,
+      ),
+    [step3],
+  );
+
   const allAgreementsChecked =
     step4.agreeTerms && step4.agreePrivacy && step4.consentMatchHistory;
 
-  const toggleAgreeTerms = () => setStep4({ agreeTerms: !step4.agreeTerms });
-  const toggleAgreePrivacy = () =>
-    setStep4({ agreePrivacy: !step4.agreePrivacy });
-  const toggleConsentMatchHistory = () =>
-    setStep4({ consentMatchHistory: !step4.consentMatchHistory });
+  useEffect(() => {
+    if (registrationPhase !== "success") return;
+    const timer = setTimeout(() => {
+      router.replace(APP_ROUTES.playerHome as any);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [registrationPhase]);
 
-  // Keyboard handling
-  const Container = KeyboardAvoidingView;
-  const containerProps = {
-    style: styles.screen,
-    behavior: Platform.OS === "ios" ? ("padding" as const) : ("height" as const),
-    keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 20,
-  };
-
-  const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
-  const [currentSubStep, setCurrentSubStep] = useState<number>(0);
-  const [errorDetails, setErrorDetails] = useState<string | null>(null);
-
-  // ---- Final submit (with phase-based reliability) ----
   const handleFinalSignUp = async () => {
     if (!allAgreementsChecked) {
       showToast({
         type: "info",
         title: "Almost there",
-        message:
-          "Please agree to the Terms, Privacy Policy and match history usage to continue.",
+        message: "Please accept all required agreements before creating your account.",
       });
       return;
     }
 
-    const { fullName, username, email, phone, password } = step1;
-
-    // Safety: if Step 1 is somehow incomplete, push them back
-    if (!fullName.trim() || !username.trim() || !email.trim() || !password) {
+    const { fullName, username, email, phone, password, ageRange } = step1;
+    const { phoneE164 } = normalizePakistaniPhone(phone || "");
+    const phoneVerified =
+      Boolean(step1.phoneVerified) &&
+      Boolean(phoneE164) &&
+      step1.phoneVerifiedE164 === phoneE164;
+    if (!fullName.trim() || !username.trim() || !email.trim() || !password || !phoneVerified) {
       showToast({
         type: "error",
         title: "Missing details",
-        message:
-          "Some of your basic account details are missing. Please go back and complete Step 1.",
+        message: "Some of your account details are missing or your phone is not verified. Please complete Step 1 again.",
       });
       router.replace("/auth/register");
       return;
@@ -150,536 +179,445 @@ export default function RegisterStep4() {
 
     setSubmitting(true);
     setPhase("submitting");
+    setRegistrationProgress("submitting", 1);
     setErrorDetails(null);
 
     try {
-      // PHASE 1: Auth + Basic Profile
-      if (currentSubStep <= 0) {
+      let userId = registeredUserId;
+      if (!userId) {
         setCurrentSubStep(1);
-        console.log("[Step4] Phase 1: Creating account...");
-        const resSignUp = await signUpWithEmail(
+        setRegistrationProgress("submitting", 1);
+        const signUpResult = await signUpWithEmail(
           email.trim(),
           password,
           fullName.trim(),
           username.trim(),
-          phone.trim()
+          phone.trim(),
+          "player",
+          DEFAULT_CITY,
+          ageRange?.trim() || undefined,
         );
-
-        if (!resSignUp || !resSignUp.ok) {
-          throw { step: 1, message: resSignUp?.message || "Auth creation failed." };
+        if (!signUpResult || !signUpResult.ok) {
+          throw { step: 1, message: signUpResult?.message || "Auth creation failed." };
         }
+        userId = signUpResult.userId as string;
+        setRegisteredUserId(userId);
       }
 
-      // PHASE 2: Preferences (Step 2)
-      if (currentSubStep <= 1) {
-        setCurrentSubStep(2);
-        console.log("[Step4] Phase 2: Saving preferences...");
-
-        const playsFutsal = (step2 as any).playsFutsal ?? false;
-        const playsIndoorCricket = (step2 as any).playsIndoorCricket ?? false;
-        const playsPadel = (step2 as any).playsPadel ?? false;
-        const playsPickleball = (step2 as any).playsPickleball ?? false;
-
-        const futsalPositions = (((step2 as any).futsalPositions ?? []) as string[]) || [];
-        const indoorCricketRole = ((step2 as any).indoorCricketRole as string) ?? null;
-        const indoorCricketBowlingStyle = ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
-        const indoorCricketBattingStyle = ((step2 as any).indoorCricketBattingStyle as string) ?? null;
-        const padelRole = ((step2 as any).padelRole as string) ?? null;
-        const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
-
-        const resStep2 = await saveOnboardingStep2({
-          areasPreferred: step2.selectedAreas,
-          playsCs2: step2.playsCs2,
-          cs2Role: step2.cs2Role,
-          playsFc: step2.playsFc,
-          fcTeam: step2.fcTeam.trim() || null,
-          fcFormation: step2.fcFormation,
-          playsTekken: step2.playsTekken,
-          tekkenFavorites: step2.tekkenFavorites,
-          // new sports fields logic
-          ...({
-            playsFutsal,
-            playsIndoorCricket,
-            playsPadel,
-            playsPickleball,
-            futsalPositions,
-            indoorCricketRole,
-            indoorCricketBowlingStyle,
-            indoorCricketBattingStyle,
-            padelRole,
-            pickleballRole,
-          } as any)
-        });
-
-        if (!resStep2.ok) {
-          throw { step: 2, message: resStep2.message };
-        }
+      if (!userId) {
+        throw { step: 1, message: "User ID not available. Please try again." };
       }
 
-      // PHASE 3: Platforms (Step 3)
-      if (currentSubStep <= 2) {
-        setCurrentSubStep(3);
-        console.log("[Step4] Phase 3: Connecting platforms...");
-        const resStep3 = await saveOnboardingStep3Platforms({
+      setCurrentSubStep(2);
+      setRegistrationProgress("submitting", 2);
+      await refreshSession();
+      const registrationSessionReady = await waitForRegistrationSession(userId as any);
+      if (!registrationSessionReady) {
+        throw {
+          step: 2,
+          message:
+            "Your account was created, but its secure session is still syncing. Tap Retry failed steps to finish setup.",
+        };
+      }
+
+      const saveStep2Result = await saveOnboardingStep2(userId as any, {
+        areasPreferred: normalizeKarachiAreaList(step2.selectedAreas),
+        playsCs2: step2.playsCs2,
+        cs2Role: step2.cs2Role,
+        playsCs16: (step2 as any).playsCs16 ?? false,
+        cs16Role: (step2 as any).cs16Role ?? null,
+        playsValorant: (step2 as any).playsValorant ?? false,
+        valorantRole: (step2 as any).valorantRole ?? null,
+        playsFc: step2.playsFc,
+        fcTeam: step2.fcTeam.trim() || null,
+        fcFormation: step2.fcFormation,
+        playsTekken: step2.playsTekken,
+        tekkenFavorites: step2.tekkenFavorites,
+        playsFutsal: false,
+        playsIndoorCricket: false,
+        playsPadel: false,
+        playsPickleball: false,
+        futsalPositions: [],
+        indoorCricketRole: null,
+        indoorCricketBowlingStyle: null,
+        indoorCricketBattingStyle: null,
+        padelRole: null,
+        pickleballRole: null,
+      } as any);
+      if (!saveStep2Result.ok) {
+        throw { step: 2, message: saveStep2Result.message };
+      }
+
+      setCurrentSubStep(3);
+      setRegistrationProgress("submitting", 3);
+      if (hasAnyStep3Data) {
+        const saveStep3Result = await saveOnboardingStep3Platforms(userId as any, {
           steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
           faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
           eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
           xboxGamertag: (step3.xboxGamertag || "").trim() || null,
           psnOnlineId: (step3.psnOnlineId || "").trim() || null,
-          // summaries from Step 3
           steamProfile: step3.steamProfile,
           faceitProfile: step3.faceitProfile,
           psnProfile: step3.psnProfile,
         });
-
-        if (!resStep3.ok) {
-          throw { step: 3, message: resStep3.message };
+        if (!saveStep3Result.ok) {
+          throw { step: 3, message: saveStep3Result.message };
         }
       }
 
-      // SUCCESS
       setCurrentSubStep(4);
+      setRegistrationProgress("submitting", 4);
+      const completeResult = await completeOnboarding(userId as any);
+      if (!completeResult.ok) {
+        throw { step: 4, message: completeResult.message };
+      }
+      setCurrentSubStep(5);
+      setRegistrationProgress("submitting", 5);
+      const sessionReady = await refreshSession();
+      if (!sessionReady) {
+        throw {
+          step: 5,
+          message: "Account created, but your session was not ready yet. Please try signing in.",
+        };
+      }
+
       setPhase("success");
-      console.log("[Step4] Registration fully complete!");
+      setRegistrationProgress("success", 5);
 
+      showToast({
+        type: "success",
+        title: "Welcome to MatchHai",
+        message: "Account created. Complete CNIC & face verification to unlock MatchHai features.",
+      });
       setTimeout(() => {
-        resetAll();
-        showToast({
-          type: "success",
-          title: "Welcome to MatchHai",
-          message: "Account ready! Let’s find your squad.",
-        });
-        router.replace("/home");
-      }, 1500);
-
-    } catch (err: any) {
-      console.error("[Step4] Submission error:", err);
-      // Determine how far we got
-      const failedAt = err.step || currentSubStep;
+        router.replace(APP_ROUTES.playerHome as any);
+      }, 650);
+    } catch (error: any) {
+      const failedAt = error.step || currentSubStep;
       setCurrentSubStep(failedAt);
       setPhase("partial-fail");
-      setErrorDetails(err.message || "An unexpected error occurred.");
+      setRegistrationProgress("partial-fail", failedAt);
+      setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);
-
       showToast({
         type: "error",
         title: "Registration incomplete",
-        message: err.message || "Something went wrong. You can try again to finish setup.",
+        message: error.message || "Something went wrong. You can retry from here.",
       });
     }
   };
 
-  // Rendering the loading overlay
   const renderLoadingOverlay = () => {
-    if (phase === "idle") return null;
+    if (visiblePhase === "idle") return null;
 
     const steps = [
       { id: 1, label: "Creating account" },
       { id: 2, label: "Saving preferences" },
-      { id: 3, label: "Connecting platforms" },
+      { id: 3, label: "Saving account links" },
+      { id: 4, label: "Completing setup" },
     ];
 
     return (
       <View style={styles.loadingOverlay}>
         <View style={styles.loadingContent}>
-          {phase !== "partial-fail" && phase !== "success" && (
-            <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
-          )}
+            {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
+              <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
+            ) : null}
+            {visiblePhase === "success" ? (
+              <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
+            ) : null}
+            {visiblePhase === "partial-fail" ? (
+              <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
+            ) : null}
 
-          {phase === "success" && (
-            <MaterialIcons name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
-          )}
-
-          {phase === "partial-fail" && (
-            <MaterialIcons name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
-          )}
-
-          <Text style={styles.loadingPhaseTitle}>
-            {phase === "submitting" ? "Setting up your profile..." :
-              phase === "partial-fail" ? "Setup Interrupted" : "Welcome aboard!"}
-          </Text>
-
-          <View style={{ width: '100%', marginBottom: 20 }}>
-            {steps.map((s, idx) => {
-              const isDone = currentSubStep > s.id || (phase === 'success');
-              const isActive = currentSubStep === s.id && phase === 'submitting';
-              const isFailed = currentSubStep === s.id && phase === 'partial-fail';
-
-              return (
-                <View key={s.id}>
-                  <View style={styles.progressStep}>
-                    <View style={styles.progressIcon}>
-                      {isDone ? (
-                        <MaterialIcons name="check-circle" size={20} color={COLORS.success} />
-                      ) : isFailed ? (
-                        <MaterialIcons name="cancel" size={20} color={COLORS.error} />
-                      ) : isActive ? (
-                        <ActivityIndicator size="small" color={COLORS.accent} />
-                      ) : (
-                        <MaterialIcons name="radio-button-unchecked" size={20} color="rgba(255,255,255,0.2)" />
-                      )}
-                    </View>
-                    <Text style={[
-                      styles.progressText,
-                      isActive && styles.progressTextActive,
-                      isDone && styles.progressTextDone,
-                      isFailed && { color: COLORS.error }
-                    ]}>
-                      {s.label}
-                    </Text>
-                  </View>
-                  {idx < steps.length - 1 && <View style={styles.progressStepLine} />}
-                </View>
-              );
-            })}
-          </View>
-
-          {phase === "partial-fail" && (
-            <>
-              <Text style={[styles.helperText, styles.helperError, { textAlign: 'center', marginBottom: 20 }]}>
-                {errorDetails}
-              </Text>
-              <Pressable
-                onPress={handleFinalSignUp}
-                style={[styles.primaryBtn, { width: '100%', marginBottom: 12 }]}
-              >
-                <Text style={styles.primaryBtnText}>Retry failed steps</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { setPhase("idle"); setSubmitting(false); }}
-                style={{ padding: 10 }}
-              >
-                <Text style={{ color: COLORS.muted }}>Cancel</Text>
-              </Pressable>
-            </>
-          )}
-
-          {phase === "success" && (
-            <Text style={[styles.progressText, { textAlign: 'center' }]}>
-              Redirecting you to the dashboard...
+            <Text style={styles.loadingPhaseTitle}>
+              {visiblePhase === "submitting"
+                ? "Setting up your profile..."
+                : visiblePhase === "partial-fail"
+                  ? "Setup interrupted"
+                  : "Welcome aboard"}
             </Text>
-          )}
+
+            <View style={{ width: "100%", marginBottom: 20 }}>
+              {steps.map((step, index) => {
+                const isDone = visibleSubStep > step.id || visiblePhase === "success";
+                const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
+                const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
+
+                return (
+                  <View key={step.id}>
+                    <View style={styles.progressStep}>
+                      <View style={styles.progressIcon}>
+                        {isDone ? (
+                          <AppIcon name="check-circle" size={20} color={COLORS.success} />
+                        ) : isFailed ? (
+                          <AppIcon name="cancel" size={20} color={COLORS.error} />
+                        ) : isActive ? (
+                          <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : (
+                          <AppIcon
+                            name="radio-button-unchecked"
+                            size={20}
+                            color="rgba(255,255,255,0.2)"
+                          />
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.progressText,
+                          isActive && styles.progressTextActive,
+                          isDone && styles.progressTextDone,
+                          isFailed && { color: COLORS.error },
+                        ]}
+                      >
+                        {step.label}
+                      </Text>
+                    </View>
+                    {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                  </View>
+                );
+              })}
+            </View>
+
+            {visiblePhase === "partial-fail" ? (
+              <>
+                <Text
+                  style={[
+                    styles.helperText,
+                    styles.helperError,
+                    { textAlign: "center", marginBottom: 20 },
+                  ]}
+                >
+                  {errorDetails}
+                </Text>
+                <AppButton onPress={handleFinalSignUp} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
+                  Retry failed steps
+                </AppButton>
+                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); setRegistrationProgress("idle", 0); hideToast(); }} style={{ padding: 10 }}>
+                  <Text style={{ color: COLORS.muted }}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            {visiblePhase === "success" ? (
+              <Text style={[styles.progressText, { textAlign: "center" }]}>
+                Redirecting you to the next screen...
+              </Text>
+            ) : null}
         </View>
       </View>
     );
   };
 
-  return (
-    <Container {...containerProps}>
-      <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: 32 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+  if (visiblePhase !== "idle") {
+    return (
+      <Screen
+        style={styles.screen}
+        contentStyle={styles.loadingScreenContainer}
+        routeKey="/auth/register-step4"
       >
-        <LogoHalo />
+        {renderLoadingOverlay()}
+      </Screen>
+    );
+  }
 
-        {/* Stepper: Step 4 of 4 */}
-        <View style={styles.stepperWrapper}>
-          <View style={styles.stepperTopRow}>
-            <View>
-              <Text style={styles.stepperTitle}>Review & confirm</Text>
-              <Text style={styles.stepperSubtitle}>
-                Step 4 of 4 · Check your details before signing up
-              </Text>
-            </View>
-          </View>
-          <View style={styles.stepperBar}>
-            <View style={[styles.stepperBarFill, { width: "100%" }]} />
-          </View>
-          <View style={styles.stepperDotsRow}>
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-          </View>
-        </View>
+  const sectionHeader = (icon: string, title: string, route: string) => (
+    <View style={styles.reviewSectionHeaderRow}>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <AppIcon name={icon as any} size={16} color={COLORS.accent} style={{ marginRight: 6 }} />
+        <Text style={styles.reviewSectionTitle}>{title}</Text>
+      </View>
+      <Pressable onPress={() => router.replace(route as any)}>
+        <Text style={styles.reviewEditLink}>Edit</Text>
+      </Pressable>
+    </View>
+  );
 
-        {/* Headings */}
-        <Text style={styles.heading}>Almost ready</Text>
-        <Text style={styles.sub}>
-          Confirm your account details, location, games and connected platforms
-          before creating your MatchHai profile.
-        </Text>
+  return (
+    <Screen
+      scroll
+      keyboardAvoiding
+      style={styles.screen}
+      contentStyle={styles.container}
+      routeKey="/auth/register-step4"
+      scrollProps={{
+        showsVerticalScrollIndicator: false,
+        keyboardShouldPersistTaps: "handled",
+      }}
+    >
+      <RegistrationStepHeader
+        title="Review and Confirm"
+        subtitle=""
+        stepTitle="Step 4 of 4"
+        stepSubtitle="Final review"
+        progress="100%"
+        onBack={() => router.replace("/auth/register-step3")}
+      />
 
-        {/* Account details review */}
-        <View style={styles.reviewSectionCard}>
-          <View style={styles.reviewSectionHeaderRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <MaterialIcons
-                name="person"
-                size={16}
-                color={COLORS.accent}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.reviewSectionTitle}>Account details</Text>
-            </View>
-            <Pressable onPress={() => router.replace("/auth/register")}>
-              <Text style={styles.reviewEditLink}>Edit</Text>
-            </Pressable>
-          </View>
+      <Text style={styles.heading}>One last check</Text>
+      <Text style={styles.sub}>
+        Review your account details, preferences, and optional links before you submit.
+      </Text>
 
+      <View style={styles.reviewSectionCard}>
+        {sectionHeader("person", "Account details", "/auth/register")}
+        <View style={styles.summaryCardList}>
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Full name</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step1.fullName && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.reviewValue, !step1.fullName && styles.reviewValueMuted]}>
               {step1.fullName || "Not set"}
             </Text>
           </View>
-
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Username</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step1.username && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.reviewValue, !step1.username && styles.reviewValueMuted]}>
               {step1.username || "Not set"}
             </Text>
           </View>
-
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Email</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step1.email && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.reviewValue, !step1.email && styles.reviewValueMuted]}>
               {step1.email || "Not set"}
             </Text>
           </View>
-
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Phone</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step1.phone && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.reviewValue, !step1.phone && styles.reviewValueMuted]}>
               {step1.phone || "Not set"}
             </Text>
           </View>
-        </View>
-
-        {/* Location & games/sports review */}
-        <View style={styles.reviewSectionCard}>
-          <View style={styles.reviewSectionHeaderRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <MaterialIcons
-                name="map"
-                size={16}
-                color={COLORS.accent}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.reviewSectionTitle}>
-                Location & games/sports
-              </Text>
-            </View>
-            <Pressable onPress={() => router.replace("/auth/register-step2")}>
-              <Text style={styles.reviewEditLink}>Edit</Text>
-            </Pressable>
-          </View>
-
           <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Areas in Karachi</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.selectedAreas.length && styles.reviewValueMuted,
-              ]}
-            >
-              {step2.selectedAreas.length
-                ? step2.selectedAreas.join(", ")
-                : "Not selected"}
+            <Text style={styles.reviewLabel}>City and age range</Text>
+            <Text style={styles.reviewValue}>
+              {[step1.city || "Karachi", step1.ageRange || "Not set"].join(" | ")}
             </Text>
           </View>
+        </View>
+      </View>
 
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Games & sports</Text>
+      <View style={styles.reviewSectionCard}>
+        {sectionHeader("map", "Location and interests", "/auth/register-step2")}
+        <View style={styles.summaryCardList}>
+          <View>
+            <Text style={styles.reviewLabel}>Areas in Karachi</Text>
+            <Text style={[styles.reviewValue, !step2.selectedAreas.length && styles.reviewValueMuted]}>
+              {step2.selectedAreas.length ? step2.selectedAreas.join(", ") : "Not selected"}
+            </Text>
+          </View>
+          <View>
+            <Text style={styles.reviewLabel}>Games and sports</Text>
             {selectedActivities.length ? (
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <View style={styles.chipRow}>
-                  {selectedActivities.map((g) => (
-                    <View key={g} style={styles.summaryChip}>
-                      <Text style={styles.summaryChipText}>{g}</Text>
-                    </View>
-                  ))}
-                </View>
-                {sportsSummary ? (
-                  <Text
-                    style={[styles.reviewValue, { marginTop: 4, fontSize: 12 }]}
-                  >
-                    {sportsSummary}
-                  </Text>
-                ) : null}
+              <View style={styles.chipRow}>
+                {selectedActivities.map((item) => (
+                  <View key={item} style={styles.summaryChip}>
+                    <Text style={styles.summaryChipText}>{item}</Text>
+                  </View>
+                ))}
               </View>
             ) : (
-              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
-                None
-              </Text>
+              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>None</Text>
             )}
           </View>
-        </View>
-
-        {/* Platforms review */}
-        <View style={styles.reviewSectionCard}>
-          <View style={styles.reviewSectionHeaderRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <MaterialIcons
-                name="sports-esports"
-                size={16}
-                color={COLORS.accent}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.reviewSectionTitle}>Connected platforms</Text>
+          {sportsSummary ? (
+            <View>
+              <Text style={styles.reviewLabel}>Role details</Text>
+              <Text style={styles.reviewValue}>{sportsSummary}</Text>
             </View>
-            <Pressable onPress={() => router.replace("/auth/register-step3")}>
-              <Text style={styles.reviewEditLink}>Edit</Text>
-            </Pressable>
-          </View>
+          ) : null}
+        </View>
+      </View>
 
-          {connectedPlatforms.length ? (
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Platforms</Text>
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <View style={styles.chipRow}>
-                  {connectedPlatforms.map((p) => (
-                    <View key={p} style={styles.summaryChip}>
-                      <Text style={styles.summaryChipText}>{p}</Text>
-                    </View>
-                  ))}
+      <View style={styles.reviewSectionCard}>
+        {sectionHeader("sports-esports", "Connected platforms", "/auth/register-step3")}
+        {connectedPlatforms.length ? (
+          <View style={styles.summaryCardList}>
+            <View style={styles.chipRow}>
+              {connectedPlatforms.map((platform) => (
+                <View key={platform} style={styles.summaryChip}>
+                  <Text style={styles.summaryChipText}>{platform}</Text>
                 </View>
-              </View>
+              ))}
             </View>
-          ) : (
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Platforms</Text>
-              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
-                No platforms connected yet
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Agreements (custom checkbox UI) */}
-        <View style={styles.termsWrapper}>
-          <Text style={styles.termsHeading}>Agreements</Text>
-
-          <Pressable onPress={toggleAgreeTerms} style={styles.termRow}>
-            <View
-              style={[
-                styles.termBox,
-                step4.agreeTerms && styles.termBoxChecked,
-              ]}
-            >
-              {step4.agreeTerms && <View style={styles.termBoxInner} />}
-            </View>
-            <Text style={styles.termText}>
-              I agree to the{" "}
-              <Text style={styles.termLink}>Terms of Service</Text>.
+            <Text style={styles.reviewValue}>
+              Connected platforms stay editable after signup from your Profile screen.
             </Text>
-          </Pressable>
+          </View>
+        ) : (
+          <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
+            No platforms connected yet. You can add them later from Profile.
+          </Text>
+        )}
+      </View>
 
-          <Pressable onPress={toggleAgreePrivacy} style={styles.termRow}>
-            <View
-              style={[
-                styles.termBox,
-                step4.agreePrivacy && styles.termBoxChecked,
-              ]}
-            >
-              {step4.agreePrivacy && <View style={styles.termBoxInner} />}
-            </View>
-            <Text style={styles.termText}>
-              I agree to the <Text style={styles.termLink}>Privacy Policy</Text>
-              .
-            </Text>
-          </Pressable>
+      <View style={styles.termsWrapper}>
+        <RegistrationFieldLabel label="Agreements" required style={styles.termsHeading} />
 
-          <Pressable onPress={toggleConsentMatchHistory} style={styles.termRow}>
-            <View
-              style={[
-                styles.termBox,
-                step4.consentMatchHistory && styles.termBoxChecked,
-              ]}
-            >
-              {step4.consentMatchHistory && (
-                <View style={styles.termBoxInner} />
-              )}
-            </View>
-            <Text style={styles.termText}>
-              I consent to MatchHai using my match history for matchmaking &amp;
-              stats.
-            </Text>
-          </Pressable>
-
-          {!allAgreementsChecked && (
-            <View style={styles.helperTextRow}>
-              <Text style={[styles.helperText, styles.helperWarning]}>
-                Please tick all three checkboxes to continue.
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Back to Step 3 (safety link) */}
-        <Pressable
-          onPress={() => router.replace("/auth/register-step3")}
-          style={{ alignSelf: "center", marginBottom: 12 }}
-        >
-          <Text style={{ color: COLORS.accent }}>← Back to platforms</Text>
+        <Pressable onPress={() => setStep4({ agreeTerms: !step4.agreeTerms })} style={styles.termRow}>
+          <View style={[styles.termBox, step4.agreeTerms && styles.termBoxChecked]}>
+            {step4.agreeTerms ? <View style={styles.termBoxInner} /> : null}
+          </View>
+          <Text style={styles.termText}>
+            I agree to the <Text style={styles.termLink}>Terms of Service</Text>.
+          </Text>
         </Pressable>
 
-        {/* Final Sign Up button */}
-        <View
+        <Pressable onPress={() => setStep4({ agreePrivacy: !step4.agreePrivacy })} style={styles.termRow}>
+          <View style={[styles.termBox, step4.agreePrivacy && styles.termBoxChecked]}>
+            {step4.agreePrivacy ? <View style={styles.termBoxInner} /> : null}
+          </View>
+          <Text style={styles.termText}>
+            I agree to the <Text style={styles.termLink}>Privacy Policy</Text>.
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setStep4({ consentMatchHistory: !step4.consentMatchHistory })}
+          style={styles.termRow}
+        >
+          <View style={[styles.termBox, step4.consentMatchHistory && styles.termBoxChecked]}>
+            {step4.consentMatchHistory ? <View style={styles.termBoxInner} /> : null}
+          </View>
+          <Text style={styles.termText}>
+            I consent to MatchHai using my match history for matchmaking and stats.
+          </Text>
+        </Pressable>
+
+        {!allAgreementsChecked ? (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, styles.helperWarning]}>
+              Please tick all three checkboxes to continue.
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <Pressable onPress={() => router.replace("/auth/register-step3")} style={styles.backLinkWrapper}>
+        <Text style={styles.backLinkText}>Back to optional account links</Text>
+      </Pressable>
+
+      <View style={[styles.buttonShadowWrapper, allAgreementsChecked && !submitting && styles.buttonShadowWrapperActive]}>
+        <AppButton
+          onPress={handleFinalSignUp}
+          disabled={submitting || !allAgreementsChecked}
+          size="lg"
           style={[
-            styles.buttonShadowWrapper,
-            allAgreementsChecked &&
-            !submitting &&
-            styles.buttonShadowWrapperActive,
+            styles.primaryBtn,
+            !allAgreementsChecked || submitting ? styles.primaryBtnDisabled : null,
           ]}
         >
-          <Pressable
-            onPress={handleFinalSignUp}
-            disabled={submitting || !allAgreementsChecked}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              (!allAgreementsChecked || submitting) &&
-              styles.primaryBtnDisabled,
-              pressed &&
-              !submitting &&
-              allAgreementsChecked && { opacity: 0.92 },
-            ]}
-            android_ripple={{ color: "rgba(255,255,255,0.12)" }}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Sign up & start playing</Text>
-            )}
-          </Pressable>
-        </View>
+          {submitting ? "Submitting..." : "Sign up and continue"}
+        </AppButton>
+      </View>
 
-        {/* Safety link to login */}
-        <Text style={styles.bottomText}>
-          Already have an account?{" "}
-          <Link href="/auth/login" style={{ color: COLORS.accent }}>
-            Sign in
-          </Link>
-        </Text>
-      </ScrollView>
+      <Text style={styles.bottomText}>
+        Already have an account?{" "}
+        <Link href="/auth/login" style={{ color: COLORS.accent }}>
+          Sign in
+        </Link>
+      </Text>
 
-      {/* Improved Loading & Status Overlay */}
       {renderLoadingOverlay()}
-    </Container>
+    </Screen>
   );
 }

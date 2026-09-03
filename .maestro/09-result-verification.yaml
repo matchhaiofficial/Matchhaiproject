@@ -1,0 +1,120 @@
+appId: ${E2E_APP_ID}
+name: 09 - Result submission and verification
+tags:
+  - result
+env:
+  E2E_HOST_EMAIL: ${E2E_HOST_EMAIL}
+  E2E_HOST_PASSWORD: ${E2E_HOST_PASSWORD}
+  E2E_USER2_EMAIL: ${E2E_USER2_EMAIL}
+  E2E_USER2_PASSWORD: ${E2E_USER2_PASSWORD}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+# This flow assumes a matchroom that is in-progress (or eligible for result
+# reporting). Seed the room into "in-progress" so the Report Result action is
+# available. (app/matchrooms/result.tsx renders the submission UI.)
+
+# --- Captain submits the result -------------------------------------------
+- launchApp:
+    clearState: true
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_HOST_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_HOST_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+- assertVisible: "Player dashboard"
+
+# Open the in-progress matchroom from the dashboard "Upcoming Matches" or via
+# Discover, then trigger the result modal.
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# "Report Result" appears on the lobby footer when status is in-progress and
+# the user is a joined captain.
+# TODO testID: add `result-report-button` to the Report Result button in
+# app/matchrooms/[id].tsx.
+- tapOn:
+    text: "Report Result"
+
+# Result submission screen (app/matchrooms/result.tsx).
+- assertVisible: "Submit Match Result"
+- assertVisible: "Which team won?"
+
+# Pick the winning team. Cards are labelled "Team 1" / "Team 2".
+# TODO testID: add `result-team1-option` / `result-team2-option` to the team
+# Pressables, and `result-submit-button` to the Submit Result button.
+- tapOn: "Team 1"
+- tapOn:
+    text: "Submit Result"
+
+# After submitting, the captain returns to the lobby; status should reflect a
+# submitted / pending-verification state.
+- assertVisible:
+    text: "Result Submitted|Waiting for verification|Pending verification|Verifying"
+
+# --- Second participant verifies / votes ----------------------------------
+# Switch to the second participant to confirm the result.
+- launchApp:
+    clearState: true
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_USER2_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_USER2_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+- assertVisible: "Player dashboard"
+
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# Second captain reports their result (must match for auto-finalize) or votes
+# on the dispute. "Report Result" / "Vote on Dispute" are the lobby actions.
+# TODO testID: add `result-vote-button` to the Vote on Dispute button.
+- tapOn:
+    text: "Report Result"
+    optional: true
+- tapOn:
+    text: "Vote on Dispute"
+    optional: true
+
+- assertVisible:
+    text: "Submit Match Result|Vote"
+    optional: true
+- tapOn:
+    text: "Team 1"
+    optional: true
+- tapOn:
+    text: "Submit Result"
+    optional: true
+
+# Assert the match reached a finalized or pending-verification end state.
+- assertVisible:
+    text: "Completed|Finalized|Result confirmed|Verified|Pending verification|Verifying"

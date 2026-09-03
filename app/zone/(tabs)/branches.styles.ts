@@ -6,6 +6,15 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        flex: 1,
+        paddingTop: 10,
+        paddingBottom: 0,
+    },
+    headerGhostAction: {
+        width: 40,
+        height: 40,
+    },
     loadingWrap: {
         flex: 1,
         alignItems: "center",
@@ -14,6 +23,12 @@ export default StyleSheet.create({
     },
     content: {
         paddingBottom: SPACING.lg,
+    },
+    branchCountLabel: {
+        color: COLORS.muted,
+        fontFamily: FONTS.interMedium,
+        fontSize: TEXT_SIZES.caption,
+        marginBottom: SPACING.md,
     },
     noticeBox: {
         borderWidth: 1,
@@ -39,7 +54,7 @@ export default StyleSheet.create({
         marginBottom: SPACING.md,
     },
     addButton: {
-        height: 46,
+        minHeight: 44,
         borderRadius: 14,
         backgroundColor: COLORS.accent,
         alignItems: "center",
@@ -49,6 +64,9 @@ export default StyleSheet.create({
     },
     addButtonPressed: {
         opacity: 0.9,
+    },
+    addButtonDisabled: {
+        opacity: 0.45,
     },
     addButtonText: {
         color: "#fff",
@@ -80,10 +98,23 @@ export default StyleSheet.create({
     branchCardPressed: {
         opacity: 0.9,
     },
+    branchCardDisabled: {
+        opacity: 0.48,
+    },
     branchCardRow: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "flex-start",
+        gap: SPACING.sm,
+    },
+    branchInfo: {
+        flex: 1,
+        minWidth: 0,
+    },
+    branchChevron: {
+        width: 28,
+        minHeight: 28,
+        alignItems: "flex-end",
+        justifyContent: "center",
     },
     branchTitleRow: {
         flexDirection: "row",
@@ -135,6 +166,39 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.xs + 1,
         marginTop: 2,
+    },
+    verificationBanner: {
+        borderWidth: 1,
+        borderColor: "rgba(255, 193, 7, 0.35)",
+        backgroundColor: "rgba(255, 193, 7, 0.1)",
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    verificationBannerHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    verificationBannerTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
+    verificationBannerText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+    },
+    verificationBannerActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    verificationActionButton: {
+        flex: 1,
     },
 });
 
