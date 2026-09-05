@@ -85,6 +85,11 @@ describe("urgent server-authority regressions", () => {
     expect(admin).toContain(".collect()");
     expect(admin).toContain('.withIndex("by_captainAUid_and_status"');
     expect(admin).toContain('.withIndex("by_captainBUid_and_status"');
+    expect(admin).toContain('.withIndex("by_userId", (q: any) => q.eq("odxerId", user._id))');
+    expect(admin).toContain('.withIndex("by_captainUid", (q: any) => q.eq("captainUid", user._id))');
+    expect(admin).toContain('.withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))');
+    expect(admin).toContain('await ctx.db.patch(membership._id, { username: "Deleted User" })');
+    expect(admin).toContain("assertCanActOnSuperAdminTarget(admin, user)");
     expect(schema).toContain('.index("by_captainAUid_and_status", ["captainAUid", "status"])');
     expect(schema).toContain('.index("by_captainBUid_and_status", ["captainBUid", "status"])');
   });
@@ -117,5 +122,22 @@ describe("urgent server-authority regressions", () => {
     expect(accept).toContain("allocationStartAt = getLinkedRoomStartMillis(linkedRoomForSlot) || allocationStartAt");
     expect(accept).toContain("durationMinutes: allocationDurationMinutes");
     expect(accept).not.toContain("args.matchroomData.scheduledStartAt");
+  });
+
+  it("keeps team venue negotiation in an accepted, server-priced state", () => {
+    const backend = read("convex/teamChallenges.ts");
+    const screen = read("app/teams/challenge.tsx");
+    const createFull = backend.slice(
+      backend.indexOf("export const createFull"),
+      backend.indexOf("export const update"),
+    );
+
+    expect(backend).toContain('if (!["accepted", "venue_proposed"].includes(challenge.status))');
+    expect(backend).toContain('status: "venue_proposed"');
+    expect(backend).toContain("captainVenueChoices: buildCaptainChoices(challenge");
+    expect(createFull).not.toContain("args.alternativeVenueByCaptainB");
+    expect(createFull).not.toContain("args.adminReviewStatus");
+    expect(createFull).toContain("[String(args.captainAUid)]: canonicalCaptainAVenue");
+    expect(screen).toContain("const canAcceptNow = !!(isPending && !isAdminPending && isCaptainB)");
   });
 });

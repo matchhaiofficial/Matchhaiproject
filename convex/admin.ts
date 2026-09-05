@@ -4109,6 +4109,33 @@ async function assertAccountDeletionIsSafe(ctx: any, user: any) {
       throw new Error("Account deletion is blocked until active team challenges are resolved.");
     }
   }
+
+  const teamMemberships = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_userId", (q: any) => q.eq("odxerId", user._id))
+    .collect();
+  for (const membership of teamMemberships) {
+    const team = await ctx.db.get(membership.teamId);
+    if (team && team.status !== "deleted") {
+      throw new Error("Account deletion is blocked until active team membership is removed or transferred.");
+    }
+  }
+
+  const captainedTeams = await ctx.db
+    .query("teams")
+    .withIndex("by_captainUid", (q: any) => q.eq("captainUid", user._id))
+    .collect();
+  if (captainedTeams.some((team: any) => team.status !== "deleted")) {
+    throw new Error("Account deletion is blocked until active team captaincy is transferred.");
+  }
+
+  const ownedZones = await ctx.db
+    .query("zones")
+    .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))
+    .collect();
+  if (ownedZones.some((zone: any) => zone.status !== "rejected")) {
+    throw new Error("Account deletion is blocked until venue ownership is transferred or the venue application is rejected.");
+  }
 }
 
 async function applyAccountDeletion(ctx: any, user: any, now: number) {
@@ -4168,6 +4195,40 @@ async function applyAccountDeletion(ctx: any, user: any, now: number) {
     updatedAt: now,
   });
 
+  // Historical rows can remain for audit/referential integrity, but they must
+  // not preserve the deleted user's display name or contact details.
+  const teamMemberships = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_userId", (q: any) => q.eq("odxerId", user._id))
+    .collect();
+  for (const membership of teamMemberships) {
+    await ctx.db.patch(membership._id, { username: "Deleted User" });
+  }
+
+  const captainedTeams = await ctx.db
+    .query("teams")
+    .withIndex("by_captainUid", (q: any) => q.eq("captainUid", user._id))
+    .collect();
+  for (const team of captainedTeams) {
+    await ctx.db.patch(team._id, { captainUsername: "Deleted User", updatedAt: now });
+  }
+
+  const rejectedZones = await ctx.db
+    .query("zones")
+    .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))
+    .collect();
+  for (const zone of rejectedZones) {
+    if (zone.status !== "rejected") continue;
+    await ctx.db.patch(zone._id, {
+      ownerUsername: "Deleted User",
+      ownerFullName: "Deleted User",
+      contactEmail: anonEmail,
+      contactPhone: undefined,
+      phone: undefined,
+      updatedAt: now,
+    });
+  }
+
   return { shortId, anonEmail };
 }
 
@@ -4191,6 +4252,7 @@ export const processAccountDeletion = mutation({
 
     const user = await ctx.db.get(ticket.userId);
     if (!user) throw new Error("User not found — account may already be deleted.");
+    assertCanActOnSuperAdminTarget(admin, user);
 
     const now = Date.now();
     const { shortId } = await applyAccountDeletion(ctx, user, now);
