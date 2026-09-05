@@ -2,8 +2,8 @@ import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
@@ -14,7 +14,7 @@ import { saveZoneRegistration } from "../../src/services/convex/zoneService";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import { useToast } from "../../src/hooks/useToast";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 import {
   DEFAULT_CITY,
   normalizeKarachiAreaLabel,

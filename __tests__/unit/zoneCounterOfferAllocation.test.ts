@@ -44,7 +44,7 @@ describe("zone counter-offer allocation regression guards", () => {
   });
 
   it("routes unallocated accepted matchrooms into resource allocation", () => {
-    const matchroomsSection = read("app/zone/modules/components/ZoneBookingsMatchroomsSection.tsx");
+    const matchroomsSection = read("app-shared/zone/modules/components/ZoneBookingsMatchroomsSection.tsx");
     const resourcesModule = read("app/zone/modules/resources.tsx");
 
     expect(matchroomsSection).toContain('item.bookingSource === "zone_accepted"');

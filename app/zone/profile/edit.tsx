@@ -25,7 +25,7 @@ import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
 import { isPhoneAvailable, isUsernameAvailable } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
-import styles from "../../(player)/profile/edit.styles";
+import styles from "../../../app-shared/(player)/profile/edit.styles";
 
 const formatPakistaniPhone = (value: string) => {
     const numeric = value.replace(/\D/g, "");

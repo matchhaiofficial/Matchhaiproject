@@ -2,7 +2,7 @@ import React from "react";
 import { BackHandler } from "react-native";
 import { act, render } from "@testing-library/react-native";
 
-import RegistrationStepHeader from "../../app/auth/components/RegistrationStepHeader";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 
 jest.mock("@react-navigation/native", () => ({
   useFocusEffect: (effect: () => void | (() => void)) => {

@@ -29,7 +29,7 @@ import { COLORS, INPUT_PADDING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { APP_ROUTES } from "../../src/navigation/routes";
 import { isSuperAdminProfile } from "../../src/utils/accountRouting";
-import styles from "./login.styles";
+import styles from "../../app-shared/auth/login.styles";
 
 // 📱 Pakistani phone formatter
 const formatPakistaniPhone = (value: string) => {

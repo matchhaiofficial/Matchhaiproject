@@ -25,7 +25,7 @@ import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { PAYMENT_VERIFICATION_SAFE_MESSAGE, PAYMENT_SUPPORT_WITH_ORDER_HINT } from "../../../../src/utils/paymentUiCopy";
 import { buildLegacyMatchroomsHref } from "../../../../src/navigation/routes";
-import styles from "./status.styles";
+import styles from "../../../../app-shared/matchrooms/book/status/status.styles";
 
 export default function BookingStatusScreen() {
     const { intentId, gateway, paymentStatus: paymentStatusParam, orderRefNum } = useLocalSearchParams() as {

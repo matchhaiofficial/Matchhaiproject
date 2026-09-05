@@ -21,7 +21,7 @@ import {
 } from "../../../src/services/convex/reportService";
 import { COLORS } from "../../../src/theme";
 import { getReportStatusLabel } from "../../../src/utils/statusLabels";
-import styles from "./support.styles";
+import styles from "../../../app-shared/zone/modules/support.styles";
 
 type SupportTab = "pending" | "reviewed" | "resolved";
 

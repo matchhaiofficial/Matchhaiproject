@@ -33,7 +33,7 @@ import { calculateInitialRating, GameKey, GameSkillScore, getDisplaySkillScoreFo
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import styles from "./game-details.styles";
+import styles from "../../../app-shared/(player)/profile/game-details.styles";
 
 // FACEIT Level Icons
 const faceitLevelIcons: Record<number, any> = {

@@ -20,12 +20,12 @@ import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import { APP_ROUTES } from "../../src/navigation/routes";
-import BasicFields from "../matchrooms/create/components/BasicFields";
-import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import BasicFields from "../../app-shared/matchrooms/create/components/BasicFields";
+import ZonePicker from "../../app-shared/matchrooms/create/components/ZonePicker";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
-import styles from "../matchrooms/create/create.styles";
+import styles from "../../app-shared/matchrooms/create/create.styles";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 
 type SeriesType = "BO1" | "BO3" | "BO5" | "BO7" | "BO10" | "BO20" | "BO40";

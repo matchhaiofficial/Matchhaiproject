@@ -7,7 +7,7 @@ jest.mock("../../src/services/convex/zoneService", () => ({
   getActiveZones: jest.fn(),
 }));
 
-import ZonePicker from "../../app/matchrooms/create/components/ZonePicker";
+import ZonePicker from "../../app-shared/matchrooms/create/components/ZonePicker";
 import { getActiveZones } from "../../src/services/convex/zoneService";
 
 const mockGetActiveZones = getActiveZones as jest.Mock;

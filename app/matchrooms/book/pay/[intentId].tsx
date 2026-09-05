@@ -41,7 +41,7 @@ import {
 } from "../../../../src/utils/phoneUtils";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
 import { getUserFacingErrorMessage } from "../../../../src/utils/userFacingErrors";
-import styles from "./pay.styles";
+import styles from "../../../../app-shared/matchrooms/book/pay/pay.styles";
 
 const shouldFallbackToOtc = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error || "");

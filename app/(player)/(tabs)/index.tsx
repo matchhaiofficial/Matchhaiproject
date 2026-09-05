@@ -38,14 +38,14 @@ import { recordCountMetric } from "../../../src/utils/perfInstrumentation";
 import { getZoneStatusLabel } from "../../../src/utils/statusLabels";
 import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
 import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
-import DashboardAlertRow from "../components/dashboard/DashboardAlertRow";
-import DashboardAtGlancePanel from "../components/dashboard/DashboardAtGlancePanel";
-import DashboardQuickActionTile from "../components/dashboard/DashboardQuickActionTile";
-import DashboardTeamCard from "../components/dashboard/DashboardTeamCard";
-import DashboardVenueCard from "../components/dashboard/DashboardVenueCard";
-import { PlayerEmptyStateCard, PlayerSectionHeader } from "../components/PlayerSurface";
-import MatchroomCard from "../../matchrooms/components/MatchroomCard";
-import styles from "./_dashboard.styles";
+import DashboardAlertRow from "../../../app-shared/(player)/components/dashboard/DashboardAlertRow";
+import DashboardAtGlancePanel from "../../../app-shared/(player)/components/dashboard/DashboardAtGlancePanel";
+import DashboardQuickActionTile from "../../../app-shared/(player)/components/dashboard/DashboardQuickActionTile";
+import DashboardTeamCard from "../../../app-shared/(player)/components/dashboard/DashboardTeamCard";
+import DashboardVenueCard from "../../../app-shared/(player)/components/dashboard/DashboardVenueCard";
+import { PlayerEmptyStateCard, PlayerSectionHeader } from "../../../app-shared/(player)/components/PlayerSurface";
+import MatchroomCard from "../../../app-shared/matchrooms/components/MatchroomCard";
+import styles from "../../../app-shared/(player)/(tabs)/_dashboard.styles";
 
 type DashboardNotification = {
   id: string;

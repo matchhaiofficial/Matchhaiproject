@@ -17,8 +17,8 @@ import {
     KARACHI_AREAS,
     normalizeKarachiAreaLabel,
 } from "../../../constants/profileOptions";
-import RegistrationFieldLabel from "../../auth/components/RegistrationFieldLabel";
-import registerStyles from "../../auth/register.styles";
+import RegistrationFieldLabel from "../../../app-shared/auth/components/RegistrationFieldLabel";
+import registerStyles from "../../../app-shared/auth/register.styles";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
@@ -33,8 +33,8 @@ import BranchInventoryPricingForm, {
     createEmptyBranchInventory,
     sanitizeBranchInventory,
     validateBranchInventory,
-} from "./components/BranchInventoryPricingForm";
-import styles from "./branch.styles";
+} from "../../../app-shared/zone/branch/components/BranchInventoryPricingForm";
+import styles from "../../../app-shared/zone/branch/branch.styles";
 
 type LocationSearchResult = {
     display_name: string;

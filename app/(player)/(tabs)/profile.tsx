@@ -46,10 +46,10 @@ import { formatValorantRoleAgent } from "../../../constants/profileOptions";
 import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
-} from "../components/PlayerSurface";
+} from "../../../app-shared/(player)/components/PlayerSurface";
 import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
 import { formatPlayerProfileShare } from "../../../src/utils/shareContent";
-import styles from "./profile.styles";
+import styles from "../../../app-shared/(player)/(tabs)/profile.styles";
 
 // FACEIT Level Icons
 const faceitLevelIcons: Record<number, any> = {

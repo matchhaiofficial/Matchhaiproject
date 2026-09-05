@@ -10,7 +10,7 @@ import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { COLORS } from "../../../src/theme";
 import { getZoneLifecycleLabel, getZoneMigrationLabel } from "../../../src/utils/zoneLifecycle";
-import styles from "./settings.styles";
+import styles from "../../../app-shared/zone/modules/settings.styles";
 
 function InfoRow({ label, value }: { label: string; value: string }) {
     return (

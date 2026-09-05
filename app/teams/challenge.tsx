@@ -27,9 +27,9 @@ import { COLORS } from "../../src/theme";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { formatTeamChallengeShare } from "../../src/utils/shareContent";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
-import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import ZonePicker from "../../app-shared/matchrooms/create/components/ZonePicker";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
-import styles from "./challenge.styles";
+import styles from "../../app-shared/teams/challenge.styles";
 
 const formatGameLabel = (value?: string | null) => {
     const key = String(value || "").trim().toLowerCase();

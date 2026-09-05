@@ -41,8 +41,8 @@ import { getZoneBranchDisplayName, getZoneBranchId } from "../../../src/utils/zo
 import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
-} from "../../(player)/components/PlayerSurface";
-import styles from "./profile.styles";
+} from "../../../app-shared/(player)/components/PlayerSurface";
+import styles from "../../../app-shared/zone/(tabs)/profile.styles";
 
 const toPositiveNumber = (value: unknown) => {
     const parsed = Number(String(value ?? "").trim());

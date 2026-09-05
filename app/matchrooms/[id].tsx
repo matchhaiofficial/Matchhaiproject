@@ -26,7 +26,7 @@ import {
   MatchroomSuggestSheet,
   MatchroomSummarySection,
   MatchroomTeamSection,
-} from "./components";
+} from "../../app-shared/matchrooms/components/index";
 import { useMatchroomJoinFlow } from "../../src/hooks/useMatchroomJoinFlow";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
@@ -38,13 +38,13 @@ import Logger from "../../src/utils/logger";
 import { canSubmitComplain } from "../../src/utils/matchroomLifecycle";
 import {
   getSlotUserId,
-} from "./utils/matchroomLobbyState";
-import { deriveLobbyBanner, type LobbyBannerTone } from "./utils/lobbyBanner";
-import { useMatchroomDetailState } from "./hooks/useMatchroomDetailState";
-import { useMatchroomDetailActions } from "./hooks/useMatchroomDetailActions";
-import { useMatchroomDetailUiState } from "./hooks/useMatchroomDetailUiState";
-import { useMatchroomDetailViewModel } from "./hooks/useMatchroomDetailViewModel";
-import styles from "./detail.styles";
+} from "../../app-shared/matchrooms/utils/matchroomLobbyState";
+import { deriveLobbyBanner, type LobbyBannerTone } from "../../app-shared/matchrooms/utils/lobbyBanner";
+import { useMatchroomDetailState } from "../../app-shared/matchrooms/hooks/useMatchroomDetailState";
+import { useMatchroomDetailActions } from "../../app-shared/matchrooms/hooks/useMatchroomDetailActions";
+import { useMatchroomDetailUiState } from "../../app-shared/matchrooms/hooks/useMatchroomDetailUiState";
+import { useMatchroomDetailViewModel } from "../../app-shared/matchrooms/hooks/useMatchroomDetailViewModel";
+import styles from "../../app-shared/matchrooms/detail.styles";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 

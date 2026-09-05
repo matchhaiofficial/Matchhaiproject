@@ -46,7 +46,7 @@ import {
 import { COLORS } from "../../../src/theme";
 import { getResourceLifecycleLabel } from "../../../src/utils/statusLabels";
 import { isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
-import styles from "./resources.styles";
+import styles from "../../../app-shared/zone/modules/resources.styles";
 
 type AssetFilter =
     | "all"

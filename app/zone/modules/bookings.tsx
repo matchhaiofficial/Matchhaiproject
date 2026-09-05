@@ -10,7 +10,7 @@ import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
-import MatchroomCard from "../../matchrooms/components/MatchroomCard";
+import MatchroomCard from "../../../app-shared/matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
@@ -38,20 +38,20 @@ import { toLocalDateString } from "../../../src/utils/scheduleTime";
 import {
     ZoneBookingsAllocationSheet,
     type ZoneBookingAllocationResourceOption,
-} from "./components/ZoneBookingsAllocationSheet";
-import { ZoneBookingsCounterOfferSheets } from "./components/ZoneBookingsCounterOfferSheets";
-import { ZoneBookingsHistorySection } from "./components/ZoneBookingsHistorySection";
-import { ZoneBookingsMatchroomsSection } from "./components/ZoneBookingsMatchroomsSection";
-import { ZoneBookingsRequestsSection } from "./components/ZoneBookingsRequestsSection";
-import { ZoneBookingsWalkinsSection } from "./components/ZoneBookingsWalkinsSection";
-import { useZoneBookingsActions } from "./hooks/useZoneBookingsActions";
+} from "../../../app-shared/zone/modules/components/ZoneBookingsAllocationSheet";
+import { ZoneBookingsCounterOfferSheets } from "../../../app-shared/zone/modules/components/ZoneBookingsCounterOfferSheets";
+import { ZoneBookingsHistorySection } from "../../../app-shared/zone/modules/components/ZoneBookingsHistorySection";
+import { ZoneBookingsMatchroomsSection } from "../../../app-shared/zone/modules/components/ZoneBookingsMatchroomsSection";
+import { ZoneBookingsRequestsSection } from "../../../app-shared/zone/modules/components/ZoneBookingsRequestsSection";
+import { ZoneBookingsWalkinsSection } from "../../../app-shared/zone/modules/components/ZoneBookingsWalkinsSection";
+import { useZoneBookingsActions } from "../../../app-shared/zone/modules/hooks/useZoneBookingsActions";
 import {
     getRequestMatchroomId,
     toDateString,
     toScheduleMillis,
     useZoneBookingsViewModel,
-} from "./hooks/useZoneBookingsViewModel";
-import styles from "./bookings.styles";
+} from "../../../app-shared/zone/modules/hooks/useZoneBookingsViewModel";
+import styles from "../../../app-shared/zone/modules/bookings.styles";
 
 type Segment = "requests" | "pending" | "matchrooms" | "walkins" | "history";
 type MatchroomFilter = "all" | "open" | "locked" | "cancelled";

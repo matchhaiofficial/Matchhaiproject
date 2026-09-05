@@ -16,7 +16,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
-import styles from './result.styles';
+import styles from '../../app-shared/matchrooms/result.styles';
 
 interface MatchData {
     id: string;

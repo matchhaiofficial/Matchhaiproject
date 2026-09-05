@@ -17,7 +17,7 @@ import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { AppReport, getMyReportsPage, ReportStatus } from "../../src/services/convex/reportService";
 import { COLORS } from "../../src/theme";
 import { getReportStatusLabel } from "../../src/utils/statusLabels";
-import styles from "./reports.styles";
+import styles from "../../app-shared/(player)/reports.styles";
 
 type ReportTab = "pending" | "reviewed" | "resolved";
 

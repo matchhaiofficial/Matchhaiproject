@@ -2,8 +2,8 @@ import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
@@ -20,7 +20,7 @@ import {
   normalizePakistaniPhone,
 } from "../../src/utils/phoneUtils";
 import { Perf, PerfScope } from "../../src/utils/perfInstrumentation";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 
 type FocusField = "owner" | "brand" | "email" | "phone" | "password" | null;
 type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";

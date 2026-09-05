@@ -22,7 +22,7 @@ import {
 } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
-import styles from "./challenges.styles";
+import styles from "../../app-shared/teams/challenges.styles";
 
 const toMillis = (value: any) => {
     if (!value) return 0;

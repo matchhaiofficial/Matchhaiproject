@@ -19,7 +19,7 @@ import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import { useEffectiveKycStatus } from "../../../src/hooks/useEffectiveKycStatus";
 import { COLORS, SPACING } from "../../../src/theme";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
-import styles from "./branches.styles";
+import styles from "../../../app-shared/zone/(tabs)/branches.styles";
 
 const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
 

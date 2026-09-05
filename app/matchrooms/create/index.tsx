@@ -56,38 +56,38 @@ import { normalizeValorantRole } from "../../../constants/profileOptions";
 
 import Logger from "../../../src/utils/logger";
 import { PAYMENT_VERIFICATION_SAFE_MESSAGE } from "../../../src/utils/paymentUiCopy";
-import BasicFields from "./components/BasicFields";
-import BroadcastAreaSelector from "./components/BroadcastAreaSelector";
-import GameDynamicFields from "./components/GameDynamicFields";
-import GameSelector from "./components/GameSelector";
-import LocationModeSelector from "./components/LocationModeSelector";
-import RoleAutoFill from "./components/RoleAutoFill";
-import SkillBracketSection from "./components/SkillBracketSection";
-import TeamBookingSection from "./components/TeamBookingSection";
-import WalkInRosterEditor from "./components/WalkInRosterEditor";
+import BasicFields from "../../../app-shared/matchrooms/create/components/BasicFields";
+import BroadcastAreaSelector from "../../../app-shared/matchrooms/create/components/BroadcastAreaSelector";
+import GameDynamicFields from "../../../app-shared/matchrooms/create/components/GameDynamicFields";
+import GameSelector from "../../../app-shared/matchrooms/create/components/GameSelector";
+import LocationModeSelector from "../../../app-shared/matchrooms/create/components/LocationModeSelector";
+import RoleAutoFill from "../../../app-shared/matchrooms/create/components/RoleAutoFill";
+import SkillBracketSection from "../../../app-shared/matchrooms/create/components/SkillBracketSection";
+import TeamBookingSection from "../../../app-shared/matchrooms/create/components/TeamBookingSection";
+import WalkInRosterEditor from "../../../app-shared/matchrooms/create/components/WalkInRosterEditor";
 import {
   useMatchroomCreatePricing,
   type ZoneRateOption,
-} from "./hooks/useMatchroomCreatePricing";
+} from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreatePricing";
 import {
   useMatchroomCreateSubmitFlow,
   type MatchroomCreateSubmitFeedback,
-} from "./hooks/useMatchroomCreateSubmitFlow";
-import { useMatchroomCreateTeamBooking } from "./hooks/useMatchroomCreateTeamBooking";
-import { useMatchroomCreateBroadcastAreas } from "./hooks/useMatchroomCreateBroadcastAreas";
+} from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateSubmitFlow";
+import { useMatchroomCreateTeamBooking } from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateTeamBooking";
+import { useMatchroomCreateBroadcastAreas } from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateBroadcastAreas";
 import {
   useMatchroomCreateWalkInRoster,
-} from "./hooks/useMatchroomCreateWalkInRoster";
+} from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateWalkInRoster";
 import {
   getMatchroomCreateSubmitBlockers,
   getMatchroomCreateValidationError,
-} from "./utils/matchroomCreateValidation";
-// import TeamModeSelector from './components/TeamModeSelector';
-// import TeamPicker from './components/TeamPicker';
-// import SlotReservation from './components/SlotReservation';
-import { MotionPressable } from "./components/MotionPressable";
-import ZonePicker from "./components/ZonePicker";
-import styles from "./create.styles";
+} from "../../../app-shared/matchrooms/create/utils/matchroomCreateValidation";
+// import TeamModeSelector from '../../../app-shared/matchrooms/create/components/TeamModeSelector';
+// import TeamPicker from '../../../app-shared/matchrooms/create/components/TeamPicker';
+// import SlotReservation from '../../../app-shared/matchrooms/create/components/SlotReservation';
+import { MotionPressable } from "../../../app-shared/matchrooms/create/components/MotionPressable";
+import ZonePicker from "../../../app-shared/matchrooms/create/components/ZonePicker";
+import styles from "../../../app-shared/matchrooms/create/create.styles";
 
 const ZONE_GAME_SUPPORT_MAP: Array<{ gameKey: string; flags: string[] }> = [
   { gameKey: "cs2", flags: ["supportsCs2"] },

@@ -66,7 +66,7 @@ import {
     cleanConvexErrorMessage,
     getUserFacingErrorMessage,
 } from "../../src/utils/userFacingErrors";
-import styles from "./wallet.styles";
+import styles from "../../app-shared/(player)/wallet.styles";
 
 type WalletTab = "overview" | "transactions";
 type WalletFilterType =
