@@ -140,7 +140,6 @@ export type ZonePageResult<T> = {
     total?: number;
 };
 
-const POLL_INTERVAL_MS = 30000;
 const queuePollingState = new Map<string, SharedPollingState<ZoneBookingQueueItem>>();
 const matchroomPollingState = new Map<string, SharedPollingState<ZoneMatchroomListItem>>();
 
@@ -462,10 +461,7 @@ export async function fetchZoneMatchroomsPage(input: {
     };
 }
 
-/**
- * Subscribe to zone booking queue using polling.
- * For real-time reactivity, use useQuery(api.zoneAdminBooking.listBookingQueueForZone) in components.
- */
+/** Subscribe to the zone booking queue through Convex's invalidation-driven watch. */
 export function subscribeZoneBookingQueue(
     zoneId: string,
     branchAreas: string[],
@@ -484,36 +480,34 @@ export function subscribeZoneBookingQueue(
     state.callbacks.add(callbackRef);
     replayPollingRows(state, callbackRef);
 
-    const poll = async (currentState: SharedPollingState<ZoneBookingQueueItem>) => {
-        if (currentState.inFlight) return;
-        currentState.inFlight = true;
+    if (!state.unsubscribe) {
         try {
-            const results = await convex.query(api.zoneAdminBooking.listBookingQueueForZone, {
+            const watch = convex.watchQuery(api.zoneAdminBooking.listBookingQueueForZone, {
                 zoneId,
                 branchAreas: normalizeAreaList(branchAreas),
             });
+            const publishCurrent = () => {
+                try {
+                    const results = watch.localQueryResult();
+                    if (results === undefined) return;
 
-            const normalized = results
-                .map((r: any) => normalizeBookingRequest(r))
-                .filter((item: ZoneBookingQueueItem) => ACTIVE_QUEUE_STATUSES.has(item.status));
-            recordRateMetric("zone_admin.booking_queue_reads_per_minute", normalized.length, {
-                zoneId,
-            });
+                    const normalized = results
+                        .map((r: any) => normalizeBookingRequest(r))
+                        .filter((item: ZoneBookingQueueItem) => ACTIVE_QUEUE_STATUSES.has(item.status));
+                    recordRateMetric("zone_admin.booking_queue_rows_received", normalized.length, { zoneId });
 
-            publishPollingRows(currentState, normalized);
+                    publishPollingRows(state!, normalized);
+                } catch (error: any) {
+                    Logger.error("zoneAdminBooking", "Queue subscription update failed", error);
+                    state!.callbacks.forEach((callback) => callback.onError(error));
+                }
+            };
+            state.unsubscribe = watch.onUpdate(publishCurrent);
+            publishCurrent();
         } catch (error: any) {
-            Logger.error("zoneAdminBooking", "Queue poll failed", error);
-            currentState.callbacks.forEach((callback) => callback.onError(error));
-        } finally {
-            currentState.inFlight = false;
+            Logger.error("zoneAdminBooking", "Queue subscription setup failed", error);
+            state.callbacks.forEach((callback) => callback.onError(error));
         }
-    };
-
-    if (!state.interval) {
-        void poll(state);
-        state.interval = setInterval(() => {
-            void poll(state!);
-        }, POLL_INTERVAL_MS);
     }
 
     return () => {
@@ -521,10 +515,7 @@ export function subscribeZoneBookingQueue(
     };
 }
 
-/**
- * Subscribe to zone matchrooms using polling.
- * For real-time reactivity, use useQuery(api.zoneAdminBooking.listMatchroomsForZone) in components.
- */
+/** Subscribe to zone matchrooms through Convex's invalidation-driven watch. */
 export function subscribeZoneMatchrooms(
     zoneId: string,
     ownerUid: string | undefined,
@@ -546,36 +537,34 @@ export function subscribeZoneMatchrooms(
     state.callbacks.add(callbackRef);
     replayPollingRows(state, callbackRef);
 
-    const poll = async (currentState: SharedPollingState<ZoneMatchroomListItem>) => {
-        if (currentState.inFlight) return;
-        currentState.inFlight = true;
+    if (!state.unsubscribe) {
         try {
-            const results = await convex.query(api.zoneAdminBooking.listMatchroomsForZone, {
+            const watch = convex.watchQuery(api.zoneAdminBooking.listMatchroomsForZone, {
                 zoneId,
                 ownerUid: ownerUid || undefined,
                 locationHints: normalizeHintList(options?.locationHints),
             });
+            const publishCurrent = () => {
+                try {
+                    const results = watch.localQueryResult();
+                    if (results === undefined) return;
 
-            const rows: ZoneMatchroomListItem[] = results.map((data: any) => normalizeZoneMatchroom(data));
+                    const rows: ZoneMatchroomListItem[] = results.map((data: any) => normalizeZoneMatchroom(data));
 
-            recordRateMetric("zone_admin.matchroom_reads_per_minute", rows.length, {
-                zoneId,
-            });
+                    recordRateMetric("zone_admin.matchroom_rows_received", rows.length, { zoneId });
 
-            publishPollingRows(currentState, rows);
+                    publishPollingRows(state!, rows);
+                } catch (error: any) {
+                    Logger.error("zoneAdminBooking", "Matchroom subscription update failed", error);
+                    state!.callbacks.forEach((callback) => callback.onError(error));
+                }
+            };
+            state.unsubscribe = watch.onUpdate(publishCurrent);
+            publishCurrent();
         } catch (error: any) {
-            Logger.error("zoneAdminBooking", "Matchroom poll failed", error);
-            currentState.callbacks.forEach((callback) => callback.onError(error));
-        } finally {
-            currentState.inFlight = false;
+            Logger.error("zoneAdminBooking", "Matchroom subscription setup failed", error);
+            state.callbacks.forEach((callback) => callback.onError(error));
         }
-    };
-
-    if (!state.interval) {
-        void poll(state);
-        state.interval = setInterval(() => {
-            void poll(state!);
-        }, POLL_INTERVAL_MS);
     }
 
     return () => {

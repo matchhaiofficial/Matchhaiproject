@@ -49,7 +49,6 @@ export interface ZoneBranchResource {
     updatedAt?: any;
 }
 
-const POLL_INTERVAL_MS = 30000;
 const branchPollingState = new Map<string, SharedPollingState<ZoneBranch>>();
 const resourcePollingState = new Map<string, SharedPollingState<ZoneBranchResource>>();
 
@@ -92,10 +91,7 @@ const normalizeResource = (data: Record<string, any>): ZoneBranchResource => ({
     updatedAt: data.updatedAt,
 });
 
-/**
- * Subscribe to zone branches using polling.
- * For real-time reactivity, use useQuery(api.zoneAdminResources.getZoneBranches) in components.
- */
+/** Subscribe to zone branches through Convex's invalidation-driven watch. */
 export function subscribeZoneBranches(
     zoneId: string,
     onData: (branches: ZoneBranch[]) => void,
@@ -112,36 +108,34 @@ export function subscribeZoneBranches(
     state.callbacks.add(callbackRef);
     replayPollingRows(state, callbackRef);
 
-    const poll = async (currentState: SharedPollingState<ZoneBranch>) => {
-        if (currentState.inFlight) return;
-        currentState.inFlight = true;
+    if (!state.unsubscribe) {
         try {
-            const branches = await convex.query(api.zoneAdminResources.getZoneBranches, {
+            const watch = convex.watchQuery(api.zoneAdminResources.getZoneBranches, {
                 zoneId: zoneId as Id<"zones">,
             });
+            const publishCurrent = () => {
+                try {
+                    const branches = watch.localQueryResult();
+                    if (branches === undefined) return;
 
-            const normalized = (branches as any[])
-                .map(normalizeBranch)
-                .sort((a, b) => a.branchDisplayName.localeCompare(b.branchDisplayName));
+                    const normalized = (branches as any[])
+                        .map(normalizeBranch)
+                        .sort((a, b) => a.branchDisplayName.localeCompare(b.branchDisplayName));
 
-            recordRateMetric("zone_admin.branch_reads_per_minute", normalized.length, {
-                zoneId,
-            });
+                    recordRateMetric("zone_admin.branch_rows_received", normalized.length, { zoneId });
 
-            publishPollingRows(currentState, normalized);
+                    publishPollingRows(state!, normalized);
+                } catch (error: any) {
+                    Logger.error("zoneAdminResources", "Branch subscription update failed", error);
+                    state!.callbacks.forEach((callback) => callback.onError(error));
+                }
+            };
+            state.unsubscribe = watch.onUpdate(publishCurrent);
+            publishCurrent();
         } catch (error: any) {
-            Logger.error("zoneAdminResources", "Branch poll failed", error);
-            currentState.callbacks.forEach((callback) => callback.onError(error));
-        } finally {
-            currentState.inFlight = false;
+            Logger.error("zoneAdminResources", "Branch subscription setup failed", error);
+            state.callbacks.forEach((callback) => callback.onError(error));
         }
-    };
-
-    if (!state.interval) {
-        void poll(state);
-        state.interval = setInterval(() => {
-            void poll(state!);
-        }, POLL_INTERVAL_MS);
     }
 
     return () => {
@@ -149,10 +143,7 @@ export function subscribeZoneBranches(
     };
 }
 
-/**
- * Subscribe to branch resources using polling.
- * For real-time reactivity, use useQuery(api.zoneAdminResources.listResourcesByZoneAndBranch) in components.
- */
+/** Subscribe to branch resources through Convex's invalidation-driven watch. */
 export function subscribeBranchResources(
     zoneId: string,
     branchId: string,
@@ -171,38 +162,35 @@ export function subscribeBranchResources(
     state.callbacks.add(callbackRef);
     replayPollingRows(state, callbackRef);
 
-    const poll = async (currentState: SharedPollingState<ZoneBranchResource>) => {
-        if (currentState.inFlight) return;
-        currentState.inFlight = true;
+    if (!state.unsubscribe) {
         try {
-            const resources = await convex.query(api.zoneAdminResources.listResourcesByZoneAndBranch, {
+            const watch = convex.watchQuery(api.zoneAdminResources.listResourcesByZoneAndBranch, {
                 zoneId: zoneId as Id<"zones">,
                 branchId,
             });
+            const publishCurrent = () => {
+                try {
+                    const resources = watch.localQueryResult();
+                    if (resources === undefined) return;
 
-            const normalized = (resources as any[])
-                .map(normalizeResource)
-                .sort((a, b) => a.label.localeCompare(b.label));
+                    const normalized = (resources as any[])
+                        .map(normalizeResource)
+                        .sort((a, b) => a.label.localeCompare(b.label));
 
-            recordRateMetric("zone_admin.resource_reads_per_minute", normalized.length, {
-                zoneId,
-                branchId,
-            });
+                    recordRateMetric("zone_admin.resource_rows_received", normalized.length, { zoneId, branchId });
 
-            publishPollingRows(currentState, normalized);
+                    publishPollingRows(state!, normalized);
+                } catch (error: any) {
+                    Logger.error("zoneAdminResources", "Resource subscription update failed", error);
+                    state!.callbacks.forEach((callback) => callback.onError(error));
+                }
+            };
+            state.unsubscribe = watch.onUpdate(publishCurrent);
+            publishCurrent();
         } catch (error: any) {
-            Logger.error("zoneAdminResources", "Resource poll failed", error);
-            currentState.callbacks.forEach((callback) => callback.onError(error));
-        } finally {
-            currentState.inFlight = false;
+            Logger.error("zoneAdminResources", "Resource subscription setup failed", error);
+            state.callbacks.forEach((callback) => callback.onError(error));
         }
-    };
-
-    if (!state.interval) {
-        void poll(state);
-        state.interval = setInterval(() => {
-            void poll(state!);
-        }, POLL_INTERVAL_MS);
     }
 
     return () => {
