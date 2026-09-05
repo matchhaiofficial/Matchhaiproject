@@ -499,8 +499,8 @@ export default function TeamChallengeCreateScreen() {
             showToast({ type: "warning", title: "Invalid date/time", message: "Select valid date and time." });
             return;
         }
-        if (scheduledAt.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
-            showToast({ type: "warning", title: "Invalid schedule", message: "Challenge match must be at least 24 hours from now." });
+        if (scheduledAt.getTime() - Date.now() < 48 * 60 * 60 * 1000) {
+            showToast({ type: "warning", title: "Invalid schedule", message: "Challenge match must be at least 2 days from now." });
             return;
         }
 

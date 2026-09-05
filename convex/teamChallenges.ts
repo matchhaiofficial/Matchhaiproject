@@ -648,7 +648,7 @@ export const proposeVenue = mutation({
   },
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
-    if (!["accepted", "venue_proposed", "venue_confirmed"].includes(challenge.status)) {
+    if (!["accepted", "venue_proposed"].includes(challenge.status)) {
       throw new Error("Challenge is not in venue proposal state");
     }
 
@@ -698,7 +698,7 @@ export const proposeVenue = mutation({
       proposedVenueByCaptainA: isCaptainAActor ? venue : challenge.proposedVenueByCaptainA,
       alternativeVenueByCaptainB: !isCaptainAActor ? venue : challenge.alternativeVenueByCaptainB,
       captainVenueChoices,
-      confirmedVenue: bothConfirmed ? venue : challenge.confirmedVenue,
+      confirmedVenue: bothConfirmed ? venue : undefined,
       zoneRateLabel: selectedRate.label,
       zoneRatePrice: selectedRate.price,
       pricePerPlayer: authoritativePricePerPlayer,
@@ -803,8 +803,23 @@ export const confirmVenue = mutation({
   args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
     const { challenge } = await requireCaptain(ctx, args.challengeId, args.actorUid);
-    if (!challenge.confirmedVenue) {
-      throw new Error("No confirmed venue to finalize");
+    if (challenge.status !== "venue_confirmed" || !challenge.confirmedVenue?.zoneId) {
+      throw new Error("Both captains must agree on an active venue before it can be finalized");
+    }
+
+    const choices = buildCaptainChoices(challenge, {});
+    const captainAChoice = choices[String(challenge.captainAUid)];
+    const captainBChoice = choices[String(challenge.captainBUid)];
+    if (
+      !captainAChoice?.zoneId
+      || captainAChoice.zoneId !== captainBChoice?.zoneId
+      || captainAChoice.zoneId !== challenge.confirmedVenue.zoneId
+    ) {
+      throw new Error("The captains' venue choices no longer match");
+    }
+    const zone = await ctx.db.get(challenge.confirmedVenue.zoneId as Id<"zones">);
+    if (!zone || zone.status !== "active") {
+      throw new Error("The confirmed venue is no longer available");
     }
 
     await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
@@ -1470,6 +1485,19 @@ async function maybeFinalizeChallengeBooking(ctx: any, challenge: any) {
   const bothHeld = sideState(challenge, "teamA") === "held" && sideState(challenge, "teamB") === "held";
   if (!bothHeld) return;
   if (!challenge.confirmedVenue?.zoneId) return;
+  const choices = buildCaptainChoices(challenge, {});
+  const captainAChoice = choices[String(challenge.captainAUid)];
+  const captainBChoice = choices[String(challenge.captainBUid)];
+  if (
+    challenge.status !== "venue_confirmed"
+    || !captainAChoice?.zoneId
+    || captainAChoice.zoneId !== captainBChoice?.zoneId
+    || captainAChoice.zoneId !== challenge.confirmedVenue.zoneId
+  ) {
+    return;
+  }
+  const zone = await ctx.db.get(challenge.confirmedVenue.zoneId as Id<"zones">);
+  if (!zone || zone.status !== "active") return;
   await ctx.runMutation(internal.matchrooms.createTeamChallengeMatchroom, {
     challengeId: challenge._id,
   });

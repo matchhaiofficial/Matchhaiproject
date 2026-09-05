@@ -59,6 +59,9 @@ export async function requireCurrentUser(ctx: any) {
   if (!actor.user) {
     throw new Error("User profile not found");
   }
+  if (actor.user.accountStatus === "suspended") {
+    throw new Error("This account is suspended");
+  }
   return actor;
 }
 

@@ -105,12 +105,12 @@ const RequestRow = React.memo(function RequestRow({
     <View style={integrated ? styles.requestExpandedCard : undefined}>
       <MatchroomCard
         room={buildRequestMatchroom(item)}
-        onAcceptPress={() => {
+        onAcceptPress={mode === "requests" ? () => {
           onSelectRequest(item.id);
           onAccept(item);
-        }}
+        } : undefined}
         onPress={() => onSelectRequest(selected ? null : item.id)}
-        acceptLabel="Accept"
+        acceptLabel={mode === "requests" ? "Accept" : undefined}
         containerStyle={integrated ? styles.requestEmbeddedMatchroomCard : undefined}
       />
       {mode === "pending" && offer ? (

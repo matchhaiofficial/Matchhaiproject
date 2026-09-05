@@ -1012,6 +1012,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_requestId", ["requestId"])
+    .index("by_requestId_and_status", ["requestId", "status"])
     .index("by_zoneId", ["zoneId"])
     .index("by_status", ["status"])
     .index("by_zoneId_and_status_and_updatedAt", ["zoneId", "status", "updatedAt"])

@@ -114,6 +114,10 @@ const PAYMENT_ATTENTION_COPY: Record<string, { title: string; body: string }> = 
     title: "Payment attention required",
     body: "Failed payment has a linked wallet transaction. Review this order.",
   },
+  team_hold_fell_back_to_wallet: {
+    title: "Team payment needs review",
+    body: "A paid team challenge top-up remained as wallet credit because its escrow hold could not be placed.",
+  },
 };
 
 type ProviderSnapshot = {
@@ -138,7 +142,8 @@ type PaymentAttentionFlag =
   | "wallet_tx_without_paid"
   | "booking_intent_unpaid_but_payment_paid"
   | "payment_pending_past_expiry"
-  | "failed_but_wallet_tx_exists";
+  | "failed_but_wallet_tx_exists"
+  | "team_hold_fell_back_to_wallet";
 
 function maskStoreId(value?: string | null) {
   const text = String(value || "");
@@ -496,6 +501,14 @@ function buildPaymentStatusForReturn(status: PaymentStatus) {
 }
 
 function getPlayerPaymentOutcomeCopy(kind: PaymentKind, decision: "paid" | "failed" | "expired" | "wallet_credit_only") {
+  if (decision === "wallet_credit_only") {
+    return {
+      title: "Payment added to wallet",
+      body: kind === "wallet_topup"
+        ? "Your Easypaisa payment was received, but the team challenge hold could not be placed. Funds remain available in your MatchHai wallet."
+        : "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
+    };
+  }
   if (kind === "wallet_topup") {
     if (decision === "paid") {
       return {
@@ -515,12 +528,6 @@ function getPlayerPaymentOutcomeCopy(kind: PaymentKind, decision: "paid" | "fail
     };
   }
 
-  if (decision === "wallet_credit_only") {
-    return {
-      title: "Payment added to wallet",
-      body: "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
-    };
-  }
   if (decision === "expired") {
     return {
       title: "Payment expired",
@@ -592,6 +599,9 @@ function collectPaymentAttentionFlags(input: {
   }
   if (activePastExpiry) flags.push("payment_pending_past_expiry");
   if (status === "failed" && input.walletTxExists) flags.push("failed_but_wallet_tx_exists");
+  if (isPaid && input.payment.providerPayload?.teamChallengeHold?.status === "wallet_credit_only") {
+    flags.push("team_hold_fell_back_to_wallet");
+  }
 
   return flags;
 }
@@ -1686,6 +1696,7 @@ export const startCheckout = action({
         actionRequired: active.providerPayload?.rest?.initiate?.actionRequired || "approve_in_easypaisa",
         paymentToken: active.providerPayload?.rest?.initiate?.response?.paymentToken || null,
         paymentTokenExpiryDateTime: active.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
+        teamChallengeHoldStatus: active.providerPayload?.teamChallengeHold?.status || null,
       };
     }
 
@@ -1747,6 +1758,7 @@ export const startCheckout = action({
         actionRequired: transaction.providerPayload?.rest?.initiate?.actionRequired || "approve_in_easypaisa",
         paymentToken: transaction.providerPayload?.rest?.initiate?.response?.paymentToken || null,
         paymentTokenExpiryDateTime: transaction.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
+        teamChallengeHoldStatus: transaction.providerPayload?.teamChallengeHold?.status || null,
       };
     }
 
@@ -1824,6 +1836,7 @@ export const startCheckout = action({
     });
     let responseBody: any = {};
     let initiateStatus: PaymentStatus = "pending";
+    let teamChallengeHoldStatus: "held" | "wallet_credit_only" | undefined;
     try {
       const initiateResult: any = await ctx.runAction((internal as any).easypaisaNode.initiateRestTransaction, {
         endpointPath,
@@ -1872,6 +1885,7 @@ export const startCheckout = action({
         },
       });
       initiateStatus = providerUpdate.status;
+      teamChallengeHoldStatus = providerUpdate.teamChallengeHoldStatus;
 
       if (String(responseBody?.responseCode || "") !== "0000") {
         throw new Error(String(responseBody?.responseDesc || "Failed to initiate Easypaisa payment."));
@@ -1935,6 +1949,7 @@ export const startCheckout = action({
       actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",
       paymentToken: responseBody?.paymentToken || null,
       paymentTokenExpiryDateTime: responseBody?.paymentTokenExpiryDateTime || null,
+      teamChallengeHoldStatus: teamChallengeHoldStatus || null,
     };
   },
 });
@@ -2598,7 +2613,7 @@ export const applyProviderUpdate = internalMutation({
       });
       await clearActivePaymentPointerIfMatching(ctx, row, now);
       await notifySuperAdminsPaymentAttentionRequired(ctx, {
-        payment: row,
+        payment: { ...row, providerPayload: sourcePayload },
         status: "paid",
         now,
       });
@@ -2950,7 +2965,7 @@ export const applyProviderUpdate = internalMutation({
         });
       }
       await notifySuperAdminsPaymentAttentionRequired(ctx, {
-        payment: row,
+        payment: { ...row, providerPayload: sourcePayload },
         status: "paid",
         now,
       });
@@ -3045,7 +3060,7 @@ export const applyProviderUpdate = internalMutation({
           status: "accepted",
         });
         await notifySuperAdminsPaymentAttentionRequired(ctx, {
-          payment: row,
+          payment: { ...row, providerPayload: fallbackPayload },
           status: "paid",
           now,
         });

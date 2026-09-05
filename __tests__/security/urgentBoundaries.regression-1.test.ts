@@ -77,6 +77,7 @@ describe("urgent server-authority regressions", () => {
   // and ignored provider payments and unlinked team challenges.
   it("blocks deletion for every active financial and match lifecycle", () => {
     const admin = read("convex/admin.ts");
+    const authz = read("convex/authz.ts");
     const schema = read("convex/schema.ts");
 
     expect(admin).toContain('.query("paymentTransactions")');
@@ -90,6 +91,12 @@ describe("urgent server-authority regressions", () => {
     expect(admin).toContain('.withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))');
     expect(admin).toContain('await ctx.db.patch(membership._id, { username: "Deleted User" })');
     expect(admin).toContain("assertCanActOnSuperAdminTarget(admin, user)");
+    expect(admin).toContain('model: "account"');
+    expect(admin).toContain("numItems: 100000");
+    expect(admin).toContain("await ctx.storage.delete(user.profileImageStorageId)");
+    expect(admin).toContain("phoneNumberHash: undefined");
+    expect(admin).toContain("eaId: undefined");
+    expect(authz).toContain('actor.user.accountStatus === "suspended"');
     expect(schema).toContain('.index("by_captainAUid_and_status", ["captainAUid", "status"])');
     expect(schema).toContain('.index("by_captainBUid_and_status", ["captainBUid", "status"])');
   });
@@ -142,15 +149,27 @@ describe("urgent server-authority regressions", () => {
     expect(createFull).not.toContain("args.adminReviewStatus");
     expect(createFull).toContain("[String(args.captainAUid)]: canonicalCaptainAVenue");
     expect(screen).toContain("const canAcceptNow = !!(isPending && !isAdminPending && isCaptainB)");
+    expect(backend).toContain('challenge.status !== "venue_confirmed"');
+    expect(backend).toContain("captainAChoice.zoneId !== captainBChoice?.zoneId");
+    expect(backend).toContain('if (!zone || zone.status !== "active") return;');
   });
 
   it("reports provider-paid team holds that fall back to wallet credit", () => {
     const backend = read("convex/easypaisa.ts");
     const screen = read("app/teams/challenge.tsx");
+    const outcomeCopy = backend.slice(
+      backend.indexOf("function getPlayerPaymentOutcomeCopy"),
+      backend.indexOf("function getPlayerPaymentRoute"),
+    );
 
     expect(backend).toContain('teamChallengeHoldStatus = "wallet_credit_only"');
     expect(backend).toContain('status: "wallet_credit_only"');
     expect(backend).toContain("teamChallengeHoldStatus: latest.providerPayload?.teamChallengeHold?.status || null");
+    expect(outcomeCopy.indexOf('if (decision === "wallet_credit_only")')).toBeLessThan(
+      outcomeCopy.indexOf('if (kind === "wallet_topup")'),
+    );
+    expect(backend).toContain("teamChallengeHoldStatus = providerUpdate.teamChallengeHoldStatus");
+    expect(backend).toContain('team_hold_fell_back_to_wallet');
     expect(screen).toContain('statusLike?.teamChallengeHoldStatus === "held"');
     expect(screen).toContain("The funds remain available in your MatchHai wallet.");
   });
@@ -178,5 +197,18 @@ describe("urgent server-authority regressions", () => {
     expect(source).toContain('lifecycleStatus: "counter_offer_expired"');
     expect(source).toContain("new Set(resourceIds.map(String)).size !== resourceIds.length");
     expect(source).toContain("This booking request already has a pending counter-offer.");
+    expect(source).toContain("Resolve the pending venue offer before updating this booking request.");
+    expect(source).toContain('if (offer.status !== "pending")');
+    expect(source).toContain('request.lifecycleStatus === "counter_offer_pending_captains"');
+    expect(source).toContain("acceptedOptionIndexes.size > 1");
+  });
+
+  it("keeps challenge scheduling feedback aligned with the backend minimum", () => {
+    const screen = read("app/teams/challenge-create.tsx");
+    const backend = read("convex/teamChallenges.ts");
+
+    expect(screen).toContain("48 * 60 * 60 * 1000");
+    expect(screen).toContain("Challenge match must be at least 2 days from now.");
+    expect(backend).toContain("const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 2");
   });
 });

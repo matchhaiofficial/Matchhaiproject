@@ -256,6 +256,21 @@ async function assertActionableZoneRequest(
   return request;
 }
 
+async function getPendingOfferForRequest(ctx: any, requestId: Id<"bookingRequests">) {
+  return await ctx.db
+    .query("zoneOffers")
+    .withIndex("by_requestId_and_status", (q: any) =>
+      q.eq("requestId", requestId).eq("status", "pending"),
+    )
+    .first();
+}
+
+async function assertNoPendingOfferForRequest(ctx: any, requestId: Id<"bookingRequests">) {
+  if (await getPendingOfferForRequest(ctx, requestId)) {
+    throw new Error("Resolve the pending venue offer before updating this booking request.");
+  }
+}
+
 async function patchBookingRequestWithLifecycleDueAt(
   ctx: any,
   request: any,
@@ -1973,6 +1988,7 @@ export const acceptBookingRequest = mutation({
       now,
     );
     assertRequestBelongsToZone(bookingRequest, args.zoneId);
+    await assertNoPendingOfferForRequest(ctx, args.requestId);
     const requestOwner: any = await ctx.db.get(bookingRequest.userId as Id<"users">);
     if (!requestOwner) throw new Error("Booking requester not found.");
     if (!args.resourceIds.length) {
@@ -2335,6 +2351,7 @@ export const rejectBookingRequest = mutation({
       now,
     );
     assertRequestBelongsToZone(request, args.zoneId);
+    await assertNoPendingOfferForRequest(ctx, args.requestId);
 
     const statusPatch =
       request?.requestKind === "broadcast_fanout"
@@ -2548,11 +2565,7 @@ export const sendCounterOffer = mutation({
     if (new Set(resourceIds.map(String)).size !== resourceIds.length) {
       throw new Error("Each selected resource must be unique.");
     }
-    const existingPendingOffer = (await ctx.db
-      .query("zoneOffers")
-      .withIndex("by_requestId", (q: any) => q.eq("requestId", args.requestId))
-      .collect())
-      .find((offer: any) => offer.status === "pending");
+    const existingPendingOffer = await getPendingOfferForRequest(ctx, args.requestId);
     if (existingPendingOffer) {
       throw new Error("This booking request already has a pending counter-offer.");
     }
@@ -2707,7 +2720,11 @@ export const expireDirectCounterOffer = internalMutation({
 
     const request = await ctx.db.get(offer.requestId);
     await ctx.db.patch(args.offerId, { status: "expired", updatedAt: now });
-    if (request) {
+    const requestStillOwnsOffer = request
+      && ["open", "pending_payment"].includes(String(request.status || ""))
+      && request.lifecycleStatus === "counter_offer_pending_captains"
+      && Number(request.responseExpiresAt || 0) === expiresAt;
+    if (requestStillOwnsOffer) {
       await releaseHeldResourcesForRequest(ctx, request, now);
       await patchBookingRequestWithLifecycleDueAt(ctx, request, {
         lifecycleStatus: "counter_offer_expired",
@@ -2725,6 +2742,12 @@ export const expireDirectCounterOffer = internalMutation({
         status: "expired",
         title: "Counter-offer expired",
         body: "The counter-offer expired before every recipient accepted it.",
+      });
+    } else if (request) {
+      await patchOfferNotifications(ctx, {
+        offerId: String(args.offerId),
+        recipientUids: Array.isArray(offer.recipientUids) ? offer.recipientUids.map(String) : [],
+        status: "expired",
       });
     }
     return { expired: true };
@@ -2760,7 +2783,7 @@ export const respondToCounterOffer = mutation({
       throw new Error("You are not allowed to respond to this negotiation.");
     }
 
-    if (offer.status !== "pending" && offer.status !== "accepted") {
+    if (offer.status !== "pending") {
       const closedMatchroomId = offer.resolvedMatchroomId
         ? String(offer.resolvedMatchroomId)
         : request.matchroomId
@@ -2772,6 +2795,23 @@ export const respondToCounterOffer = mutation({
         locked: false,
         alreadyClosed: true,
         message: "This time option is no longer available.",
+      };
+    }
+    const isBroadcastRequest = request.requestKind === "broadcast_fanout";
+    if (
+      !isBroadcastRequest
+      && (
+        !["open", "pending_payment"].includes(String(request.status || ""))
+        || request.lifecycleStatus !== "counter_offer_pending_captains"
+        || Number(request.responseExpiresAt || 0) !== Number(offer.expiresAt || offer.responseExpiresAt || 0)
+      )
+    ) {
+      return {
+        status: "unavailable",
+        matchroomId: matchroomId ? String(matchroomId) : undefined,
+        locked: false,
+        alreadyClosed: true,
+        message: "This booking request changed after the counter-offer was sent.",
       };
     }
     if (offer.expiresAt && offer.expiresAt < now && offer.status === "pending") {
@@ -2831,8 +2871,28 @@ export const respondToCounterOffer = mutation({
     };
 
     let finalStatus: "pending" | "accepted" | "rejected" | "expired" = offer.status;
-    const isBroadcastRequest = request.requestKind === "broadcast_fanout";
-
+    const allRecipientsAccepted = recipientUids.length > 0
+      && recipientUids.every((uid) =>
+        acceptedResponses.some((response: any) => String(response.uid) === uid),
+      );
+    const acceptedOptionIndexes = new Set(
+      acceptedResponses.map((response: any) => Number(response.selectedOptionIndex ?? 0)),
+    );
+    if (allRecipientsAccepted && acceptedOptionIndexes.size > 1) {
+      await ctx.db.patch(args.offerId, patch);
+      await patchOfferNotifications(ctx, {
+        offerId: String(args.offerId),
+        recipientUids,
+        status: args.decision,
+        responderUid: String(responder._id),
+      });
+      return {
+        status: "pending",
+        matchroomId: matchroomId ? String(matchroomId) : undefined,
+        locked: false,
+        message: "All recipients must select the same time option before the booking can be confirmed.",
+      };
+    }
     if (isBroadcastRequest && request.matchroomId) {
       const requiredCaptainIds = recipientUids;
       const acceptedByRequired = requiredCaptainIds.filter((uid) =>

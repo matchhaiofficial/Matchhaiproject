@@ -4200,7 +4200,18 @@ export const createTeamChallengeMatchroom = internalMutation({
     if (!venue?.zoneId) return { ok: false, reason: "no_confirmed_venue" };
 
     const zone: any = await ctx.db.get(venue.zoneId as Id<"zones">);
-    if (!zone) return { ok: false, reason: "zone_not_found" };
+    if (!zone || zone.status !== "active") return { ok: false, reason: "zone_unavailable" };
+    const choices = challenge.captainVenueChoices || {};
+    const captainAChoice = choices[String(challenge.captainAUid)];
+    const captainBChoice = choices[String(challenge.captainBUid)];
+    if (
+      challenge.status !== "venue_confirmed"
+      || !captainAChoice?.zoneId
+      || captainAChoice.zoneId !== captainBChoice?.zoneId
+      || captainAChoice.zoneId !== venue.zoneId
+    ) {
+      return { ok: false, reason: "venue_agreement_changed" };
+    }
     const zoneOwnerUid = zone.ownerUid ? String(zone.ownerUid) : undefined;
 
     const game = String(challenge.gameKey || challenge.game || "");
