@@ -88,4 +88,20 @@ describe("urgent server-authority regressions", () => {
     expect(schema).toContain('.index("by_captainAUid_and_status", ["captainAUid", "status"])');
     expect(schema).toContain('.index("by_captainBUid_and_status", ["captainBUid", "status"])');
   });
+
+  it("keeps demo creation internal while reusing matchroom validation", () => {
+    const seed = read("convex/demoSeed.ts");
+    const matchrooms = read("convex/matchrooms.ts");
+    const teamSeed = seed.slice(
+      seed.indexOf("export const seedDemoTeamByIndex"),
+      seed.indexOf("export const seedDemoMatchroomByIndex"),
+    );
+
+    expect(teamSeed).not.toContain("ctx.runMutation(api.teams.create");
+    expect(teamSeed).not.toContain("ctx.runMutation(api.teams.addMember");
+    expect(seed).toContain("internalAny.matchrooms.createSeededDemo");
+    expect(matchrooms).toContain("export const createSeededDemo = internalMutation");
+    expect(matchrooms).toContain('args.bookingSource !== "seed" || args.paymentStatus !== "unpaid"');
+    expect(matchrooms).toContain("createMatchroomFromValidatedArgs(ctx, args");
+  });
 });

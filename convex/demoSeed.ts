@@ -1734,14 +1734,37 @@ export const seedDemoTeamByIndex = internalMutation({
     const already = existingTeams.find((t: any) => t.game === game && t.nameLower === name.toLowerCase());
     let teamId: any = already?._id;
     if (!teamId) {
-      teamId = await ctx.runMutation(api.teams.create, {
+      const isFivePlayerGame = game === "cs2" || game === "cs16" || game === "valorant";
+      const isDuelGame = game === "fc25" || game === "fc26" || game === "tekken8";
+      const mainRosterSize = isFivePlayerGame ? 5 : isDuelGame ? 2 : 5;
+      const maxSubstitutes = isFivePlayerGame ? 2 : isDuelGame ? 1 : 0;
+      const now = Date.now();
+      teamId = await ctx.db.insert("teams", {
         name,
+        nameLower: name.toLowerCase(),
         tag,
         game,
         captainUid: captain._id,
         captainUsername: captain.username,
-        maxMembers: 10,
+        memberUids: [String(captain._id)],
+        memberCount: 1,
+        maxMembers: mainRosterSize + maxSubstitutes,
+        mainRosterSize,
+        maxSubstitutes,
         description: `Community roster for ${game}. Seeded for demo testing.`,
+        stats: { wins: 0, losses: 0, matchesPlayed: 0 },
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("teamMembers", {
+        teamId,
+        odxerId: captain._id,
+        username: captain.username,
+        role: "captain",
+        rosterRole: "main",
+        rosterOrder: 0,
+        joinedAt: now,
       });
     }
 
@@ -1756,16 +1779,27 @@ export const seedDemoTeamByIndex = internalMutation({
         .unique()) as Doc<"users"> | null;
       if (!candidate) continue;
       if (!doesUserPlayGameFromRecord(candidate, game)) continue;
-      try {
-        await ctx.runMutation(api.teams.addMember, {
-          teamId: teamId as any,
-          userId: candidate._id,
-          username: candidate.username,
-        });
-        added += 1;
-      } catch {
-        // Ignore duplicates / not eligible.
-      }
+      const team: any = await ctx.db.get(teamId);
+      if (!team || team.memberUids.map(String).includes(String(candidate._id))) continue;
+      const capacity = Number(team.mainRosterSize || 5) + Number(team.maxSubstitutes || 0);
+      if (Number(team.memberCount || 0) >= capacity) break;
+      const now = Date.now();
+      const rosterOrder = Number(team.memberCount || 0);
+      await ctx.db.patch(teamId, {
+        memberUids: [...team.memberUids, String(candidate._id)],
+        memberCount: rosterOrder + 1,
+        updatedAt: now,
+      });
+      await ctx.db.insert("teamMembers", {
+        teamId,
+        odxerId: candidate._id,
+        username: candidate.username,
+        role: "member",
+        rosterRole: rosterOrder < Number(team.mainRosterSize || 5) ? "main" : "substitute",
+        rosterOrder,
+        joinedAt: now,
+      });
+      added += 1;
     }
 
     return { ok: true, teamId: String(teamId) };
@@ -1855,7 +1889,18 @@ export const seedDemoMatchroomByIndex = internalMutation({
       return Number.isFinite(n) && n > 0 ? Math.round(n / maxPlayers) : 500;
     })();
 
-    const matchroomId: any = await ctx.runMutation(api.matchrooms.create, {
+    const resourceProfile = (() => {
+      if (["cs2", "cs16", "valorant"].includes(game)) {
+        return { assetType: "pc", tier: "regular", surface: undefined, rateKey: "pc:regular" };
+      }
+      if (["fc25", "fc26", "tekken8"].includes(game)) {
+        return { assetType: "console", tier: "ps5", surface: "1v1", rateKey: "console:ps5" };
+      }
+      const ratePrefix = game === "indoor_cricket" ? "cricket" : game;
+      return { assetType: game, tier: undefined, surface: "standard", rateKey: `${ratePrefix}:standard` };
+    })();
+    const internalAny = (await import("./_generated/api")).internal as any;
+    const matchroomId: any = await ctx.runMutation(internalAny.matchrooms.createSeededDemo, {
       hostUid: String(host._id),
       hostName: host.username,
       game,
@@ -1883,12 +1928,18 @@ export const seedDemoMatchroomByIndex = internalMutation({
       expiresAt: startAt - 24 * 60 * 60 * 1000,
       durationMinutes: 60,
       pricing: { perPlayer, currency: DEFAULT_CURRENCY },
+      branchId: String((zone as any).primaryBranch?.id || "") || undefined,
+      requestedResourceAssetType: resourceProfile.assetType,
+      requestedResourceSurface: resourceProfile.surface,
+      requestedResourceTier: resourceProfile.tier,
+      selectedZoneRateKey: resourceProfile.rateKey,
       slotsA,
       slotsB,
       captainUidA: String(host._id),
       skillLevel: "Any",
       hostRole: "Player",
       bookingSource: "seed",
+      clientCreateRequestId: `legacy-demo-matchroom-${i}`,
       isPrivate: false,
       paymentStatus: "unpaid",
       zoneAdminApproved: true,

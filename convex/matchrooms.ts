@@ -4134,6 +4134,26 @@ export const create = mutation({
   },
 });
 
+// Guarded demo seeding must not call the authenticated public mutation with a
+// fabricated actor. Keep the trusted entry point internal, limited to unpaid
+// rows that are explicitly tagged as seed data, and reuse the exact production
+// validation/member/lifecycle pipeline.
+export const createSeededDemo = internalMutation({
+  args: createMatchroomArgsValidator,
+  handler: async (ctx, args) => {
+    if (args.bookingSource !== "seed" || args.paymentStatus !== "unpaid") {
+      throw new Error("Seeded matchrooms must be unpaid and tagged with bookingSource=seed.");
+    }
+    const result = await createMatchroomFromValidatedArgs(ctx, args, {
+      trustedHostUid: true,
+    });
+    if (isMatchroomCreateFailureResult(result)) {
+      throw new Error(result.message || "Could not create seeded matchroom.");
+    }
+    return result;
+  },
+});
+
 export const finalizePaidCreateFromProvider = internalMutation({
   args: {
     orderRefNum: v.string(),
