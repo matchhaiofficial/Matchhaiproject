@@ -92,7 +92,9 @@ describe("urgent server-authority regressions", () => {
     expect(admin).toContain('await ctx.db.patch(membership._id, { username: "Deleted User" })');
     expect(admin).toContain("assertCanActOnSuperAdminTarget(admin, user)");
     expect(admin).toContain('model: "account"');
+    expect(admin).toContain('model: "verification"');
     expect(admin).toContain("numItems: 100000");
+    expect(admin).toContain('profile.accountStatus === "suspended"');
     expect(admin).toContain("await ctx.storage.delete(user.profileImageStorageId)");
     expect(admin).toContain("phoneNumberHash: undefined");
     expect(admin).toContain("eaId: undefined");

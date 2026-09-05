@@ -319,7 +319,7 @@ async function getAuthenticatedAdmin(ctx: any, sessionToken: string) {
   const email = normalizeEmail(authUser.email || "");
   const isSuperAdmin = isAuthorizedSuperAdmin(profile, email);
 
-  if (!profile || !isSuperAdmin) {
+  if (!profile || profile.accountStatus === "suspended" || !isSuperAdmin) {
     throw new Error("Super admin access required");
   }
 
@@ -4147,6 +4147,21 @@ async function applyAccountDeletion(ctx: any, user: any, now: number) {
   // 1. Anonymize the auth identity and revoke sessions. These operations are
   // required; never resolve a deletion request while a usable login remains.
   if (user.authId) {
+    const verificationIdentifiers = Array.from(new Set([
+      user.email,
+      user.phone,
+      user.pendingEmail,
+      user.pendingPhone,
+    ].map((value) => String(value || "").trim()).filter(Boolean)));
+    if (verificationIdentifiers.length > 0) {
+      await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+        input: {
+          model: "verification",
+          where: [{ field: "identifier", operator: "in", value: verificationIdentifiers }],
+        },
+        paginationOpts: { cursor: null, numItems: 100000 },
+      });
+    }
     await ctx.runMutation(components.betterAuth.adapter.updateOne, {
       input: {
         model: "user",
