@@ -326,6 +326,33 @@ function hasDomainCheckoutContext(transaction: any) {
   );
 }
 
+function stableCheckoutContextValue(value: any): string {
+  if (value === null || value === undefined) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map(stableCheckoutContextValue).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableCheckoutContextValue(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function getCheckoutContextIdentity(context: any): string {
+  if (context?.teamChallengeHold) {
+    return `team:${String(context.teamChallengeHold.challengeId || "")}:${String(context.teamChallengeHold.side || "")}`;
+  }
+  if (context?.zoneWalkInCreateArgs) {
+    return `walkin:${stableCheckoutContextValue(context.zoneWalkInCreateArgs)}`;
+  }
+  if (context?.matchroomCreateArgs) {
+    return `matchroom:${stableCheckoutContextValue(context.matchroomCreateArgs)}`;
+  }
+  return "wallet_topup:generic";
+}
+
 function shouldIgnoreActiveWalletTopupForRequest(transaction: any, args: any, now: number) {
   if (!transaction) return false;
 
@@ -337,6 +364,9 @@ function shouldIgnoreActiveWalletTopupForRequest(transaction: any, args: any, no
   if (args?.matchroomCreateArgs && !checkoutContext.matchroomCreateArgs) return true;
   if (args?.zoneWalkInCreateArgs && !checkoutContext.zoneWalkInCreateArgs) return true;
   if (args?.teamChallengeHold && !checkoutContext.teamChallengeHold) return true;
+  if (getCheckoutContextIdentity(checkoutContext) !== getCheckoutContextIdentity(args)) {
+    return true;
+  }
 
   // Polling can keep updatedAt fresh, but it does not resend the mobile-account
   // approval request. After this window, a new payment attempt should be allowed.
