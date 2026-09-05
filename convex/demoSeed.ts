@@ -7,6 +7,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 const DEMO_DOMAIN = "@matchhai.demo";
 const DEMO_PASSWORD = "MatchHaiDemo123!";
 const KARACHI_REALISTIC_SEED_SOURCE = "karachi_realistic_demo_2026";
+const DEMO_SEED_SOURCE = "legacy_demo_seed";
 const KARACHI_REALISTIC_PASSWORD = "Demo@123456";
 const KARACHI_REALISTIC_EMAIL_DOMAIN = "@matchhai.demo";
 const DEFAULT_CURRENCY = "PKR";
@@ -1460,7 +1461,9 @@ export const seedDemoZoneByIndex = internalMutation({
     const games = zoneGameArrayFromBranches(branches);
     const venueBrandName = buildZoneName(i, city, profile);
 
-    const zoneId = (await ctx.runMutation(api.zones.create, {
+    const now = Date.now();
+    const firstBranch = branches[0];
+    const zoneId = await ctx.db.insert("zones", {
       ownerUid: adminId as any,
       ownerUsername: auth.username,
       ownerFullName: fullName,
@@ -1475,10 +1478,24 @@ export const seedDemoZoneByIndex = internalMutation({
       phone,
       games,
       branches,
+      primaryBranch: firstBranch
+        ? {
+            branchDisplayName: firstBranch.branchDisplayName,
+            city: firstBranch.city,
+            areaLabel: firstBranch.areaLabel,
+            addressLine1: firstBranch.addressLine1,
+            googleMapsUrl: firstBranch.googleMapsUrl,
+          }
+        : undefined,
+      pricing: firstBranch?.pricing,
       defaultPricing: { hourlyRate: 350, currency: DEFAULT_CURRENCY },
-    })) as any;
-
-    await ctx.runMutation(api.zones.approve, { zoneId: zoneId as any });
+      status: "active",
+      approvedAt: now,
+      isDemo: true,
+      seedSource: DEMO_SEED_SOURCE,
+      createdAt: now,
+      updatedAt: now,
+    });
 
     for (const branch of branches) {
       const branchId = String(branch.id);
@@ -1499,7 +1516,7 @@ export const seedDemoZoneByIndex = internalMutation({
       for (const t of tiers) {
         const cap = t.tier === "regular" ? 3 : t.tier === "premium" ? 2 : 1;
         for (let seat = 1; seat <= Math.min(Math.max(0, t.count), cap); seat += 1) {
-          await ctx.runMutation(api.zones.createResource, {
+          await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,
             kind: "seat",
@@ -1510,6 +1527,12 @@ export const seedDemoZoneByIndex = internalMutation({
             roomLabel: "PC Hall",
             capacity: 1,
             hourlyRate: t.price,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
           });
         }
       }
@@ -1519,7 +1542,7 @@ export const seedDemoZoneByIndex = internalMutation({
         const count = Number(ps5.count);
         const rate = Number(ps5.price1v1);
         for (let idx = 1; idx <= Math.min(Math.max(0, count), 1); idx += 1) {
-          await ctx.runMutation(api.zones.createResource, {
+          await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,
             kind: "seat",
@@ -1530,6 +1553,12 @@ export const seedDemoZoneByIndex = internalMutation({
             roomLabel: "Console Room",
             capacity: 2,
             hourlyRate: rate,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
           });
         }
       }
@@ -1572,7 +1601,7 @@ export const seedDemoZoneByIndex = internalMutation({
       for (const c of courts) {
         if (courtCreated) break;
         for (let idx = 1; idx <= Math.min(Math.max(0, c.count), 1); idx += 1) {
-          await ctx.runMutation(api.zones.createResource, {
+          await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,
             kind: "court",
@@ -1583,6 +1612,12 @@ export const seedDemoZoneByIndex = internalMutation({
             roomLabel: undefined,
             capacity: c.assetType === "indoor_cricket" ? 12 : 10,
             hourlyRate: c.price,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
           });
         }
         courtCreated = true;
@@ -1597,7 +1632,7 @@ export const seedDemoZoneByIndex = internalMutation({
               ? String(courts[0]!.assetType)
               : "pc";
 
-      await ctx.runMutation(api.zones.createPricingRule, {
+      await ctx.db.insert("pricingRules", {
         zoneId: zoneId as any,
         branchId,
         assetType: ruleAssetType,
@@ -1614,6 +1649,8 @@ export const seedDemoZoneByIndex = internalMutation({
             ? "Peak hours rate adjustment for evening sessions."
             : "Weekend pricing offer for demo venue testing.",
         createdByUid: String(adminId),
+        createdAt: now,
+        updatedAt: now,
       });
     }
 
