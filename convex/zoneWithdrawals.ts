@@ -9,7 +9,7 @@ import {
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "MatchHai <no-reply@matchhai.com>";
-const WITHDRAWAL_REQUEST_EMAIL = "admin@matchhai.com";
+const WITHDRAWAL_REQUEST_EMAIL = String(process.env.WITHDRAWAL_REQUEST_EMAIL || "").trim();
 
 async function sendResendEmail(input: { to: string; subject: string; text: string; html?: string }) {
   if (!RESEND_API_KEY) {
@@ -139,11 +139,15 @@ export const requestZoneWithdrawal = action({
     ];
 
     try {
-      await sendResendEmail({
-        to: WITHDRAWAL_REQUEST_EMAIL,
-        subject: `Withdrawal request: ${result.venueName || result.ownerName || "Zone Admin"} - PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
-        text: lines.join("\n"),
-      });
+      if (WITHDRAWAL_REQUEST_EMAIL) {
+        await sendResendEmail({
+          to: WITHDRAWAL_REQUEST_EMAIL,
+          subject: `Withdrawal request: ${result.venueName || result.ownerName || "Zone Admin"} - PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
+          text: lines.join("\n"),
+        });
+      } else {
+        console.warn("[zoneWithdrawals] WITHDRAWAL_REQUEST_EMAIL is not configured; durable in-app notifications remain active");
+      }
     } catch (error) {
       // The durable request and balance reservation have already committed.
       // Email is an operational alert, so its failure must never invite a

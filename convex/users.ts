@@ -5,6 +5,7 @@ import { api, internal } from "./_generated/api";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
 import { getCurrentUser, publicUser, requireCurrentUser, requireSelf, requireSelfOrSuperAdmin } from "./authz";
 import { markUserPresent } from "./presence";
+import { isPhoneOtpBypassEnabled } from "./kycGate";
 
 // ============================================
 // RATING / PROFILE SECURITY HELPERS
@@ -470,7 +471,7 @@ export const validateRegistrationIdentity = action({
     let phoneNumberHash: string | undefined;
     if (args.accountType === "player") {
       const phoneHash = await sha256(phone);
-      const skipOtp = String(process.env.SKIP_PHONE_OTP || "").trim() === "1";
+      const skipOtp = isPhoneOtpBypassEnabled();
 
       if (skipOtp) {
         phoneOtpVerified = true;

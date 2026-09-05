@@ -10,10 +10,18 @@ export const KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL =
   "Please complete CNIC & face verification before requesting withdrawal.";
 
 export function isKycVerificationBypassEnabled(): boolean {
-  return (
+  const environment = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
+  const isExplicitDevelopment = ["development", "dev", "local", "test"].includes(environment);
+  return isExplicitDevelopment && (
     String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1" ||
     String(process.env.SKIP_PHONE_OTP || "").trim() === "1"
   );
+}
+
+export function isPhoneOtpBypassEnabled(): boolean {
+  const environment = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
+  return ["development", "dev", "local", "test"].includes(environment)
+    && String(process.env.SKIP_PHONE_OTP || "").trim() === "1";
 }
 
 export function isKycAccessAllowed(status?: string | null): boolean {

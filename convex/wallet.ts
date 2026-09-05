@@ -89,11 +89,16 @@ export const listTransactions = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
     const { user } = await requireCurrentUser(ctx);
-    return await ctx.db
+    const rows = await ctx.db
       .query("walletTransactions")
       .withIndex("by_userId", (q) => q.eq("userId", user._id))
       .order("desc")
-      .collect();
+      .take(200);
+    return rows.map((row: any) => {
+      const metadata = { ...(row.metadata || {}) };
+      delete metadata.accountNumberFull;
+      return { ...row, metadata };
+    });
   },
 });
 
