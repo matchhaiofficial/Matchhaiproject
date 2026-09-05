@@ -298,7 +298,7 @@ export default function TeamMatchChallengeDetails() {
         });
     }, [showToast]);
 
-    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string) => {
+    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string, statusLike: any) => {
         if (!easypaisaPay || !challengeId) return;
         if (resumedOrderRef.current === orderRefNum) return;
         resumedOrderRef.current = orderRefNum;
@@ -311,10 +311,15 @@ export default function TeamMatchChallengeDetails() {
             setEasypaisaModalVisible(false);
             setEasypaisaPay(null);
             setActiveEasypaisaOrderRef(null);
-            showToast({
+            const holdWasPlaced = statusLike?.teamChallengeHoldStatus === "held";
+            showToast(holdWasPlaced ? {
                 type: "success",
                 title: "Payment held",
                 message: "Your Easypaisa payment is held for your team.",
+            } : {
+                type: "warning",
+                title: "Payment added to wallet",
+                message: "Payment was received, but the challenge hold was not placed. The funds remain available in your MatchHai wallet.",
             });
         } finally {
             setFinishingEasypaisa(false);
@@ -326,7 +331,7 @@ export default function TeamMatchChallengeDetails() {
         try {
             const result = await syncCheckoutStatus({ orderRefNum, userId: user._id as Id<"users"> } as any);
             if (isEasypaisaPaid(result)) {
-                await finishAfterEasypaisaPayment(orderRefNum);
+                await finishAfterEasypaisaPayment(orderRefNum, result);
                 return;
             }
             if (isEasypaisaStopped(result)) {
@@ -397,7 +402,7 @@ export default function TeamMatchChallengeDetails() {
                     : `${attemptMessage} Approve the payment in Easypaisa. MatchHai will keep checking the status.`,
             });
             if (paidImmediately && orderRefNum) {
-                await finishAfterEasypaisaPayment(orderRefNum);
+                await finishAfterEasypaisaPayment(orderRefNum, checkout);
                 return;
             }
             if (orderRefNum) {
@@ -415,7 +420,7 @@ export default function TeamMatchChallengeDetails() {
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !checkoutStatus || !easypaisaPay || !challengeId) return;
         if (isEasypaisaPaid(checkoutStatus)) {
-            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef);
+            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef, checkoutStatus);
             return;
         }
         if (isEasypaisaStopped(checkoutStatus)) {

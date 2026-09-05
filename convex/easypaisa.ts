@@ -80,6 +80,7 @@ type FinalizeResult = {
   shouldRetry: boolean;
   status: PaymentStatus;
   message?: string;
+  teamChallengeHoldStatus?: "held" | "wallet_credit_only";
 };
 
 type CheckoutAttempt = "reused" | "created";
@@ -2013,6 +2014,7 @@ export const syncTransactionStatus = action({
       status: applyResult.status,
       shouldRetry: applyResult.shouldRetry,
       message: applyResult.message || null,
+      teamChallengeHoldStatus: applyResult.teamChallengeHoldStatus || null,
     };
   },
 });
@@ -2253,6 +2255,7 @@ export const getCheckoutStatus = query({
       startTimedOut: String(latest.lastError || "").toLowerCase().includes("taking too long"),
       callbackCount: latest.callbackCount || 0,
       finalizedMatchroomId: latest.providerPayload?.matchroomCreate?.matchroomId || null,
+      teamChallengeHoldStatus: latest.providerPayload?.teamChallengeHold?.status || null,
       processedAt: latest.processedAt || null,
       createdAt: latest.createdAt,
       updatedAt: latest.updatedAt,
@@ -2605,6 +2608,7 @@ export const applyProviderUpdate = internalMutation({
         ok: true,
         shouldRetry: false,
         status: "paid",
+        teamChallengeHoldStatus: row.providerPayload?.teamChallengeHold?.status || undefined,
       };
     }
 
@@ -2734,6 +2738,7 @@ export const applyProviderUpdate = internalMutation({
     let walletTopupMatchroomCreateArgs: any = null;
     let walletTopupZoneWalkInCreateArgs: any = null;
     let walletTopupTeamChallengeHold: any = null;
+    let teamChallengeHoldStatus: "held" | "wallet_credit_only" | undefined;
     let createdWalletTopupMatchroomId: string | null = null;
 
     try {
@@ -2883,10 +2888,24 @@ export const applyProviderUpdate = internalMutation({
           orderRefNum: row.orderRefNum,
         });
         if (holdResult?.held) {
+          teamChallengeHoldStatus = "held";
           sourcePayload = {
             ...sourcePayload,
             teamChallengeHold: {
+              status: "held",
               heldAt: now,
+              challengeId: String(walletTopupTeamChallengeHold.challengeId),
+              side: walletTopupTeamChallengeHold.side,
+            },
+          };
+        } else {
+          teamChallengeHoldStatus = "wallet_credit_only";
+          sourcePayload = {
+            ...sourcePayload,
+            teamChallengeHold: {
+              status: "wallet_credit_only",
+              completionFailedAt: now,
+              completionError: String(holdResult?.message || "Challenge hold could not be placed.").slice(0, 240),
               challengeId: String(walletTopupTeamChallengeHold.challengeId),
               side: walletTopupTeamChallengeHold.side,
             },
@@ -2920,7 +2939,10 @@ export const applyProviderUpdate = internalMutation({
         // than the generic "top-up successful" so the policy is honoured.
         const createWasAttempted = Boolean(walletTopupMatchroomCreateArgs || walletTopupZoneWalkInCreateArgs);
         const createFinalized = Boolean((sourcePayload as any)?.matchroomCreate?.matchroomId);
-        const decision = createWasAttempted && !createFinalized ? "wallet_credit_only" : "paid";
+        const teamHoldFellBackToWallet = Boolean(walletTopupTeamChallengeHold) && teamChallengeHoldStatus !== "held";
+        const decision = (createWasAttempted && !createFinalized) || teamHoldFellBackToWallet
+          ? "wallet_credit_only"
+          : "paid";
         await notifyPlayerPaymentOutcome(ctx, {
           payment: row,
           decision,
@@ -2939,6 +2961,7 @@ export const applyProviderUpdate = internalMutation({
         ok: true,
         shouldRetry: false,
         status: "paid",
+        teamChallengeHoldStatus,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Payment reconciliation failed.";
@@ -3001,6 +3024,7 @@ export const applyProviderUpdate = internalMutation({
         if (walletTopupTeamChallengeHold) {
           fallbackPayload.teamChallengeHold = {
             ...(fallbackPayload.teamChallengeHold || {}),
+            status: "wallet_credit_only",
             completionFailedAt: now,
             completionError: message,
           };
@@ -3033,6 +3057,7 @@ export const applyProviderUpdate = internalMutation({
           shouldRetry: false,
           status: "paid",
           message,
+          teamChallengeHoldStatus: walletTopupTeamChallengeHold ? "wallet_credit_only" : undefined,
         };
       }
 

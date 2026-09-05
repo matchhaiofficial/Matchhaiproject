@@ -140,4 +140,15 @@ describe("urgent server-authority regressions", () => {
     expect(createFull).toContain("[String(args.captainAUid)]: canonicalCaptainAVenue");
     expect(screen).toContain("const canAcceptNow = !!(isPending && !isAdminPending && isCaptainB)");
   });
+
+  it("reports provider-paid team holds that fall back to wallet credit", () => {
+    const backend = read("convex/easypaisa.ts");
+    const screen = read("app/teams/challenge.tsx");
+
+    expect(backend).toContain('teamChallengeHoldStatus = "wallet_credit_only"');
+    expect(backend).toContain('status: "wallet_credit_only"');
+    expect(backend).toContain("teamChallengeHoldStatus: latest.providerPayload?.teamChallengeHold?.status || null");
+    expect(screen).toContain('statusLike?.teamChallengeHoldStatus === "held"');
+    expect(screen).toContain("The funds remain available in your MatchHai wallet.");
+  });
 });
