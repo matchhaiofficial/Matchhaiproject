@@ -609,14 +609,15 @@ export const repairRejectedRefundsForCaptain = mutation({
     const userId = await getAuthenticatedUserId(ctx, args.actorUid);
     const rejectedChallenges = await ctx.db
       .query("teamChallenges")
-      .withIndex("by_status", (q) => q.eq("status", "rejected"))
+      .withIndex("by_captainAUid_and_status", (q) =>
+        q.eq("captainAUid", userId).eq("status", "rejected"),
+      )
       .collect();
 
     let repairedCount = 0;
     let creditedAmount = 0;
 
     for (const challenge of rejectedChallenges) {
-      if (String(challenge.captainAUid || "") !== String(userId)) continue;
       if (challenge.teamAPaymentStatus !== "paid") continue;
 
       const refundResult = await refundChallengerPaymentForRejectedChallenge(ctx, challenge._id, challenge);

@@ -17,4 +17,15 @@ describe("zone admin reactive subscriptions", () => {
     expect(combined).not.toContain("setInterval(");
     expect(registry).toContain("currentState.unsubscribe?.()");
   });
+
+  it("repairs refunds through a captain-scoped index", () => {
+    const challenges = read("convex/teamChallenges.ts");
+    const repair = challenges.slice(
+      challenges.indexOf("export const repairRejectedRefundsForCaptain"),
+      challenges.indexOf("export const proposeVenue"),
+    );
+
+    expect(repair).toContain('.withIndex("by_captainAUid_and_status"');
+    expect(repair).not.toContain('.withIndex("by_status"');
+  });
 });
