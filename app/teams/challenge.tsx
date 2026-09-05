@@ -141,8 +141,7 @@ export default function TeamMatchChallengeDetails() {
     const bothConfirmed = useMemo(() => !!challenge?.matchroomId && !!challenge?.confirmedVenue, [challenge]);
     const proposalFromA = challenge?.proposedVenueByCaptainA || null;
     const alternativeFromB = challenge?.alternativeVenueByCaptainB || null;
-    const hasAlternative = !!alternativeFromB?.zoneId;
-    const canAcceptNow = !!(isPending && !isAdminPending && isCaptain && ((hasAlternative && isCaptainA) || (!hasAlternative && isCaptainB)));
+    const canAcceptNow = !!(isPending && !isAdminPending && isCaptainB);
     const canRejectNow = !!(isPending && !isAdminPending && isCaptain);
     const canProposeVenue = !!(isAcceptedFlow && isCaptain && !challenge?.matchroomId);
 
@@ -748,9 +747,7 @@ export default function TeamMatchChallengeDetails() {
                                 ? "Waiting for the responding captain."
                                 : canAcceptNow
                                     ? "Review this challenge and choose accept or reject."
-                                    : hasAlternative
-                                        ? "Waiting for Captain A to accept Team B's alternative venue."
-                                        : "Waiting for challenged captain to accept, or reject if needed."}
+                                    : "Waiting for challenged captain to accept, or reject if needed."}
                         </Text>
                         {canAcceptNow && isCaptainB && hasOpponentSubstitutes ? (
                             <View style={styles.lineupPanel}>

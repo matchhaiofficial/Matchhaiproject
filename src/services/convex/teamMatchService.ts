@@ -610,7 +610,9 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
             actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
-        if (challenge.status !== "pending") return { ok: false, message: "Challenge is not pending." };
+        if (!["accepted", "venue_proposed"].includes(challenge.status)) {
+            return { ok: false, message: "Accept the challenge before suggesting an alternative zone." };
+        }
 
         await convex.mutation(api.teamChallenges.suggestAlternativeVenue, {
             challengeId: input.challengeId as Id<"teamChallenges">,

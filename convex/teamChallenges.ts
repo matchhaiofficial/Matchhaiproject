@@ -753,8 +753,8 @@ export const suggestAlternativeVenue = mutation({
   },
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
-    if (challenge.status !== "pending") {
-      throw new Error("Challenge is not pending");
+    if (!["accepted", "venue_proposed"].includes(challenge.status)) {
+      throw new Error("Accept the challenge before suggesting an alternative venue");
     }
     if (String(challenge.captainBUid || "") !== String(userId)) {
       throw new Error("Only the challenged captain can suggest an alternative venue");
@@ -763,14 +763,35 @@ export const suggestAlternativeVenue = mutation({
     if (!zone || zone.status !== "active") {
       throw new Error("The selected venue is unavailable");
     }
+    const rates = getAuthoritativeZoneRates(
+      zone,
+      challenge.gameKey || challenge.game,
+      Number(challenge.maxPlayers || 0),
+    );
+    const selectedRate = challenge.zoneRateKey ? rates.get(challenge.zoneRateKey) : null;
+    if (!selectedRate) {
+      throw new Error("The selected venue does not offer the challenge's selected rate");
+    }
+    const authoritativePricePerPlayer = Math.ceil(
+      selectedRate.price * getChallengeSeriesHours(challenge.gameKey || challenge.game, challenge.seriesType),
+    );
+    if (authoritativePricePerPlayer !== Number(challenge.pricePerPlayer || 0)) {
+      throw new Error("This venue's price differs from the agreed challenge price. Create a new challenge for this venue.");
+    }
     const venue = {
       zoneId: String(zone._id),
       venueName: zone.venueBrandName || zone.name,
       areaLabel: zone.primaryBranch?.areaLabel || null,
     };
     await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+      status: "venue_proposed",
       message: `Alternative venue proposed: ${venue.venueName}`,
       alternativeVenueByCaptainB: venue,
+      captainVenueChoices: buildCaptainChoices(challenge, {
+        [String(userId)]: venue,
+      }),
+      zoneRateLabel: selectedRate.label,
+      zoneRatePrice: selectedRate.price,
       updatedAt: Date.now(),
     });
     return { ok: true, venue };
@@ -854,11 +875,7 @@ export const createFull = mutation({
     teamAPaymentAmount: v.optional(v.number()),
     teamBPaymentAmount: v.optional(v.number()),
     proposedVenueByCaptainA: v.optional(venueChoiceValidator),
-    alternativeVenueByCaptainB: v.optional(venueChoiceValidator),
     commonAreas: v.optional(v.array(v.string())),
-    adminReviewStatus: v.optional(
-      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"), v.null())
-    ),
     lineupA: v.optional(v.array(v.string())),
     lineupB: v.optional(v.array(v.string())),
   },
@@ -954,6 +971,11 @@ export const createFull = mutation({
       }
     }
 
+    const canonicalCaptainAVenue = {
+      zoneId: String(zone._id),
+      venueName: zone.venueBrandName || zone.name,
+      areaLabel: zone.primaryBranch?.areaLabel || null,
+    };
     const challengeDocument = {
       challengerTeamId: args.challengerTeamId,
       challengerTeamName: challenger.name,
@@ -981,19 +1003,13 @@ export const createFull = mutation({
       teamBPaymentStatus: safeTeamBPaymentStatus,
       teamAPaymentAmount: undefined,
       teamBPaymentAmount: undefined,
-      proposedVenueByCaptainA: {
-        zoneId: String(zone._id),
-        venueName: zone.venueBrandName || zone.name,
-        areaLabel: zone.primaryBranch?.areaLabel || null,
+      proposedVenueByCaptainA: canonicalCaptainAVenue,
+      alternativeVenueByCaptainB: undefined,
+      captainVenueChoices: {
+        [String(args.captainAUid)]: canonicalCaptainAVenue,
       },
-      alternativeVenueByCaptainB: args.alternativeVenueByCaptainB,
-      captainVenueChoices: args.proposedVenueByCaptainA
-        ? {
-            [String(args.captainAUid)]: args.proposedVenueByCaptainA,
-          }
-        : undefined,
       commonAreas: args.commonAreas || [],
-      adminReviewStatus: args.adminReviewStatus ?? null,
+      adminReviewStatus: null,
       lineupA,
       lineupB: undefined,
       createdAt: now,
