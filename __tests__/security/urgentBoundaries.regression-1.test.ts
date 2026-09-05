@@ -104,7 +104,8 @@ describe("urgent server-authority regressions", () => {
 
     expect(teamSeed).not.toContain("ctx.runMutation(api.teams.create");
     expect(teamSeed).not.toContain("ctx.runMutation(api.teams.addMember");
-    expect(seed).toContain("internalAny.matchrooms.createSeededDemo");
+    expect(seed).toContain("(internal as any).matchrooms.createSeededDemo");
+    expect(seed).not.toContain('await import("./_generated/api")).internal as any;\n    const matchroomId');
     expect(matchrooms).toContain("export const createSeededDemo = internalMutation");
     expect(matchrooms).toContain('args.bookingSource !== "seed" || args.paymentStatus !== "unpaid"');
     expect(matchrooms).toContain("createMatchroomFromValidatedArgs(ctx, args");

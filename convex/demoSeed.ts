@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { action, internalMutation, mutation, query } from "./_generated/server";
-import { api, components } from "./_generated/api";
+import { api, components, internal } from "./_generated/api";
 import { hashPassword } from "better-auth/crypto";
 import type { Doc, Id } from "./_generated/dataModel";
 
@@ -1899,8 +1899,7 @@ export const seedDemoMatchroomByIndex = internalMutation({
       const ratePrefix = game === "indoor_cricket" ? "cricket" : game;
       return { assetType: game, tier: undefined, surface: "standard", rateKey: `${ratePrefix}:standard` };
     })();
-    const internalAny = (await import("./_generated/api")).internal as any;
-    const matchroomId: any = await ctx.runMutation(internalAny.matchrooms.createSeededDemo, {
+    const matchroomId: any = await ctx.runMutation((internal as any).matchrooms.createSeededDemo, {
       hostUid: String(host._id),
       hostName: host.username,
       game,
