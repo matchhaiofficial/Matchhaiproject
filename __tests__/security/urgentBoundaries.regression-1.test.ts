@@ -104,4 +104,18 @@ describe("urgent server-authority regressions", () => {
     expect(matchrooms).toContain('args.bookingSource !== "seed" || args.paymentStatus !== "unpaid"');
     expect(matchrooms).toContain("createMatchroomFromValidatedArgs(ctx, args");
   });
+
+  it("uses persisted booking times and unique resources for allocation checks", () => {
+    const source = read("convex/zoneAdminBooking.ts");
+    const accept = source.slice(
+      source.indexOf("export const acceptBookingRequest"),
+      source.indexOf("export const rejectBookingRequest"),
+    );
+
+    expect(accept).toContain("new Set(args.resourceIds.map(String)).size !== args.resourceIds.length");
+    expect(accept).toContain("let allocationStartAt = getBookingRequestStartAtForConflict(bookingRequest)");
+    expect(accept).toContain("allocationStartAt = getLinkedRoomStartMillis(linkedRoomForSlot) || allocationStartAt");
+    expect(accept).toContain("durationMinutes: allocationDurationMinutes");
+    expect(accept).not.toContain("args.matchroomData.scheduledStartAt");
+  });
 });

@@ -1978,6 +1978,9 @@ export const acceptBookingRequest = mutation({
     if (!args.resourceIds.length) {
       throw new Error("Select at least one resource.");
     }
+    if (new Set(args.resourceIds.map(String)).size !== args.resourceIds.length) {
+      throw new Error("Each selected resource must be unique.");
+    }
 
     const selectedResources = await Promise.all(
       args.resourceIds.map((resourceId) => ctx.db.get(resourceId)),
@@ -1998,22 +2001,25 @@ export const acceptBookingRequest = mutation({
       }
     });
 
-    let allocationStartAt =
-      typeof args.matchroomData.scheduledStartAt === "number" && Number.isFinite(args.matchroomData.scheduledStartAt)
-        ? args.matchroomData.scheduledStartAt
-        : getBookingRequestStartAtForConflict(bookingRequest);
+    let allocationStartAt = getBookingRequestStartAtForConflict(bookingRequest);
+    let allocationDurationMinutes = getDurationMinutesFromRequest(bookingRequest);
     if (bookingRequest.matchroomId) {
       const linkedRoomForSlot: any = await ctx.db.get(bookingRequest.matchroomId);
-      allocationStartAt =
-        Number(linkedRoomForSlot?.scheduledStartAt || linkedRoomForSlot?.startTime || 0) ||
-        allocationStartAt;
+      if (!linkedRoomForSlot) {
+        throw new Error("The linked matchroom no longer exists.");
+      }
+      allocationStartAt = getLinkedRoomStartMillis(linkedRoomForSlot) || allocationStartAt;
+      const linkedDuration = Number(linkedRoomForSlot.durationMinutes || 0);
+      if (Number.isFinite(linkedDuration) && linkedDuration > 0) {
+        allocationDurationMinutes = linkedDuration;
+      }
     }
     await assertSelectedResourcesAvailableForSlot(ctx, {
       zoneId: args.zoneId,
       branchId: args.branchId,
       resourceIds: args.resourceIds,
       scheduledStartAt: allocationStartAt,
-      durationMinutes: args.matchroomData.durationMinutes || getDurationMinutesFromRequest(bookingRequest),
+      durationMinutes: allocationDurationMinutes,
       excludeMatchroomId: bookingRequest.matchroomId ? String(bookingRequest.matchroomId) : null,
       excludeBookingRequestId: String(args.requestId),
     });
