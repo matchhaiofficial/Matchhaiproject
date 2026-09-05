@@ -439,7 +439,9 @@ function buildZoneBranch(i: number, branchIndex: number, city: string, profile: 
   const supportsPickleball = profile === "sports" ? rand() < 0.35 : profile === "hybrid" ? rand() < 0.25 : rand() < 0.08;
 
   // Keep resource counts intentionally small so seeding stays fast while still looking realistic.
-  const pcRegularCount = supportsCs2 ? String(Math.floor(rand() * 5) + 6) : "0";
+      // Team CS/Valorant matchrooms require ten same-tier PCs. Keep the demo
+      // inventory internally consistent with the bookings it is meant to test.
+      const pcRegularCount = supportsCs2 ? String(Math.floor(rand() * 3) + 10) : "0";
   const pcPremiumCount = supportsCs2 ? String(Math.floor(rand() * 3) + 2) : "0";
   const pcEliteCount = supportsCs2 ? String(Math.floor(rand() * 2) + 1) : "0";
   const regularPrice = String(Math.floor(rand() * 150) + 250);
@@ -516,6 +518,25 @@ function zoneGameArrayFromBranches(branches: any[]) {
   }
   if (games.size === 0) games.add("cs2");
   return Array.from(games);
+}
+
+function buildZoneCapacity(branches: any[]) {
+  const sum = (selector: (pricing: any) => unknown) => branches.reduce((total, branch) => {
+    const value = Number(selector(branch.pricing || {}) || 0);
+    return total + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
+  return {
+    pcSeats: sum((pricing) =>
+      Number(pricing.pc?.regular?.count || 0)
+      + Number(pricing.pc?.premium?.count || 0)
+      + Number(pricing.pc?.elite?.count || 0)),
+    consoleSeats: sum((pricing) => pricing.console?.ps5?.count),
+    consolePlatform: "ps5",
+    futsalCourts: sum((pricing) => pricing.futsal?.standard?.count),
+    indoorCricketNets: sum((pricing) => pricing.indoor_cricket?.standard?.count),
+    padelCourts: sum((pricing) => pricing.padel?.standard?.count),
+    pickleballCourts: sum((pricing) => pricing.pickleball?.standard?.count),
+  };
 }
 
 function buildZoneName(i: number, city: string, profile: DemoZoneProfile) {
@@ -1478,6 +1499,7 @@ export const seedDemoZoneByIndex = internalMutation({
       phone,
       games,
       branches,
+      capacity: buildZoneCapacity(branches),
       primaryBranch: firstBranch
         ? {
             branchDisplayName: firstBranch.branchDisplayName,
@@ -1514,8 +1536,7 @@ export const seedDemoZoneByIndex = internalMutation({
       }
 
       for (const t of tiers) {
-        const cap = t.tier === "regular" ? 3 : t.tier === "premium" ? 2 : 1;
-        for (let seat = 1; seat <= Math.min(Math.max(0, t.count), cap); seat += 1) {
+        for (let seat = 1; seat <= Math.max(0, t.count); seat += 1) {
           await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,

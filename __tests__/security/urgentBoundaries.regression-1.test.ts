@@ -109,6 +109,8 @@ describe("urgent server-authority regressions", () => {
     expect(matchrooms).toContain("export const createSeededDemo = internalMutation");
     expect(matchrooms).toContain('args.bookingSource !== "seed" || args.paymentStatus !== "unpaid"');
     expect(matchrooms).toContain("createMatchroomFromValidatedArgs(ctx, args");
+    expect(seed).toContain("capacity: buildZoneCapacity(branches)");
+    expect(seed).toContain("seat <= Math.max(0, t.count)");
   });
 
   it("uses persisted booking times and unique resources for allocation checks", () => {
