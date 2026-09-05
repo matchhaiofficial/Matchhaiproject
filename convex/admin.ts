@@ -4054,14 +4054,59 @@ async function assertAccountDeletionIsSafe(ctx: any, user: any) {
     throw new Error("Account deletion is blocked while a wallet transaction is pending.");
   }
 
+  const providerPaymentPendingStatuses = [
+    "created",
+    "redirected",
+    "token_received",
+    "pending",
+  ] as const;
+  for (const status of providerPaymentPendingStatuses) {
+    const pendingProviderPayment = await ctx.db
+      .query("paymentTransactions")
+      .withIndex("by_userId_and_status", (q: any) =>
+        q.eq("userId", user._id).eq("status", status),
+      )
+      .first();
+    if (pendingProviderPayment) {
+      throw new Error("Account deletion is blocked while a provider payment is pending.");
+    }
+  }
+
   const memberships = await ctx.db
     .query("matchroomMembers")
     .withIndex("by_uid", (q: any) => q.eq("uid", String(user._id)))
-    .take(100);
+    .collect();
   for (const membership of memberships) {
     const room = await ctx.db.get(membership.matchroomId);
     if (room && ["open", "locked", "in-progress"].includes(String(room.status))) {
       throw new Error("Account deletion is blocked until active matchrooms are completed or cancelled.");
+    }
+  }
+
+  const activeChallengeStatuses = [
+    "pending",
+    "accepted",
+    "venue_proposed",
+    "venue_confirmed",
+    "admin_pending",
+  ] as const;
+  for (const status of activeChallengeStatuses) {
+    const [asCaptainA, asCaptainB] = await Promise.all([
+      ctx.db
+        .query("teamChallenges")
+        .withIndex("by_captainAUid_and_status", (q: any) =>
+          q.eq("captainAUid", user._id).eq("status", status),
+        )
+        .first(),
+      ctx.db
+        .query("teamChallenges")
+        .withIndex("by_captainBUid_and_status", (q: any) =>
+          q.eq("captainBUid", user._id).eq("status", status),
+        )
+        .first(),
+    ]);
+    if (asCaptainA || asCaptainB) {
+      throw new Error("Account deletion is blocked until active team challenges are resolved.");
     }
   }
 }

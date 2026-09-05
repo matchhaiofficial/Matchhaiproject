@@ -72,4 +72,20 @@ describe("urgent server-authority regressions", () => {
     expect(source).toContain("internal.matchrooms.processScheduledLifecycle");
     expect(source).toContain("await scheduleMatchroomLifecycle(ctx, matchroomId)");
   });
+
+  // Regression: account deletion inspected only the first 100 room memberships
+  // and ignored provider payments and unlinked team challenges.
+  it("blocks deletion for every active financial and match lifecycle", () => {
+    const admin = read("convex/admin.ts");
+    const schema = read("convex/schema.ts");
+
+    expect(admin).toContain('.query("paymentTransactions")');
+    expect(admin).toContain('q.eq("userId", user._id).eq("status", status)');
+    expect(admin).toContain('.withIndex("by_uid"');
+    expect(admin).toContain(".collect()");
+    expect(admin).toContain('.withIndex("by_captainAUid_and_status"');
+    expect(admin).toContain('.withIndex("by_captainBUid_and_status"');
+    expect(schema).toContain('.index("by_captainAUid_and_status", ["captainAUid", "status"])');
+    expect(schema).toContain('.index("by_captainBUid_and_status", ["captainBUid", "status"])');
+  });
 });

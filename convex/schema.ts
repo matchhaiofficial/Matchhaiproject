@@ -1225,6 +1225,8 @@ export default defineSchema({
     .index("by_opponentTeamId", ["opponentTeamId"])
     .index("by_captainAUid_and_createdAt", ["captainAUid", "createdAt"])
     .index("by_captainBUid_and_createdAt", ["captainBUid", "createdAt"])
+    .index("by_captainAUid_and_status", ["captainAUid", "status"])
+    .index("by_captainBUid_and_status", ["captainBUid", "status"])
     .index("by_status", ["status"])
     .index("by_status_and_lifecycleDueAt", ["status", "lifecycleDueAt"])
     .index("by_matchroomId", ["matchroomId"]),
