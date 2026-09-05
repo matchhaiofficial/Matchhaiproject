@@ -1,5 +1,10 @@
 import fs from "fs";
 import path from "path";
+import {
+  createSharedPollingState,
+  publishPollingRows,
+  releasePollingSubscription,
+} from "../../src/services/convex/sharedPollingRegistry";
 
 const read = (relativePath: string) =>
   fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -27,5 +32,27 @@ describe("zone admin reactive subscriptions", () => {
 
     expect(repair).toContain('.withIndex("by_captainAUid_and_status"');
     expect(repair).not.toContain('.withIndex("by_status"');
+  });
+
+  it("shares cached rows and closes the watch only after the final listener leaves", () => {
+    const stop = jest.fn();
+    const first = { onData: jest.fn(), onError: jest.fn() };
+    const second = { onData: jest.fn(), onError: jest.fn() };
+    const state = createSharedPollingState<number>();
+    state.unsubscribe = stop;
+    state.callbacks.add(first);
+    state.callbacks.add(second);
+    const store = new Map([["zone", state]]);
+
+    expect(publishPollingRows(state, [1, 2])).toBe(true);
+    expect(publishPollingRows(state, [1, 2])).toBe(false);
+    expect(first.onData).toHaveBeenCalledTimes(1);
+    expect(second.onData).toHaveBeenCalledTimes(1);
+
+    releasePollingSubscription(store, "zone", first);
+    expect(stop).not.toHaveBeenCalled();
+    releasePollingSubscription(store, "zone", second);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(store.has("zone")).toBe(false);
   });
 });
