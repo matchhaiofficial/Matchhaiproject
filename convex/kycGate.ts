@@ -53,6 +53,21 @@ export function assertKycAccessAllowed(
   }
 }
 
+export function assertKycFullyVerified(
+  profile?: {
+    kycVerificationStatus?: string | null;
+    accountStatus?: string | null;
+    suspendedUntil?: number | null;
+  } | null,
+  message = KYC_VERIFICATION_REQUIRED_MESSAGE,
+) {
+  assertKycAccessAllowed(profile, message);
+  if (isKycVerificationBypassEnabled()) return;
+  if (profile?.kycVerificationStatus !== "verified") {
+    throw new Error(message);
+  }
+}
+
 export async function requireKycVerified(
   ctx: ActionCtx | MutationCtx,
   message = KYC_VERIFICATION_REQUIRED_MESSAGE,

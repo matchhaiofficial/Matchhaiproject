@@ -3,6 +3,7 @@ import { api } from "./_generated/api";
 import { v } from "convex/values";
 import {
   KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL,
+  assertKycFullyVerified,
   requireKycVerified,
 } from "./kycGate";
 
@@ -68,12 +69,14 @@ export const requestZoneWithdrawal = action({
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
+    requestKey: v.string(),
   },
   handler: async (ctx, args): Promise<{ ok: true; reference: string }> => {
     const { profile } = await requireKycVerified(ctx, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);
     if (!profile) {
       throw new Error("User profile not found.");
     }
+    assertKycFullyVerified(profile, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);
     const requester = await ctx.runQuery(api.users.getById, { userId: args.userId });
     if (!requester || String(requester._id) !== String(profile._id)) {
       throw new Error("Not authorized.");
@@ -112,6 +115,7 @@ export const requestZoneWithdrawal = action({
         ownerName: args.ownerName,
         ownerEmail: args.ownerEmail,
         venueName: args.venueName,
+        requestKey: args.requestKey,
       },
     );
     const requestedAt = new Date(result.createdAt).toLocaleString("en-PK", {
@@ -134,11 +138,21 @@ export const requestZoneWithdrawal = action({
       `Reference: ${result.reference}`,
     ];
 
-    await sendResendEmail({
-      to: WITHDRAWAL_REQUEST_EMAIL,
-      subject: `Withdrawal request: ${result.venueName || result.ownerName || "Zone Admin"} - PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
-      text: lines.join("\n"),
-    });
+    try {
+      await sendResendEmail({
+        to: WITHDRAWAL_REQUEST_EMAIL,
+        subject: `Withdrawal request: ${result.venueName || result.ownerName || "Zone Admin"} - PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
+        text: lines.join("\n"),
+      });
+    } catch (error) {
+      // The durable request and balance reservation have already committed.
+      // Email is an operational alert, so its failure must never invite a
+      // duplicate retry by making the successful withdrawal look failed.
+      console.error("[zoneWithdrawals] Withdrawal saved but email delivery failed", {
+        reference: result.reference,
+        error: error instanceof Error ? error.message : "Unknown email error",
+      });
+    }
 
     return { ok: true, reference: result.reference };
   },

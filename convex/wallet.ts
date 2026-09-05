@@ -313,6 +313,7 @@ export const createZoneWithdrawalTransaction = mutation({
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
+    requestKey: v.string(),
   },
   handler: async (ctx, args) => {
     if (args.amount <= 0) {
@@ -363,7 +364,42 @@ export const createZoneWithdrawalTransaction = mutation({
     const accountNumberMasked = `${"*".repeat(Math.max(2, compactAccountNumber.length - 4))}${accountNumberLast4}`;
 
     const now = Date.now();
-    const reference = `zone_withdrawal_${String(user._id)}_${now}`;
+    const requestKey = String(args.requestKey || "").trim();
+    if (!/^[A-Za-z0-9:_-]{16,160}$/.test(requestKey)) {
+      throw new Error("Withdrawal request identifier is invalid. Please reopen the form and try again.");
+    }
+    const reference = `zone_withdrawal:${String(user._id)}:${requestKey}`;
+    const existing = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", reference))
+      .first();
+    if (existing) {
+      const metadata: any = existing.metadata || {};
+      const matchesRequest =
+        String(existing.userId) === String(user._id)
+        && Number(existing.amount) === amount
+        && String(metadata.zoneId || "") === String(zone._id)
+        && String(metadata.branchId || "") === String(args.branchId)
+        && String(metadata.bankName || "") === String(args.bankName || "").trim().slice(0, 80)
+        && String(metadata.accountNumberLast4 || "") === accountNumberLast4;
+      if (!matchesRequest) {
+        throw new Error("This withdrawal request identifier was already used with different details.");
+      }
+      return {
+        reference,
+        createdAt: existing.createdAt,
+        walletBalance,
+        amount,
+        bankName: String(metadata.bankName || ""),
+        accountNumberMasked: String(metadata.accountNumberMasked || accountNumberMasked),
+        branchId: String(metadata.branchId || args.branchId),
+        branchName: String(metadata.branchName || safeBranchName),
+        ownerName: metadata.ownerName || user.fullName || user.username || null,
+        ownerEmail: metadata.ownerEmail || user.email || null,
+        venueName: metadata.venueName || zone.venueBrandName || zone.name || null,
+        zoneId: String(zone._id),
+      };
+    }
     await ctx.db.patch(user._id, {
       walletBalance: walletBalance - amount,
       updatedAt: now,
