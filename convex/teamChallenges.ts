@@ -184,7 +184,10 @@ async function validateTeamLineup(
   for (const uid of lineup) {
     const member = members.find((entry: any) => String(entry.odxerId) === uid);
     const user = member ? await ctx.db.get(member.odxerId) : null;
-    if (!user || user.status === "deleted" || user.status === "suspended") {
+    const suspensionIsActive =
+      user?.accountStatus === "suspended"
+      && (!user.suspendedUntil || Number(user.suspendedUntil) > Date.now());
+    if (!user || user.deletedAt || user.accountStatus === "deleted" || suspensionIsActive) {
       throw new Error(`${label} contains an inactive player.`);
     }
   }
@@ -649,10 +652,31 @@ export const proposeVenue = mutation({
     }
 
     const zone = await ctx.db.get(args.zoneId);
+    if (!zone || zone.status !== "active") {
+      throw new Error("The selected venue is unavailable");
+    }
+    const rates = getAuthoritativeZoneRates(
+      zone,
+      challenge.gameKey || challenge.game,
+      Number(challenge.maxPlayers || 0),
+    );
+    const selectedRate = challenge.zoneRateKey ? rates.get(challenge.zoneRateKey) : null;
+    if (!selectedRate) {
+      throw new Error("The selected venue does not offer the challenge's selected rate");
+    }
+    const authoritativePricePerPlayer = Math.ceil(
+      selectedRate.price * getChallengeSeriesHours(challenge.gameKey || challenge.game, challenge.seriesType),
+    );
+    if (
+      Number(challenge.pricePerPlayer || 0) > 0
+      && authoritativePricePerPlayer !== Number(challenge.pricePerPlayer)
+    ) {
+      throw new Error("This venue's price differs from the agreed challenge price. Create a new challenge for this venue.");
+    }
     const venue = {
       zoneId: String(args.zoneId),
-      venueName: args.zoneName || zone?.name || "Zone",
-      areaLabel: args.areaLabel ?? null,
+      venueName: zone.venueBrandName || zone.name,
+      areaLabel: zone.primaryBranch?.areaLabel || null,
     };
 
     const isCaptainAActor = challenge.captainAUid === userId;
@@ -674,6 +698,9 @@ export const proposeVenue = mutation({
       alternativeVenueByCaptainB: !isCaptainAActor ? venue : challenge.alternativeVenueByCaptainB,
       captainVenueChoices,
       confirmedVenue: bothConfirmed ? venue : challenge.confirmedVenue,
+      zoneRateLabel: selectedRate.label,
+      zoneRatePrice: selectedRate.price,
+      pricePerPlayer: authoritativePricePerPlayer,
       updatedAt: Date.now(),
     });
 
@@ -715,6 +742,38 @@ export const proposeVenue = mutation({
       confirmedVenue: bothConfirmed ? venue : null,
       status: bothConfirmed ? "venue_confirmed" : "venue_proposed",
     };
+  },
+});
+
+export const suggestAlternativeVenue = mutation({
+  args: {
+    challengeId: v.id("teamChallenges"),
+    zoneId: v.id("zones"),
+    actorUid: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
+    if (challenge.status !== "pending") {
+      throw new Error("Challenge is not pending");
+    }
+    if (String(challenge.captainBUid || "") !== String(userId)) {
+      throw new Error("Only the challenged captain can suggest an alternative venue");
+    }
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone || zone.status !== "active") {
+      throw new Error("The selected venue is unavailable");
+    }
+    const venue = {
+      zoneId: String(zone._id),
+      venueName: zone.venueBrandName || zone.name,
+      areaLabel: zone.primaryBranch?.areaLabel || null,
+    };
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+      message: `Alternative venue proposed: ${venue.venueName}`,
+      alternativeVenueByCaptainB: venue,
+      updatedAt: Date.now(),
+    });
+    return { ok: true, venue };
   },
 });
 
@@ -1003,23 +1062,26 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const { challenge } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     const { challengeId, actorUid: _actorUid, ...updates } = args;
-    const patch: Record<string, any> = { updatedAt: Date.now() };
-    if (updates.status !== undefined) patch.status = updates.status;
-    if (updates.zoneId !== undefined) patch.zoneId = updates.zoneId;
-    if (updates.zoneName !== undefined) patch.zoneName = updates.zoneName;
-    if (updates.scheduledAt !== undefined) {
-      validateTeamChallengeScheduledAt(updates.scheduledAt);
-      patch.scheduledAt = updates.scheduledAt;
+    const privilegedKeys = [
+      "status",
+      "zoneId",
+      "zoneName",
+      "scheduledAt",
+      "adminReviewStatus",
+      "proposedVenueByCaptainA",
+      "alternativeVenueByCaptainB",
+      "confirmedVenue",
+      "chatId",
+      "matchroomId",
+    ];
+    if (privilegedKeys.some((key) => (updates as any)[key] !== undefined)) {
+      throw new Error("Use the dedicated challenge action for lifecycle, venue, and matchroom changes");
     }
-    if (updates.message !== undefined) patch.message = updates.message;
-    if (updates.adminReviewStatus !== undefined) patch.adminReviewStatus = updates.adminReviewStatus;
-    if (updates.proposedVenueByCaptainA !== undefined) patch.proposedVenueByCaptainA = updates.proposedVenueByCaptainA;
-    if (updates.alternativeVenueByCaptainB !== undefined) patch.alternativeVenueByCaptainB = updates.alternativeVenueByCaptainB;
-    if (updates.confirmedVenue !== undefined) patch.confirmedVenue = updates.confirmedVenue;
-    if (updates.chatId !== undefined) patch.chatId = updates.chatId;
-    if (updates.matchroomId !== undefined) patch.matchroomId = updates.matchroomId;
-
-    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, patch);
+    if (updates.message === undefined) return true;
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+      message: String(updates.message).trim().slice(0, 500),
+      updatedAt: Date.now(),
+    });
     return true;
   },
 });

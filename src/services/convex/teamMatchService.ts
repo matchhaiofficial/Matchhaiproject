@@ -612,16 +612,10 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
         if (!challenge) return { ok: false, message: "Challenge not found." };
         if (challenge.status !== "pending") return { ok: false, message: "Challenge is not pending." };
 
-        // Update challenge message with alternative zone info
-        await convex.mutation(api.teamChallenges.update, {
+        await convex.mutation(api.teamChallenges.suggestAlternativeVenue, {
             challengeId: input.challengeId as Id<"teamChallenges">,
             actorUid: me.convexId,
-            message: `Alternative venue proposed: ${input.venueName}`,
-            alternativeVenueByCaptainB: {
-                zoneId: input.zoneId,
-                venueName: input.venueName,
-                areaLabel: input.areaLabel || null,
-            },
+            zoneId: input.zoneId as Id<"zones">,
         });
 
         return { ok: true };
