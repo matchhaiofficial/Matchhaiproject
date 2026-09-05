@@ -151,4 +151,29 @@ describe("urgent server-authority regressions", () => {
     expect(screen).toContain('statusLike?.teamChallengeHoldStatus === "held"');
     expect(screen).toContain("The funds remain available in your MatchHai wallet.");
   });
+
+  it("keeps verification bypasses development-only and redacts payout details", () => {
+    const gate = read("convex/kycGate.ts");
+    const users = read("convex/users.ts");
+    const wallet = read("convex/wallet.ts");
+    const withdrawals = read("convex/zoneWithdrawals.ts");
+
+    expect(gate).toContain('process.env.MATCHHAI_ENV || ""');
+    expect(gate).toContain("isExplicitDevelopment &&");
+    expect(users).toContain("isPhoneOtpBypassEnabled()");
+    expect(wallet).toContain("delete metadata.accountNumberFull");
+    expect(wallet).toContain(".take(200)");
+    expect(withdrawals).toContain("process.env.WITHDRAWAL_REQUEST_EMAIL");
+    expect(withdrawals).not.toContain('const WITHDRAWAL_REQUEST_EMAIL = "admin@matchhai.com"');
+  });
+
+  it("schedules direct counter-offer expiry and rejects duplicate holds", () => {
+    const source = read("convex/zoneAdminBooking.ts");
+
+    expect(source).toContain("export const expireDirectCounterOffer = internalMutation");
+    expect(source).toContain("internal.zoneAdminBooking.expireDirectCounterOffer");
+    expect(source).toContain('lifecycleStatus: "counter_offer_expired"');
+    expect(source).toContain("new Set(resourceIds.map(String)).size !== resourceIds.length");
+    expect(source).toContain("This booking request already has a pending counter-offer.");
+  });
 });

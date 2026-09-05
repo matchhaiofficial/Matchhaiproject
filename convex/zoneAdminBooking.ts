@@ -2545,6 +2545,17 @@ export const sendCounterOffer = mutation({
     if (!branchId || !resourceIds.length) {
       throw new Error("Select a branch and resources before sending an alternative time.");
     }
+    if (new Set(resourceIds.map(String)).size !== resourceIds.length) {
+      throw new Error("Each selected resource must be unique.");
+    }
+    const existingPendingOffer = (await ctx.db
+      .query("zoneOffers")
+      .withIndex("by_requestId", (q: any) => q.eq("requestId", args.requestId))
+      .collect())
+      .find((offer: any) => offer.status === "pending");
+    if (existingPendingOffer) {
+      throw new Error("This booking request already has a pending counter-offer.");
+    }
     const canonicalBranch = getCanonicalZoneBranch(zone, branchId);
     const primaryStartAt = primaryOption.startAt;
     await assertSelectedResourcesAvailableForSlot(ctx, {
@@ -2641,13 +2652,13 @@ export const sendCounterOffer = mutation({
       });
     }
 
-    if (isBroadcastRequest) {
-      await ctx.scheduler.runAfter(
-        expiresAt - now,
-        internal.matchroomBroadcast.expireBroadcastCounterOffer,
-        { offerId },
-      );
-    }
+    await ctx.scheduler.runAt(
+      expiresAt,
+      isBroadcastRequest
+        ? internal.matchroomBroadcast.expireBroadcastCounterOffer
+        : internal.zoneAdminBooking.expireDirectCounterOffer,
+      { offerId },
+    );
 
     await recordZoneAuditEvent(ctx, {
       zoneId: String(args.zoneId),
@@ -2675,6 +2686,48 @@ export const sendCounterOffer = mutation({
     });
 
     return String(offerId);
+  },
+});
+
+export const expireDirectCounterOffer = internalMutation({
+  args: { offerId: v.id("zoneOffers") },
+  handler: async (ctx, args) => {
+    const offer = await ctx.db.get(args.offerId);
+    if (!offer || offer.status !== "pending" || offer.requestKind === "broadcast_fanout") {
+      return { expired: false };
+    }
+    const expiresAt = Number(offer.expiresAt || offer.responseExpiresAt || 0);
+    const now = Date.now();
+    if (Number.isFinite(expiresAt) && expiresAt > now) {
+      await ctx.scheduler.runAt(expiresAt, internal.zoneAdminBooking.expireDirectCounterOffer, {
+        offerId: args.offerId,
+      });
+      return { expired: false, rescheduled: true };
+    }
+
+    const request = await ctx.db.get(offer.requestId);
+    await ctx.db.patch(args.offerId, { status: "expired", updatedAt: now });
+    if (request) {
+      await releaseHeldResourcesForRequest(ctx, request, now);
+      await patchBookingRequestWithLifecycleDueAt(ctx, request, {
+        lifecycleStatus: "counter_offer_expired",
+        responseExpiresAt: undefined,
+        updatedAt: now,
+      }, now);
+      await patchOfferNotifications(ctx, {
+        offerId: String(args.offerId),
+        recipientUids: Array.isArray(offer.recipientUids) ? offer.recipientUids.map(String) : [],
+        status: "expired",
+      });
+      await notifyZoneOfferOutcome(ctx, {
+        offer,
+        request,
+        status: "expired",
+        title: "Counter-offer expired",
+        body: "The counter-offer expired before every recipient accepted it.",
+      });
+    }
+    return { expired: true };
   },
 });
 
