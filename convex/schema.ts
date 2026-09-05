@@ -607,6 +607,8 @@ export default defineSchema({
     scheduledStartAt: v.optional(v.number()),
     lockAt: v.optional(v.number()),
     lifecycleDueAt: v.optional(v.number()),
+    lifecycleScheduledAt: v.optional(v.number()),
+    lifecycleScheduledFnId: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
     durationMinutes: v.optional(v.number()),
     pricing: v.object({
@@ -693,6 +695,8 @@ export default defineSchema({
     venuePayoutAt: v.optional(v.number()),
     venuePayoutAmount: v.optional(v.number()),
     venuePayoutReference: v.optional(v.string()),
+    venuePayoutEligibleAt: v.optional(v.number()),
+    venuePayoutScheduledFnId: v.optional(v.string()),
 
     // Result verification
     resultVerification: v.optional(v.object({
@@ -1201,6 +1205,8 @@ export default defineSchema({
     zoneName: v.optional(v.string()),
     scheduledAt: v.optional(v.number()),
     lifecycleDueAt: v.optional(v.number()),
+    lifecycleScheduledAt: v.optional(v.number()),
+    lifecycleScheduledFnId: v.optional(v.string()),
 
     // Result
     result: v.optional(
@@ -1217,6 +1223,8 @@ export default defineSchema({
   })
     .index("by_challengerTeamId", ["challengerTeamId"])
     .index("by_opponentTeamId", ["opponentTeamId"])
+    .index("by_captainAUid_and_createdAt", ["captainAUid", "createdAt"])
+    .index("by_captainBUid_and_createdAt", ["captainBUid", "createdAt"])
     .index("by_status", ["status"])
     .index("by_status_and_lifecycleDueAt", ["status", "lifecycleDueAt"])
     .index("by_matchroomId", ["matchroomId"]),

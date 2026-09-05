@@ -466,10 +466,6 @@ function serializeAdminZoneWithdrawal(row: any) {
     bankName: metadata.bankName || null,
     accountNumberMasked: metadata.accountNumberMasked || null,
     accountNumberLast4: metadata.accountNumberLast4 || null,
-    // Full payout account number (Super-Admin-only serializer) so the reviewer can
-    // execute the bank transfer. Older requests created before this field was
-    // persisted will be null; the request email still carries the full number.
-    accountNumberFull: metadata.accountNumberFull || null,
     ownerName: metadata.ownerName || null,
     ownerEmail: metadata.ownerEmail || null,
     adminDecision: metadata.adminDecision || null,
@@ -506,8 +502,6 @@ function serializeAdminZoneWithdrawalEnriched(
     bankName: metadata.bankName || null,
     accountNumberMasked: metadata.accountNumberMasked || null,
     accountNumberLast4: metadata.accountNumberLast4 || null,
-    // Full payout account number (Super-Admin-only) for executing the transfer.
-    accountNumberFull: metadata.accountNumberFull || null,
     // Owner identity — metadata stored at request time, verified from user record
     ownerName: metadata.ownerName || user?.fullName || user?.username || null,
     ownerEmail: metadata.ownerEmail || user?.email || null,
@@ -2419,6 +2413,27 @@ export const listZoneWithdrawalRequestsPage = query({
   },
 });
 
+export const getZoneWithdrawalPayoutDetails = query({
+  args: {
+    sessionToken: v.string(),
+    withdrawalId: v.id("walletTransactions"),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const withdrawal = await ctx.db.get(args.withdrawalId);
+    if (!withdrawal || !isZoneWithdrawalRequest(withdrawal)) {
+      throw new Error("Withdrawal request not found.");
+    }
+    const metadata = withdrawal.metadata || {};
+    return {
+      withdrawalId: withdrawal._id,
+      bankName: metadata.bankName || null,
+      accountNumberFull: metadata.accountNumberFull || null,
+      accountNumberMasked: metadata.accountNumberMasked || null,
+    };
+  },
+});
+
 export const listZoneFinanceSummaries = query({
   args: {
     sessionToken: v.string(),
@@ -2683,22 +2698,28 @@ export const approveZoneWithdrawal = mutation({
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error("Invalid withdrawal amount.");
     }
-    if (!Number.isFinite(currentBalance) || currentBalance < amount) {
+    const fundsReserved = Boolean(withdrawal.metadata?.fundsReservedAt);
+    if (!fundsReserved && (!Number.isFinite(currentBalance) || currentBalance < amount)) {
       throw new Error("Wallet balance is no longer sufficient for this withdrawal.");
     }
 
     const now = Date.now();
-    await ctx.db.patch(user._id, {
-      walletBalance: currentBalance - amount,
-      updatedAt: now,
-    });
+    if (!fundsReserved) {
+      await ctx.db.patch(user._id, {
+        walletBalance: currentBalance - amount,
+        updatedAt: now,
+      });
+    }
     await ctx.db.patch(args.withdrawalId, {
       status: "completed",
-      metadata: buildWithdrawalDecisionMetadata(withdrawal, {
-        adminUserId: admin.profile._id,
-        decision: "approved",
-        now,
-      }),
+      metadata: {
+        ...buildWithdrawalDecisionMetadata(withdrawal, {
+          adminUserId: admin.profile._id,
+          decision: "approved",
+          now,
+        }),
+        fundsReservationStatus: "captured",
+      },
     });
 
     await notifyZoneAdminWithdrawalDecision(ctx, {
@@ -2764,14 +2785,25 @@ export const rejectZoneWithdrawal = mutation({
     }
 
     const now = Date.now();
+    const user = await ctx.db.get(withdrawal.userId);
+    if (withdrawal.metadata?.fundsReservedAt) {
+      if (!user) throw new Error("Withdrawal owner not found.");
+      await ctx.db.patch(user._id, {
+        walletBalance: Number(user.walletBalance || 0) + Number(withdrawal.amount || 0),
+        updatedAt: now,
+      });
+    }
     await ctx.db.patch(args.withdrawalId, {
       status: "failed",
-      metadata: buildWithdrawalDecisionMetadata(withdrawal, {
-        adminUserId: admin.profile._id,
-        decision: "rejected",
-        now,
-        rejectionReasonSafe: reason,
-      }),
+      metadata: {
+        ...buildWithdrawalDecisionMetadata(withdrawal, {
+          adminUserId: admin.profile._id,
+          decision: "rejected",
+          now,
+          rejectionReasonSafe: reason,
+        }),
+        fundsReservationStatus: withdrawal.metadata?.fundsReservedAt ? "released" : "not_reserved",
+      },
     });
 
     await notifyZoneAdminWithdrawalDecision(ctx, {
@@ -4007,11 +4039,60 @@ export const resolveSupportTicket = mutation({
 // Shared core for account deletion. Anonymizes PII in both the Convex users table
 // and the Better Auth auth record, then revokes all active sessions.
 // Financial/KYC/audit records are intentionally retained for legal compliance.
+async function assertAccountDeletionIsSafe(ctx: any, user: any) {
+  const availableBalance = Number(user.walletBalance || 0);
+  const heldBalance = Number(user.walletHeldBalance || 0);
+  if (availableBalance !== 0 || heldBalance !== 0) {
+    throw new Error("Account deletion is blocked until wallet funds and active holds are fully settled.");
+  }
+
+  const pendingTransaction = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_userId_and_status", (q: any) => q.eq("userId", user._id).eq("status", "pending"))
+    .first();
+  if (pendingTransaction) {
+    throw new Error("Account deletion is blocked while a wallet transaction is pending.");
+  }
+
+  const memberships = await ctx.db
+    .query("matchroomMembers")
+    .withIndex("by_uid", (q: any) => q.eq("uid", String(user._id)))
+    .take(100);
+  for (const membership of memberships) {
+    const room = await ctx.db.get(membership.matchroomId);
+    if (room && ["open", "locked", "in-progress"].includes(String(room.status))) {
+      throw new Error("Account deletion is blocked until active matchrooms are completed or cancelled.");
+    }
+  }
+}
+
 async function applyAccountDeletion(ctx: any, user: any, now: number) {
   const shortId = String(user._id).slice(-8);
   const anonEmail = `deleted_${shortId}@deleted.matchhai.internal`;
 
-  // 1. Anonymize Convex user record.
+  await assertAccountDeletionIsSafe(ctx, user);
+
+  // 1. Anonymize the auth identity and revoke sessions. These operations are
+  // required; never resolve a deletion request while a usable login remains.
+  if (user.authId) {
+    await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+      input: {
+        model: "user",
+        where: [{ field: "_id", operator: "eq", value: user.authId }],
+        update: { email: anonEmail, name: "Deleted User", updatedAt: now },
+      },
+    });
+
+    await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+      input: {
+        model: "session",
+        where: [{ field: "userId", operator: "eq", value: user.authId }],
+      },
+      paginationOpts: { cursor: null, numItems: 500 },
+    });
+  }
+
+  // 2. Anonymize Convex user record.
   await ctx.db.patch(user._id, {
     fullName: "Deleted User",
     username: `deleted_${shortId}`,
@@ -4041,30 +4122,6 @@ async function applyAccountDeletion(ctx: any, user: any, now: number) {
     suspensionReason: "account_deletion_processed",
     updatedAt: now,
   });
-
-  // 2. Anonymize Better Auth auth record and revoke all sessions.
-  // Wrapped in try/catch so Convex changes persist even if auth ops fail.
-  if (user.authId) {
-    try {
-      await ctx.runMutation(components.betterAuth.adapter.updateOne, {
-        input: {
-          model: "user",
-          where: [{ field: "_id", operator: "eq", value: user.authId }],
-          update: { email: anonEmail, name: "Deleted User", updatedAt: now },
-        },
-      });
-    } catch {}
-
-    try {
-      await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
-        input: {
-          model: "session",
-          where: [{ field: "userId", operator: "eq", value: user.authId }],
-        },
-        paginationOpts: { cursor: null, numItems: 500 },
-      });
-    } catch {}
-  }
 
   return { shortId, anonEmail };
 }

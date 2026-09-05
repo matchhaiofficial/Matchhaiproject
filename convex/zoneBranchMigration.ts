@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
+import { requireOwnedZone } from "./authz";
 
 // ============================================
 // QUERIES
@@ -11,8 +12,7 @@ import { requireKycVerified } from "./kycGate";
 export const getZoneBranches = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) return [];
+    const { zone } = await requireOwnedZone(ctx, args.zoneId);
 
     const branches = Array.isArray(zone.branches) ? zone.branches : [];
     return branches.map((b: any, index: number) => ({
@@ -211,22 +211,14 @@ export const migrateZoneBranches = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found.");
-
-    if (String(zone.ownerUid) !== args.ownerUid) {
-      const user = await ctx.db.get(zone.ownerUid);
-      if (!user || user.authId !== args.ownerUid) {
-        throw new Error("Only the zone owner can run migration.");
-      }
-    }
+    const { user: actor } = await requireOwnedZone(ctx, args.zoneId);
 
     const result = await migrateZoneBranchesInternal(ctx, args.zoneId);
     await recordZoneAuditEvent(ctx, {
       zoneId: String(args.zoneId),
       module: "migration",
       action: result.skipped ? "run_branch_migration_skipped" : "run_branch_migration",
-      actorUid: args.ownerUid,
+      actorUid: String(actor._id),
       targetType: "zone",
       targetId: String(args.zoneId),
       summary: result.skipped

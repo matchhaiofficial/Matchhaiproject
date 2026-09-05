@@ -30,7 +30,6 @@
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECORD_AUDIO",
-        "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "blockedPermissions": [
@@ -41,7 +40,6 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": false,
-      "navigationBarColor": "#121212",
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize"
     },

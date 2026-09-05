@@ -6,39 +6,52 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "environment": "development",
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://acrobatic-bison-271.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://acrobatic-bison-271.convex.site",
+        "EXPO_PUBLIC_APP_SCHEME": "matchhai",
+        "EXPO_PUBLIC_ENV": "development",
+        "EXPO_PUBLIC_TOUCH_DEBUG": "0"
+      }
     },
     "ios-simulator": {
       "distribution": "internal",
+      "environment": "development",
       "ios": {
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_CONVEX_URL": "https://nautical-ibex-721.convex.cloud",
-        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://nautical-ibex-721.convex.site",
+        "EXPO_PUBLIC_CONVEX_URL": "https://acrobatic-bison-271.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://acrobatic-bison-271.convex.site",
         "EXPO_PUBLIC_APP_SCHEME": "matchhai",
+        "EXPO_PUBLIC_ENV": "development",
         "EXPO_PUBLIC_TOUCH_DEBUG": "0"
       }
     },
     "preview": {
       "distribution": "internal",
+      "environment": "preview",
       "android": {
         "buildType": "apk"
       },
-        "env": {
+      "env": {
         "EXPO_PUBLIC_CONVEX_URL": "https://acrobatic-bison-271.convex.cloud",
         "EXPO_PUBLIC_CONVEX_SITE_URL": "https://acrobatic-bison-271.convex.site",
         "EXPO_PUBLIC_APP_SCHEME": "matchhai",
-        "EXPO_PUBLIC_SUPER_ADMIN_EMAIL": "superadmin@matchhai.com",
+        "EXPO_PUBLIC_ENV": "preview",
         "EXPO_PUBLIC_TOUCH_DEBUG": "0"
       }
     },
     "production": {
       "autoIncrement": true,
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_CONVEX_URL": "https://nautical-ibex-721.convex.cloud",
         "EXPO_PUBLIC_CONVEX_SITE_URL": "https://nautical-ibex-721.convex.site",
         "EXPO_PUBLIC_APP_SCHEME": "matchhai",
+        "EXPO_PUBLIC_ENV": "production",
         "EXPO_PUBLIC_TOUCH_DEBUG": "0"
       }
     }

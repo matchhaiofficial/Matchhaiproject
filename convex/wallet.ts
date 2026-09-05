@@ -347,16 +347,31 @@ export const createZoneWithdrawalTransaction = mutation({
       "Branch",
     ).trim();
     const walletBalance = Number(user.walletBalance || 0);
-    if (walletBalance < args.amount) {
+    const amount = Math.round(Number(args.amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("Withdrawal amount must be positive.");
+    }
+    if (walletBalance < amount) {
       throw new Error("Withdrawal amount cannot exceed wallet balance.");
     }
+    const accountNumberFull = String(args.accountNumberFull || "").trim().replace(/[^0-9 -]/g, "");
+    const compactAccountNumber = accountNumberFull.replace(/[\s-]/g, "");
+    if (compactAccountNumber.length < 6 || compactAccountNumber.length > 34) {
+      throw new Error("Please enter a valid account number.");
+    }
+    const accountNumberLast4 = compactAccountNumber.slice(-4);
+    const accountNumberMasked = `${"*".repeat(Math.max(2, compactAccountNumber.length - 4))}${accountNumberLast4}`;
 
     const now = Date.now();
     const reference = `zone_withdrawal_${String(user._id)}_${now}`;
+    await ctx.db.patch(user._id, {
+      walletBalance: walletBalance - amount,
+      updatedAt: now,
+    });
     const withdrawalId = await ctx.db.insert("walletTransactions", {
       userId: user._id,
       type: "withdrawal",
-      amount: args.amount,
+      amount,
       status: "pending",
       reference,
       metadata: {
@@ -364,13 +379,14 @@ export const createZoneWithdrawalTransaction = mutation({
         zoneId: String(zone._id),
         branchId: args.branchId,
         branchName: safeBranchName,
-        bankName: args.bankName,
-        accountNumberMasked: args.accountNumberMasked,
-        accountNumberLast4: args.accountNumberLast4,
-        accountNumberFull: args.accountNumberFull || null,
-        ownerName: args.ownerName || user.fullName || user.username || null,
-        ownerEmail: args.ownerEmail || user.email || null,
-        venueName: args.venueName || null,
+        bankName: String(args.bankName || "").trim().slice(0, 80),
+        accountNumberMasked,
+        accountNumberLast4,
+        accountNumberFull,
+        ownerName: user.fullName || user.username || null,
+        ownerEmail: user.email || null,
+        venueName: zone.venueBrandName || zone.name || null,
+        fundsReservedAt: now,
       },
       createdAt: now,
     });
@@ -378,7 +394,20 @@ export const createZoneWithdrawalTransaction = mutation({
     await notifySuperAdminsWithdrawalReviewNeeded(ctx, { withdrawalId });
     await notifyZoneAdminWithdrawalRequested(ctx, { withdrawalId, zoneAdminUserId: user._id });
 
-    return { reference, createdAt: now, walletBalance };
+    return {
+      reference,
+      createdAt: now,
+      walletBalance: walletBalance - amount,
+      amount,
+      bankName: String(args.bankName || "").trim().slice(0, 80),
+      accountNumberMasked,
+      branchId: args.branchId,
+      branchName: safeBranchName,
+      ownerName: user.fullName || user.username || null,
+      ownerEmail: user.email || null,
+      venueName: zone.venueBrandName || zone.name || null,
+      zoneId: String(zone._id),
+    };
   },
 });
 

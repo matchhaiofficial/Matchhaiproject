@@ -42,7 +42,7 @@ import {
   withBookingRequestLifecycleDueAt,
   withTeamChallengeLifecycleDueAt,
 } from "./maintenanceDue";
-import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
+import { isMaintenanceJobEnabled } from "./runtimeEnv";
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -335,14 +335,12 @@ async function completeMatchroomForResultVerification(
     updatedAt: now,
   });
 
-  const completedRoom = await ctx.db.get(matchroomId);
   await captureHeldBookingIntentsForMatchroom(ctx, matchroomId);
   await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
     matchroomId,
     action: "capture",
     reason: "matchroom_completed",
   });
-  await payVenueWalletForCompletedMatchroom(ctx, matchroomId, completedRoom);
 
   return { ok: true, changed: true, status: "completed" as const };
 }
@@ -420,10 +418,6 @@ function resolveResultCaptains(room: any, rv: any = {}) {
     "",
   );
   return { team1Captain, team2Captain };
-}
-
-function chooseRandomWinner() {
-  return Math.random() < 0.5 ? "team1" as const : "team2" as const;
 }
 
 async function notifyResultFinalized(ctx: any, room: any, winner: "team1" | "team2", source: string) {
@@ -956,8 +950,18 @@ async function finalizeMatchroomResult(
     resolutionSource: source,
   };
 
+  const venuePayoutEligibleAt = now + ONE_DAY_MS;
+  const venuePayoutScheduledFnId = room.zoneOwnerUid
+    ? await ctx.scheduler.runAt(
+        venuePayoutEligibleAt,
+        internal.matchrooms.settleVenuePayoutAfterResult,
+        { matchroomId },
+      )
+    : null;
   await ctx.db.patch(matchroomId, {
     resultVerification: nextVerification,
+    venuePayoutEligibleAt: room.zoneOwnerUid ? venuePayoutEligibleAt : undefined,
+    venuePayoutScheduledFnId: venuePayoutScheduledFnId ? String(venuePayoutScheduledFnId) : undefined,
     lifecycleDueAt: undefined,
     updatedAt: now,
   });
@@ -1515,6 +1519,16 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
       paidAt: room.venuePayoutAt || null,
     };
   }
+  if (room.resultVerification?.status !== "resolved") {
+    return { status: "pending", reason: "result_not_resolved" };
+  }
+  const eligibleAt = Number(
+    room.venuePayoutEligibleAt
+      || (Number(room.resultVerification?.resolvedAt || 0) + ONE_DAY_MS),
+  );
+  if (!Number.isFinite(eligibleAt) || eligibleAt > Date.now()) {
+    return { status: "pending", reason: "clearing_window", eligibleAt };
+  }
 
   const owner = await resolveUserByAnyId(ctx, String(room.zoneOwnerUid));
   if (!owner) return null;
@@ -1595,6 +1609,16 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
   });
   return { status: "paid", reference, amount: payoutAmount, paidAt: now };
 }
+
+export const settleVenuePayoutAfterResult = internalMutation({
+  args: { matchroomId: v.id("matchrooms") },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return { ok: false, reason: "matchroom_not_found" };
+    const result = await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, room);
+    return { ok: true, result };
+  },
+});
 
 function getBookingHoldReference(intentId: Id<"bookingIntents">, sourceReference?: string | null) {
   const source = String(sourceReference || "wallet").replace(/[^a-zA-Z0-9:_-]/g, "_");
@@ -4037,6 +4061,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   await syncMatchroomMembers(ctx, matchroomId, normalizedPlayerUids);
   const insertedRoom = await ctx.db.get(matchroomId);
   if (insertedRoom) {
+    await scheduleNextMatchroomLifecycle(ctx, insertedRoom);
     await scheduleNewMatchroomAreaNotifications(ctx, matchroomId, insertedRoom, args);
   }
 
@@ -4165,45 +4190,55 @@ export const createTeamChallengeMatchroom = internalMutation({
     const now = Date.now();
     const scheduledStartAt = typeof challenge.scheduledAt === "number" ? challenge.scheduledAt : undefined;
 
-    const buildCaptainPlayer = async (uid: any, name: any) => {
+    const buildLineupPlayer = async (uid: any, fallbackName: any, teamLetter: "A" | "B") => {
       const user = uid ? await resolveUserByAnyId(ctx, String(uid)) : null;
-      const resolvedUid = user ? String(user._id) : String(uid || "");
+      if (!user) return null;
+      const resolvedUid = String(user._id);
       const skill = user ? getSkillScoreForGame(user, game) : null;
+      const isCaptain = resolvedUid === String(teamLetter === "A" ? challenge.captainAUid : challenge.captainBUid);
       return {
         uid: resolvedUid,
-        username: String(name || user?.username || user?.fullName || "Captain"),
+        username: String(user?.username || user?.fullName || (isCaptain ? fallbackName : "Player")),
         joinedAt: now,
-        role: "Captain",
+        role: isCaptain ? "Captain" : `Team ${teamLetter}`,
         skillTier: typeof skill?.tier === "string" ? skill.tier : undefined,
       };
     };
-    const captainA = await buildCaptainPlayer(challenge.captainAUid, challenge.captainAName);
-    const captainB = await buildCaptainPlayer(challenge.captainBUid, challenge.captainBName);
-    const players = [captainA, captainB].filter((p) => p.uid);
+    const lineupA = Array.isArray(challenge.lineupA) ? Array.from(new Set(challenge.lineupA.map(String))) : [];
+    const lineupB = Array.isArray(challenge.lineupB) ? Array.from(new Set(challenge.lineupB.map(String))) : [];
+    if (
+      lineupA.length !== teamSize
+      || lineupB.length !== teamSize
+      || !lineupA.includes(String(challenge.captainAUid))
+      || !lineupB.includes(String(challenge.captainBUid))
+    ) {
+      return { ok: false, reason: "invalid_lineup" };
+    }
+    const teamAPlayers = (await Promise.all(
+      lineupA.map((uid) => buildLineupPlayer(uid, challenge.captainAName, "A")),
+    )).filter(Boolean) as any[];
+    const teamBPlayers = (await Promise.all(
+      lineupB.map((uid) => buildLineupPlayer(uid, challenge.captainBName, "B")),
+    )).filter(Boolean) as any[];
+    if (teamAPlayers.length !== teamSize || teamBPlayers.length !== teamSize) {
+      return { ok: false, reason: "lineup_user_missing" };
+    }
+    const players = [...teamAPlayers, ...teamBPlayers];
     const playerUids = Array.from(new Set(players.map((p) => p.uid)));
 
-    const buildSlots = (teamLetter: "A" | "B", captain: { uid: string; username: string; skillTier?: string } | null) => {
-      const slots: any[] = [];
-      for (let i = 0; i < teamSize; i++) {
-        const slotId = `${teamLetter}${i + 1}`;
-        if (i === 0 && captain?.uid) {
-          slots.push({
-            slotId,
-            uid: captain.uid,
-            user: { uid: captain.uid, username: captain.username, skillTier: captain.skillTier },
-            status: "confirmed" as const,
-            role: "Captain",
-          });
-        } else {
-          slots.push({ slotId, status: "open" as const });
-        }
-      }
-      return slots;
-    };
+    const buildSlots = (teamLetter: "A" | "B", lineupPlayers: any[]) => lineupPlayers.map((player, index) => ({
+      slotId: `${teamLetter}${index + 1}`,
+      uid: player.uid,
+      user: { uid: player.uid, username: player.username, skillTier: player.skillTier },
+      status: "confirmed" as const,
+      role: player.role,
+    }));
 
     const skillStats = await buildRoomSkillStats(ctx, game, playerUids);
-    const slotsA = buildSlots("A", captainA.uid ? captainA : null);
-    const slotsB = buildSlots("B", captainB.uid ? captainB : null);
+    const slotsA = buildSlots("A", teamAPlayers);
+    const slotsB = buildSlots("B", teamBPlayers);
+    const captainA = teamAPlayers.find((player) => player.uid === String(challenge.captainAUid))!;
+    const captainB = teamBPlayers.find((player) => player.uid === String(challenge.captainBUid))!;
     const lockAt = getMatchroomLockAt(scheduledStartAt) || undefined;
 
     const matchroomId = await ctx.db.insert("matchrooms", {
@@ -4213,7 +4248,7 @@ export const createTeamChallengeMatchroom = internalMutation({
       title: `${challenge.challengerTeamName || "Team A"} vs ${challenge.opponentTeamName || "Team B"}`,
       status: "open",
       maxPlayers,
-      currentPlayers: players.length,
+      currentPlayers: maxPlayers,
       players,
       playerUids,
       location: venue.venueName || zone.name || "Zone",
@@ -4266,6 +4301,8 @@ export const createTeamChallengeMatchroom = internalMutation({
     });
 
     await syncMatchroomMembers(ctx, matchroomId, playerUids);
+    const insertedRoom = await ctx.db.get(matchroomId);
+    if (insertedRoom) await scheduleNextMatchroomLifecycle(ctx, insertedRoom);
 
     await ctx.db.patch(args.challengeId, withTeamChallengeLifecycleDueAt(challenge, {
       matchroomId,
@@ -4701,13 +4738,11 @@ export const submitCaptainReport = mutation({
 
       const participantUids = getMatchroomPlayerUids(room);
       if (participantUids.length <= 2) {
-        return await finalizeMatchroomResult(
+        return await markInvalidResultVerificationForAdminReview(
           ctx,
           args.matchroomId,
-          room,
-          nextRv,
-          chooseRandomWinner(),
-          "two_player_random_tiebreak",
+          { ...room, resultVerification: nextRv },
+          "captain_reports_disagree",
         );
       }
 
@@ -4801,13 +4836,11 @@ export const submitParticipantVote = mutation({
     }
 
     if (submittedCount >= participantUids.length && team1Votes === team2Votes) {
-      return await finalizeMatchroomResult(
+      return await markInvalidResultVerificationForAdminReview(
         ctx,
         args.matchroomId,
-        room,
-        nextRv,
-        chooseRandomWinner(),
-        "participant_random_tiebreak",
+        { ...room, resultVerification: nextRv },
+        "participant_vote_tied",
       );
     }
 
@@ -5132,6 +5165,110 @@ export const inviteToMatchroom = mutation({
   },
 });
 
+async function scheduleNextMatchroomLifecycle(ctx: any, room: any) {
+  const dueAt = Number(room?.lifecycleDueAt || 0);
+  if (!room?._id || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
+  if (Number(room.lifecycleScheduledAt || 0) === dueAt && room.lifecycleScheduledFnId) return;
+  const scheduledId = await ctx.scheduler.runAt(
+    Math.max(Date.now(), dueAt),
+    internal.matchrooms.processScheduledLifecycle,
+    { matchroomId: room._id, expectedDueAt: dueAt },
+  );
+  await ctx.db.patch(room._id, {
+    lifecycleScheduledAt: dueAt,
+    lifecycleScheduledFnId: String(scheduledId),
+  });
+}
+
+async function processMatchroomLifecycle(ctx: any, matchroomId: Id<"matchrooms">, room: any) {
+  const now = Date.now();
+  const scheduledStartAt = room.scheduledStartAt || room.startTime;
+  const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
+  let changed = false;
+
+  if (shouldExpireForNotFull(room, now)) {
+    await expireMatchroomForInvalidLifecycle(ctx, matchroomId, room, "scheduled_start_roster_incomplete");
+    return { changed: true, status: "expired" as const };
+  }
+  if (shouldExpireInProgressRoom(room, now)) {
+    await expireMatchroomForInvalidLifecycle(ctx, matchroomId, room, "in_progress_roster_incomplete");
+    return { changed: true, status: "expired" as const };
+  }
+
+  const startValidation = canStartMatchroom(room, now);
+  if (startValidation.ok) {
+    await ctx.db.patch(matchroomId, withLifecycleDueAt(room, {
+      status: "in-progress",
+      startTime: room.startTime || scheduledStartAt,
+      startedAt: now,
+      startedWithFullRoster: true,
+      startedPlayerCount: getConfirmedPlayerCount(room),
+      captainUidA: room.captainUidA || room.hostUid,
+      lifecycleScheduledAt: undefined,
+      lifecycleScheduledFnId: undefined,
+      updatedAt: now,
+    }, now));
+    changed = true;
+  }
+
+  const refreshedRoom = changed ? await ctx.db.get(matchroomId) : room;
+  if (!refreshedRoom) return { changed };
+  const effectiveStart = refreshedRoom.startTime || refreshedRoom.scheduledStartAt;
+  const completeDue = refreshedRoom.status === "in-progress"
+    && effectiveStart
+    && effectiveStart + durationMinutes * 60 * 1000 <= now;
+  const completeValidation = canCompleteMatchroom(refreshedRoom, now);
+  if (completeDue && !completeValidation.ok) {
+    await expireMatchroomForInvalidLifecycle(ctx, matchroomId, refreshedRoom, `invalid_in_progress_${completeValidation.reason}`);
+    return { changed: true, status: "expired" as const };
+  }
+  if (
+    refreshedRoom.locationMode === "broadcast"
+    && refreshedRoom.broadcastRequestStatus === "waiting_for_zones"
+    && refreshedRoom.broadcastRequestExpiresAt
+    && refreshedRoom.broadcastRequestExpiresAt <= now
+  ) {
+    await finalizeBroadcastFailure(ctx, matchroomId, "no_zone_response");
+    return { changed: true };
+  }
+  if (completeValidation.ok) {
+    const teamTwoCaptain = refreshedRoom.captainUidB
+      || refreshedRoom.players?.find((player: any) => player.uid !== refreshedRoom.hostUid)?.uid;
+    if ((!refreshedRoom.captainUidA && !refreshedRoom.hostUid) || !teamTwoCaptain) {
+      await markInvalidResultVerificationForAdminReview(ctx, matchroomId, refreshedRoom, "missing_result_captains");
+      return { changed: true, status: "admin_review" as const };
+    }
+    const result = await completeMatchroomForResultVerification(ctx, matchroomId, refreshedRoom, now);
+    if (!result.ok) {
+      await markInvalidResultVerificationForAdminReview(ctx, matchroomId, refreshedRoom, result.reason || "completion_failed");
+      return { changed: true, status: "admin_review" as const };
+    }
+    changed = result.changed;
+  }
+  return { changed };
+}
+
+export const processScheduledLifecycle = internalMutation({
+  args: { matchroomId: v.id("matchrooms"), expectedDueAt: v.number() },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return { changed: false, missing: true };
+    if (Number(room.lifecycleScheduledAt || 0) !== args.expectedDueAt) {
+      return { changed: false, stale: true };
+    }
+    await ctx.db.patch(room._id, { lifecycleScheduledAt: undefined, lifecycleScheduledFnId: undefined });
+    if (Number(room.lifecycleDueAt || 0) > Date.now()) {
+      const fresh = await ctx.db.get(room._id);
+      if (fresh) await scheduleNextMatchroomLifecycle(ctx, fresh);
+      return { changed: false, early: true };
+    }
+    const result = await processMatchroomLifecycle(ctx, room._id, room);
+    const fresh = await ctx.db.get(room._id);
+    if (fresh) await scheduleNextMatchroomLifecycle(ctx, fresh);
+    return result;
+  },
+});
+
 export const syncLifecycleIfDue = mutation({
   args: {
     matchroomId: v.id("matchrooms"),
@@ -5162,99 +5299,10 @@ export const syncLifecycleIfDue = mutation({
     }
     assertKycAccessAllowed(actor.user, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
-    const now = Date.now();
-    const scheduledStartAt = room.scheduledStartAt || room.startTime;
-    const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
-    let changed = false;
-
-    if (shouldExpireForNotFull(room, now)) {
-      await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "scheduled_start_roster_incomplete");
-      changed = true;
-      return { changed, status: "expired" };
-    }
-
-    if (shouldExpireInProgressRoom(room, now)) {
-      await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "in_progress_roster_incomplete");
-      changed = true;
-      return { changed, status: "expired" };
-    }
-
-    const startValidation = canStartMatchroom(room, now);
-    if (startValidation.ok) {
-      await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, {
-        status: "in-progress",
-        startTime: room.startTime || scheduledStartAt,
-        startedAt: now,
-        startedWithFullRoster: true,
-        startedPlayerCount: getConfirmedPlayerCount(room),
-        captainUidA: room.captainUidA || room.hostUid,
-        updatedAt: now,
-      }, now));
-      changed = true;
-    }
-
-    const refreshedRoom = changed ? await ctx.db.get(args.matchroomId) : room;
-    if (!refreshedRoom) return { changed };
-
-    const effectiveStart = refreshedRoom.startTime || refreshedRoom.scheduledStartAt;
-    const completeDue =
-      refreshedRoom.status === "in-progress" &&
-      effectiveStart &&
-      effectiveStart + durationMinutes * 60 * 1000 <= now;
-    const completeValidation = canCompleteMatchroom(refreshedRoom, now);
-    const shouldComplete = completeValidation.ok;
-
-    if (completeDue && !completeValidation.ok) {
-      await expireMatchroomForInvalidLifecycle(
-        ctx,
-        args.matchroomId,
-        refreshedRoom,
-        `invalid_in_progress_${completeValidation.reason}`,
-      );
-      return { changed: true, status: "expired" };
-    }
-
-    if (
-      refreshedRoom.locationMode === "broadcast" &&
-      refreshedRoom.broadcastRequestStatus === "waiting_for_zones" &&
-      refreshedRoom.broadcastRequestExpiresAt &&
-      refreshedRoom.broadcastRequestExpiresAt <= now
-    ) {
-      await finalizeBroadcastFailure(ctx, args.matchroomId, "no_zone_response");
-      changed = true;
-      return { changed };
-    }
-
-    if (shouldComplete) {
-      const teamTwoCaptain =
-        refreshedRoom.captainUidB ||
-        refreshedRoom.players?.find((player: any) => player.uid !== refreshedRoom.hostUid)?.uid ||
-        undefined;
-
-      if ((!refreshedRoom.captainUidA && !refreshedRoom.hostUid) || !teamTwoCaptain) {
-        await markInvalidResultVerificationForAdminReview(
-          ctx,
-          args.matchroomId,
-          refreshedRoom,
-          "missing_result_captains",
-        );
-        return { changed: true, status: "admin_review" };
-      }
-
-      const result = await completeMatchroomForResultVerification(ctx, args.matchroomId, refreshedRoom, now);
-      if (!result.ok) {
-        await markInvalidResultVerificationForAdminReview(
-          ctx,
-          args.matchroomId,
-          refreshedRoom,
-          result.reason || "completion_failed",
-        );
-        return { changed: true, status: "admin_review" };
-      }
-      changed = result.changed;
-    }
-
-    return { changed };
+    const scheduledResult = await processMatchroomLifecycle(ctx, args.matchroomId, room);
+    const latestRoom = await ctx.db.get(args.matchroomId);
+    if (latestRoom) await scheduleNextMatchroomLifecycle(ctx, latestRoom);
+    return scheduledResult;
   },
 });
 
@@ -6447,7 +6495,7 @@ export const runLifecycleSweep = internalMutation({
     const now = Date.now();
     // Keep the status scan available during the schema/backfill rollout. The
     // production flag is enabled only after every existing room has a due time.
-    const useIndexedSweep = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_LIFECYCLE_SWEEP");
+    const useIndexedSweep = true;
     let changedRooms = 0;
     let expiredNotifications = 0;
     let inspectedRooms = 0;

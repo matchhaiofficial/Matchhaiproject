@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import { authComponent } from "./auth";
+import { requireCurrentUser, requireSelf, requireSuperAdmin } from "./authz";
 import { EasypaisaTransactionType } from "./easypaisaRest";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
@@ -15,7 +15,7 @@ import {
   STALE_PAYMENT_RECONCILE_MAX_AGE_MS,
   withPaymentNextReconcileAt,
 } from "./maintenanceDue";
-import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
+import { isMaintenanceJobEnabled } from "./runtimeEnv";
 
 const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
 const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest").trim().toLowerCase();
@@ -154,7 +154,11 @@ function maskPhone(value?: string | null) {
 }
 
 function logGatewayDebug(event: string, payload: Record<string, unknown>) {
-  console.log(`[easypaisa] ${event}`, JSON.stringify(payload));
+  const sensitiveKey = /(auth|token|secret|password|phone|email|payload|request|response|url)/i;
+  const safePayload = Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, sensitiveKey.test(key) ? "[redacted]" : value]),
+  );
+  console.log(`[easypaisa] ${event}`, JSON.stringify(safePayload));
 }
 
 function getEmailDomain(email?: string | null) {
@@ -192,18 +196,16 @@ function buildAbsoluteUrl(path: string, token: string) {
 }
 
 function generateCheckoutToken() {
-  return [
-    Date.now().toString(36),
-    Math.random().toString(36).slice(2, 10),
-    Math.random().toString(36).slice(2, 10),
-  ].join("");
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function generateOrderRefNum(kind: PaymentKind) {
   const prefix = kind === "booking_intent" ? "MHB" : "MHW";
-  return `${prefix}${Date.now()}${Math.floor(Math.random() * 1000)
-    .toString()
-    .padStart(3, "0")}`;
+  const random = new Uint32Array(1);
+  crypto.getRandomValues(random);
+  return `${prefix}${Date.now()}${String(random[0] % 1_000_000_000).padStart(9, "0")}`;
 }
 
 function formatExpiryDate(timestamp: number) {
@@ -288,34 +290,14 @@ function redirectHtml(title: string, message: string, returnUrl: string) {
 }
 
 async function getAuthenticatedPaymentUser(ctx: any) {
-  const authUser = await authComponent.getAuthUser(ctx);
-  if (authUser?.userId) {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_authId", (q: any) => q.eq("authId", authUser.userId))
-      .unique();
-
-    if (user) {
-      return user;
-    }
-  }
-
-  throw new Error("Please sign in to continue.");
+  return (await requireCurrentUser(ctx)).user;
 }
 
 async function getPaymentUserWithFallback(ctx: any, fallbackUserId?: Id<"users">) {
-  try {
-    return await getAuthenticatedPaymentUser(ctx);
-  } catch {
-    if (fallbackUserId) {
-      const fallbackUser = await ctx.db.get(fallbackUserId);
-      if (fallbackUser) {
-        return fallbackUser;
-      }
-    }
+  if (fallbackUserId) {
+    return (await requireSelf(ctx, fallbackUserId)).user;
   }
-
-  throw new Error("Please sign in to continue.");
+  return await getAuthenticatedPaymentUser(ctx);
 }
 
 function isTerminalStatus(status: PaymentStatus) {
@@ -599,7 +581,7 @@ async function notifySuperAdminsPaymentAttentionRequired(ctx: any, input: {
     ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q: any) => q.eq("reference", `easypaisa:${orderRefNum}`))
-      .collect(),
+      .take(2),
     payment.bookingIntentId ? ctx.db.get(payment.bookingIntentId) : Promise.resolve(null),
   ]);
   const flags = collectPaymentAttentionFlags({
@@ -1076,7 +1058,8 @@ export const getStartCheckoutContext = internalQuery({
         .withIndex("by_createdByUid_matchroomId", (q: any) =>
           q.eq("createdByUid", user._id).eq("matchroomId", intent.matchroomId)
         )
-        .collect();
+        .order("desc")
+        .take(25);
       const duplicateIntent = relatedIntents.find((otherIntent: any) =>
         String(otherIntent._id) !== String(args.bookingIntentId)
         && isActiveUnpaidBookingIntent(otherIntent)
@@ -1142,7 +1125,8 @@ export const getStartCheckoutContext = internalQuery({
         const existing = await ctx.db
           .query("paymentTransactions")
           .withIndex("by_bookingIntentId", (q) => q.eq("bookingIntentId", bookingIntentId!))
-          .collect();
+          .order("desc")
+          .take(25);
         activeTransaction = chooseLatestActiveTransaction(existing, now);
       }
 
@@ -1157,7 +1141,66 @@ export const getStartCheckoutContext = internalQuery({
       };
     }
 
-    amount = Number(args.amount || 0);
+    let sanitizedTeamChallengeHold: any = undefined;
+    if (args.teamChallengeHold) {
+      const side = String(args.teamChallengeHold.side || "");
+      if (side !== "teamA" && side !== "teamB") {
+        throw new Error("Invalid team challenge payment side.");
+      }
+      let challenge: any = null;
+      try {
+        challenge = await ctx.db.get(args.teamChallengeHold.challengeId as Id<"teamChallenges">);
+      } catch {
+        challenge = null;
+      }
+      if (!challenge) throw new Error("Team challenge not found.");
+      const captainUid = side === "teamA" ? challenge.captainAUid : challenge.captainBUid;
+      if (!captainUid || String(captainUid) !== String(user._id)) {
+        throw new Error("Only this team's captain can start its payment.");
+      }
+      if (["rejected", "expired", "completed"].includes(String(challenge.status))) {
+        throw new Error("This team challenge is no longer active.");
+      }
+      if (side === "teamB") {
+        if (!["accepted", "venue_proposed", "venue_confirmed", "admin_pending"].includes(String(challenge.status))) {
+          throw new Error("Accept the challenge before paying for Team B.");
+        }
+        const teamAState = String(challenge.teamAPaymentState || "unpaid");
+        if (teamAState !== "held" && teamAState !== "captured") {
+          throw new Error("Waiting for Team A's payment.");
+        }
+      }
+
+      const teamSize = Math.max(1, Math.floor(Number(challenge.maxPlayers || 0) / 2));
+      const lineup = side === "teamA" ? challenge.lineupA : challenge.lineupB;
+      const teamId = side === "teamA" ? challenge.challengerTeamId : challenge.opponentTeamId;
+      const team: any = await ctx.db.get(teamId as Id<"teams">);
+      const lineupIds = Array.isArray(lineup) ? lineup.map(String) : [];
+      const uniqueLineupIds = new Set(lineupIds);
+      const members = team
+        ? await ctx.db.query("teamMembers").withIndex("by_teamId", (q) => q.eq("teamId", team._id)).take(100)
+        : [];
+      const memberIds = new Set(members.map((member: any) => String(member.odxerId)));
+      if (
+        !team
+        || lineupIds.length !== teamSize
+        || uniqueLineupIds.size !== teamSize
+        || !uniqueLineupIds.has(String(captainUid))
+        || lineupIds.some((uid: string) => !memberIds.has(uid))
+      ) {
+        throw new Error(`Select exactly ${teamSize} valid team players before paying.`);
+      }
+
+      amount = Math.ceil(Number(challenge.pricePerPlayer || 0) * teamSize);
+      sanitizedTeamChallengeHold = {
+        challengeId: String(challenge._id),
+        side,
+        captainUid: user._id,
+        amount,
+      };
+    } else {
+      amount = Number(args.amount || 0);
+    }
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error("Enter a valid top-up amount.");
     }
@@ -1180,7 +1223,8 @@ export const getStartCheckoutContext = internalQuery({
         const rows = await ctx.db
           .query("paymentTransactions")
           .withIndex("by_userId_and_status", (q) => q.eq("userId", user._id).eq("status", status))
-          .collect();
+          .order("desc")
+          .take(5);
         activeTopups.push(...rows.filter((transaction: any) =>
           transaction.kind === "wallet_topup"
           && isActiveCheckoutTransaction(transaction, now),
@@ -1189,7 +1233,11 @@ export const getStartCheckoutContext = internalQuery({
       activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
     }
 
-    if (shouldIgnoreActiveWalletTopupForRequest(activeTransaction, args, now)) {
+    if (shouldIgnoreActiveWalletTopupForRequest(
+      activeTransaction,
+      { ...args, amount, teamChallengeHold: sanitizedTeamChallengeHold },
+      now,
+    )) {
       activeTransaction = null;
     }
 
@@ -1205,6 +1253,7 @@ export const getStartCheckoutContext = internalQuery({
       amount,
       currency,
       activeTransaction,
+      teamChallengeHold: sanitizedTeamChallengeHold,
     };
   },
 });
@@ -1258,7 +1307,8 @@ export const createCheckoutTransactionWithLock = internalMutation({
       const existing = await ctx.db
         .query("paymentTransactions")
         .withIndex("by_bookingIntentId", (q) => q.eq("bookingIntentId", args.bookingIntentId!))
-        .collect();
+        .order("desc")
+        .take(25);
       const activeTransaction = chooseLatestActiveTransaction(existing, now);
       if (activeTransaction) {
         await ctx.db.patch(args.bookingIntentId, {
@@ -1304,7 +1354,8 @@ export const createCheckoutTransactionWithLock = internalMutation({
         const rows = await ctx.db
           .query("paymentTransactions")
           .withIndex("by_userId_and_status", (q) => q.eq("userId", args.userId).eq("status", status))
-          .collect();
+          .order("desc")
+          .take(5);
         activeTopups.push(...rows.filter((transaction: any) =>
           transaction.kind === "wallet_topup"
           && isActiveCheckoutTransaction(transaction, now),
@@ -1379,6 +1430,13 @@ export const createCheckoutTransactionWithLock = internalMutation({
     const transaction = await ctx.db.get(transactionId);
     if (!transaction) {
       throw new Error("Could not start the payment attempt.");
+    }
+    if (typeof transaction.nextReconcileAt === "number") {
+      await ctx.scheduler.runAt(
+        transaction.nextReconcileAt,
+        internal.easypaisa.reconcilePaymentByOrderRef,
+        { orderRefNum: transaction.orderRefNum },
+      );
     }
 
     if (args.kind === "booking_intent" && args.bookingIntentId) {
@@ -1630,7 +1688,7 @@ export const startCheckout = action({
       checkoutPhoneMasked: maskPhone(userPhone),
       matchroomCreateArgs: args.matchroomCreateArgs,
       zoneWalkInCreateArgs: args.zoneWalkInCreateArgs,
-      teamChallengeHold: args.teamChallengeHold,
+      teamChallengeHold: context.teamChallengeHold,
     });
     const transaction = checkoutStart.transaction;
     const attempt = String(checkoutStart.attempt || "created") as CheckoutAttempt;
@@ -1950,7 +2008,7 @@ export const listStaleActivePaymentTransactions = internalQuery({
     const floor = now - Math.max(0, args.maxAgeMs);
     const limit = Math.max(1, Math.min(Math.floor(args.limit), 50));
     const activeStatuses: PaymentStatus[] = ["created", "redirected", "token_received", "pending"];
-    const useIndexedReconciler = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_PAYMENT_RECONCILER");
+    const useIndexedReconciler = true;
     const out: Array<{ orderRefNum: string }> = [];
     for (const status of activeStatuses) {
       if (out.length >= limit) break;
@@ -2012,6 +2070,35 @@ export const claimPaymentForReconciliation = internalMutation({
     const nextReconcileAt = now + STALE_PAYMENT_RECONCILE_COOLDOWN_MS;
     await ctx.db.patch(row._id, { nextReconcileAt });
     return { ...row, nextReconcileAt };
+  },
+});
+
+export const reconcilePaymentByOrderRef = internalAction({
+  args: { orderRefNum: v.string() },
+  handler: async (ctx, args) => {
+    const row: any = await ctx.runMutation(
+      (internal as any).easypaisa.claimPaymentForReconciliation,
+      { orderRefNum: args.orderRefNum },
+    );
+    if (!row) return { ok: true, skipped: true };
+    try {
+      const result: any = await performProviderInquiryAndApply(ctx, row);
+      if (result?.shouldRetry) {
+        await ctx.scheduler.runAfter(
+          STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
+          internal.easypaisa.reconcilePaymentByOrderRef,
+          { orderRefNum: args.orderRefNum },
+        );
+      }
+      return { ok: true, status: result?.status || null };
+    } catch (error) {
+      await ctx.scheduler.runAfter(
+        STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
+        internal.easypaisa.reconcilePaymentByOrderRef,
+        { orderRefNum: args.orderRefNum },
+      );
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
   },
 });
 
@@ -2085,8 +2172,9 @@ export const listMyTransactions = query({
     const user = await getAuthenticatedPaymentUser(ctx);
     const rows = await ctx.db
       .query("paymentTransactions")
-      .withIndex("by_userId", (q) => q.eq("userId", user._id))
-      .collect();
+      .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(100);
     return rows.sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   },
 });
@@ -2098,18 +2186,21 @@ export const getCheckoutStatus = query({
   },
   handler: async (ctx, args) => {
     const user = await getPaymentUserWithFallback(ctx, args.userId);
-    const rows = await ctx.db
-      .query("paymentTransactions")
-      .withIndex("by_userId", (q) => q.eq("userId", user._id))
-      .collect();
-
-    const filtered = args.orderRefNum
-      ? rows.filter((row: any) => String(row.orderRefNum) === String(args.orderRefNum))
-      : rows;
-
-    const latest = [...filtered].sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0];
+    const latest = args.orderRefNum
+      ? await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_orderRefNum", (q) => q.eq("orderRefNum", args.orderRefNum!))
+          .unique()
+      : (await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
+          .order("desc")
+          .take(1))[0];
     if (!latest) {
       return null;
+    }
+    if (String(latest.userId) !== String(user._id)) {
+      throw new Error("Payment not found.");
     }
 
     return {
@@ -2127,12 +2218,10 @@ export const getCheckoutStatus = query({
       providerReference: latest.providerReference || null,
       transactionType: latest.providerPayload?.rest?.initiate?.request?.transactionType || null,
       actionRequired: latest.providerPayload?.rest?.initiate?.actionRequired || null,
-      paymentToken: latest.providerPayload?.rest?.initiate?.response?.paymentToken || null,
-      paymentTokenExpiryDateTime: latest.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
       hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
+      hasSyncIssue: Boolean(latest.lastError),
+      startTimedOut: String(latest.lastError || "").toLowerCase().includes("taking too long"),
       callbackCount: latest.callbackCount || 0,
-      lastError: latest.lastError || null,
-      providerPayload: latest.providerPayload || null,
       finalizedMatchroomId: latest.providerPayload?.matchroomCreate?.matchroomId || null,
       processedAt: latest.processedAt || null,
       createdAt: latest.createdAt,
@@ -3358,17 +3447,17 @@ export const getLatestCheckoutDebug = query({
     orderRefNum: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await getAuthenticatedPaymentUser(ctx);
-    const rows = await ctx.db
-      .query("paymentTransactions")
-      .withIndex("by_userId", (q) => q.eq("userId", user._id))
-      .collect();
-
-    const filtered = args.orderRefNum
-      ? rows.filter((row: any) => String(row.orderRefNum) === String(args.orderRefNum))
-      : rows;
-
-    const latest = [...filtered].sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0];
+    await requireSuperAdmin(ctx);
+    const latest = args.orderRefNum
+      ? await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_orderRefNum", (q) => q.eq("orderRefNum", args.orderRefNum!))
+          .unique()
+      : (await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_createdAt")
+          .order("desc")
+          .take(1))[0];
     if (!latest) return null;
 
     return {
@@ -3381,7 +3470,6 @@ export const getLatestCheckoutDebug = query({
       providerReference: latest.providerReference || null,
       lastError: latest.lastError || null,
       callbackCount: latest.callbackCount || 0,
-      providerPayload: latest.providerPayload || null,
       createdAt: latest.createdAt,
       updatedAt: latest.updatedAt,
     };

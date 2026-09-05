@@ -1,5 +1,6 @@
 import { api } from "./_generated/api";
 import { ActionCtx, MutationCtx } from "./_generated/server";
+import { Doc } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 
 export const KYC_VERIFICATION_REQUIRED_MESSAGE =
@@ -55,7 +56,7 @@ export function assertKycAccessAllowed(
 export async function requireKycVerified(
   ctx: ActionCtx | MutationCtx,
   message = KYC_VERIFICATION_REQUIRED_MESSAGE,
-) {
+): Promise<{ authUser: any; profile: Doc<"users"> }> {
   let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
   try {
     authUser = await authComponent.getAuthUser(ctx);
@@ -91,7 +92,7 @@ export async function requireKycVerified(
     throw new Error("Please sign in to continue.");
   }
 
-  let profile: Awaited<ReturnType<typeof getProfileByAuthId>> = null;
+  let profile: Doc<"users"> | null = null;
   for (const authId of candidateAuthIds) {
     profile = await getProfileByAuthId(ctx, authId);
     if (profile) break;
@@ -99,14 +100,17 @@ export async function requireKycVerified(
 
   assertKycAccessAllowed(profile as any, message);
 
-  return { authUser, profile };
+  return { authUser, profile: profile! };
 }
 
-async function getProfileByAuthId(ctx: ActionCtx | MutationCtx, authId: string) {
-  return "db" in ctx
+async function getProfileByAuthId(
+  ctx: ActionCtx | MutationCtx,
+  authId: string,
+): Promise<Doc<"users"> | null> {
+  return ("db" in ctx
     ? await ctx.db
         .query("users")
         .withIndex("by_authId", (q) => q.eq("authId", authId))
         .unique()
-    : await ctx.runQuery(api.users.getByAuthId, { authId });
+    : await ctx.runQuery(api.users.getByAuthId, { authId })) as Doc<"users"> | null;
 }

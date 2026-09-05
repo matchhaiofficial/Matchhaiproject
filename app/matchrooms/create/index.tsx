@@ -1283,9 +1283,7 @@ export default function CreateMatchroom() {
         ? "This payment was not completed. You can try again when ready."
       : "Approve the payment in Easypaisa. MatchHai will keep checking this screen."
     : "Use the number you want to pay with for this matchroom payment.";
-  const easypaisaStartTimedOut = String(easypaisaCheckoutStatus?.lastError || "")
-    .toLowerCase()
-    .includes("taking too long");
+  const easypaisaStartTimedOut = Boolean(easypaisaCheckoutStatus?.startTimedOut);
   const easypaisaStatusMessage =
     isEasypaisaFinalized
       ? "Your payment was received and your matchroom is ready."

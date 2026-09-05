@@ -128,7 +128,7 @@ export default function PlayerReportsScreen() {
       router.push({
         pathname: "/(player)/report/[id]",
         params: { id },
-      });
+      } as any);
     },
     [router],
   );

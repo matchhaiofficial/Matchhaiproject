@@ -140,7 +140,7 @@ export type ZonePageResult<T> = {
     total?: number;
 };
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 30000;
 const queuePollingState = new Map<string, SharedPollingState<ZoneBookingQueueItem>>();
 const matchroomPollingState = new Map<string, SharedPollingState<ZoneMatchroomListItem>>();
 

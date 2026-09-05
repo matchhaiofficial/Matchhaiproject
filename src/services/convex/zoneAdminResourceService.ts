@@ -49,7 +49,7 @@ export interface ZoneBranchResource {
     updatedAt?: any;
 }
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 30000;
 const branchPollingState = new Map<string, SharedPollingState<ZoneBranch>>();
 const resourcePollingState = new Map<string, SharedPollingState<ZoneBranchResource>>();
 

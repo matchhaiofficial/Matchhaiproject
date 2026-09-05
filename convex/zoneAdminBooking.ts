@@ -22,7 +22,7 @@ import {
   getBookingRequestLifecycleDueAt,
   withBookingRequestLifecycleDueAt,
 } from "./maintenanceDue";
-import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
+import { isMaintenanceJobEnabled } from "./runtimeEnv";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -285,7 +285,7 @@ export const expireStaleBookingRequests = internalMutation({
     const now = Date.now();
     const batchSize = Math.max(1, Math.min(100, Math.floor(Number(args.batchSize || 50))));
     const statuses = ["open", "pending_payment", "accepted"] as const;
-    const useIndexedSweep = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_ZONE_BOOKING_EXPIRY_SWEEP");
+    const useIndexedSweep = true;
     let inspected = 0;
     let expired = 0;
     let expiredOffers = 0;

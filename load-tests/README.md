@@ -2,7 +2,7 @@
 
 > **⚠️ STAGING ONLY. These tests must NEVER be pointed at production, and must
 > NEVER hit Easypaisa production endpoints. Use the staging Convex deployment
-> (`https://quick-panda-920.convex.cloud` / `https://quick-panda-920.convex.site`)
+> (`https://acrobatic-bison-271.convex.cloud` / `https://acrobatic-bison-271.convex.site`)
 > and mock/test payment paths only.**
 
 This directory contains [k6](https://k6.io) load-test scenarios for the MatchHai
@@ -58,7 +58,7 @@ an authenticated token. k6 cannot speak the reactive WebSocket protocol, but it
 **can** call the generic function API on the `.cloud` origin:
 
 ```
-POST https://quick-panda-920.convex.cloud/api/query
+POST https://acrobatic-bison-271.convex.cloud/api/query
 Content-Type: application/json
 Authorization: Bearer <token>
 
@@ -80,7 +80,7 @@ How to obtain a **staging-only** test token (pick one, document which you used):
    staging deployment, then read the Better Auth session/JWT the client sends.
    This is the least invasive option and touches no backend code.
 2. **Mint via Better Auth on `.site`.** The auth routes under
-   `https://quick-panda-920.convex.site/api/auth/*` can issue a session for a
+   `https://acrobatic-bison-271.convex.site/api/auth/*` can issue a session for a
    dedicated staging test user. Drive sign-in once, capture the bearer/JWT, and
    feed it to `CONVEX_TEST_TOKEN`.
 

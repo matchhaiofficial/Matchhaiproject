@@ -549,12 +549,12 @@ export default function BookingStatusScreen() {
                             valueStyle={styles.orderValue}
                         />
                     ) : null}
-                    {checkoutStatus?.lastError && !isCompleted ? (
+                    {checkoutStatus?.hasSyncIssue && !isCompleted ? (
                         <Text style={styles.expiredHint}>
                             Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                         </Text>
                     ) : null}
-                    {activeOrderRefNum && !isCompleted && (isGatewayFailed || isGatewayPending || checkoutStatus?.lastError) ? (
+                    {activeOrderRefNum && !isCompleted && (isGatewayFailed || isGatewayPending || checkoutStatus?.hasSyncIssue) ? (
                         <Text style={styles.expiredHint}>
                             {PAYMENT_SUPPORT_WITH_ORDER_HINT}
                         </Text>
@@ -562,7 +562,7 @@ export default function BookingStatusScreen() {
                     {isGatewayPending && checkoutStatus?.actionRequired ? (
                         <Text style={styles.expiredHint}>
                             Next step: {checkoutStatus.actionRequired === "pay_with_token"
-                                ? `Pay with OTC token ${checkoutStatus.paymentToken || ""}`.trim()
+                                ? "Use the OTC token shown when this payment started"
                                 : "Approve in Easypaisa"}
                         </Text>
                     ) : null}

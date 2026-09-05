@@ -124,7 +124,7 @@ There are **three** independent seeding mechanisms. Know which one you need.
 
 ## 3. Seeding staging
 
-> Confirm `CONVEX_DEPLOYMENT=dev:quick-panda-920` (staging) first. See checklist.
+> Confirm `CONVEX_DEPLOYMENT=dev:acrobatic-bison-271` (development) first. See checklist.
 
 Set the staging deployment env once (Convex dashboard → staging deployment):
 `DEMO_SEED_ENABLED=true` and `DEMO_SEED_KEY=<secret>`. Load local env from
@@ -261,8 +261,8 @@ field names — keep this list in mind when writing E2E assertions.
 Before running ANY seed or cleanup command:
 
 - [ ] `echo $env:CONVEX_DEPLOYMENT` (PowerShell) shows the **staging** value
-      (`dev:quick-panda-920`), never a `prod:` deployment.
-- [ ] `EXPO_PUBLIC_CONVEX_URL` points at `https://quick-panda-920.convex.cloud`.
+      (`dev:acrobatic-bison-271`), never a `prod:` deployment.
+- [ ] `EXPO_PUBLIC_CONVEX_URL` points at `https://acrobatic-bison-271.convex.cloud`.
 - [ ] `DEMO_SEED_ENABLED=true` and `DEMO_SEED_KEY` are set on the **staging**
       Convex deployment (not production).
 - [ ] No real secrets are written to any committed file — only `.env.test`

@@ -41,6 +41,10 @@ module.exports = {
   ],
 
   moduleNameMapper: {
+    // Lucide publishes ESM-only .mjs files that Jest 29 does not transform
+    // consistently through the Expo preset. UI tests only need stable icon
+    // components, not Lucide's generated implementation.
+    "^lucide-react-native$": "<rootDir>/jest/mocks/lucideReactNative.js",
     // Static assets -> lightweight stub.
     "\\.(png|jpg|jpeg|gif|webp|svg|ttf|otf|woff|woff2|mp3|wav|m4a)$":
       "<rootDir>/jest/mocks/fileMock.js",

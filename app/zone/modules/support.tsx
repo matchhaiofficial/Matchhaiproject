@@ -186,7 +186,7 @@ export default function ZoneSupportModule() {
                 router.push({
                   pathname: "/zone/report/[id]",
                   params: { id: target.id },
-                })
+                } as any)
               }
             />
           )}

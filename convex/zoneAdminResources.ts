@@ -4,6 +4,7 @@ import { Doc, Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
 import { requireKycVerified } from "./kycGate";
+import { requireOwnedZone } from "./authz";
 import { withLifecycleDueAt } from "./matchroomLifecycle";
 import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
 
@@ -18,6 +19,7 @@ export const listResourcesByZoneAndBranch = query({
     branchId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireOwnedZone(ctx, args.zoneId);
     if (args.branchId) {
       return await ctx.db
         .query("zoneResources")
@@ -37,8 +39,7 @@ export const listResourcesByZoneAndBranch = query({
 export const getZoneBranches = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) return [];
+    const { zone } = await requireOwnedZone(ctx, args.zoneId);
 
     // Return the branches array from the zone document
     const branches = Array.isArray(zone.branches) ? zone.branches : [];
@@ -225,12 +226,12 @@ export const updateResourceLifecycleStatus = mutation({
     holdMinutes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
     const now = Date.now();
     const resource = await ctx.db.get(args.resourceId);
     if (!resource) {
       throw new Error("Resource not found.");
     }
+    const { user: actor } = await requireOwnedZone(ctx, resource.zoneId);
 
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
@@ -241,7 +242,7 @@ export const updateResourceLifecycleStatus = mutation({
       zoneId: String(resource.zoneId),
       module: "resources",
       action: "update_resource_status",
-      actorUid: args.adminUid,
+      actorUid: String(actor._id),
       targetType: "resource",
       targetId: String(args.resourceId),
       summary: `Updated ${resource.name} to ${args.lifecycleStatus}.`,
@@ -323,7 +324,7 @@ export const syncBranchResourcesFromPricing = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const { user: actor } = await requireOwnedZone(ctx, args.zoneId);
     const now = Date.now();
     const resources = await ctx.db
       .query("zoneResources")
@@ -395,7 +396,7 @@ export const syncBranchResourcesFromPricing = mutation({
         zoneId: String(args.zoneId),
         module: "resources",
         action: "sync_branch_resources_from_pricing",
-        actorUid: args.adminUid,
+        actorUid: String(actor._id),
         targetType: "branch",
         targetId: args.branchId,
         summary: "Synced branch resources from branch inventory changes.",

@@ -94,9 +94,10 @@ const getSeriesHours = (gameKey: string, seriesType?: string | null) => {
     const game = String(gameKey || "").toLowerCase();
     const series = String(seriesType || "BO1").toUpperCase();
     if (game === "cs2" || game === "cs16" || game === "valorant") return series === "BO3" ? 3 : series === "BO5" ? 5 : 1;
-    if (game === "fc26" || game === "fc25") return series === "BO3" ? 1 : series === "BO5" ? 2 : 0.5;
-    if (game === "tekken8") return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;
-    if (game === "padel" || game === "pickleball") return series === "BO3" ? 1 : series === "BO5" ? 2 : 1;
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") {
+        return series === "BO3" ? 1 : series === "BO5" ? 2 : series === "BO10" ? 3 : 1;
+    }
+    if (game === "tekken8") return series === "BO20" ? 2 : series === "BO40" ? 3 : 1;
     if (game === "indoor_cricket") return 2;
     if (game === "futsal") return 1;
     return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;

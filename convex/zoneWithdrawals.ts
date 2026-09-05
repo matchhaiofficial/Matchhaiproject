@@ -84,7 +84,20 @@ export const requestZoneWithdrawal = action({
       throw new Error("Please select a bank.");
     }
     const { accountNumberRaw, accountNumberMasked, accountNumberLast4 } = maskAccountNumber(args.accountNumber);
-    const result: { reference: string; createdAt: number; walletBalance: number } = await ctx.runMutation(
+    const result: {
+      reference: string;
+      createdAt: number;
+      walletBalance: number;
+      amount: number;
+      bankName: string;
+      accountNumberMasked: string;
+      branchId: string;
+      branchName: string;
+      ownerName: string | null;
+      ownerEmail: string | null;
+      venueName: string | null;
+      zoneId: string;
+    } = await ctx.runMutation(
       api.wallet.createZoneWithdrawalTransaction,
       {
         userId: profile._id,
@@ -109,24 +122,22 @@ export const requestZoneWithdrawal = action({
     const lines = [
       "Zone admin withdrawal request",
       `Time: ${requestedAt}`,
-      `Amount: PKR ${Math.round(args.amount).toLocaleString("en-US")}`,
-      `Venue: ${args.venueName || "Not provided"}`,
-      `Branch: ${args.branchName} (${args.branchId})`,
-      `Bank: ${bankName}`,
-      `Account number: ${accountNumberRaw}`,
-      `Account number (masked): ${accountNumberMasked}`,
-      `Owner: ${args.ownerName || "Not provided"}`,
-      `Owner email: ${args.ownerEmail || "Not provided"}`,
+      `Amount: PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
+      `Venue: ${result.venueName || "Not provided"}`,
+      `Branch: ${result.branchName} (${result.branchId})`,
+      `Bank: ${result.bankName}`,
+      `Account number (masked): ${result.accountNumberMasked}`,
+      `Owner: ${result.ownerName || "Not provided"}`,
+      `Owner email: ${result.ownerEmail || "Not provided"}`,
       `User ID: ${String(profile._id)}`,
-      `Zone ID: ${args.zoneId || "Not provided"}`,
+      `Zone ID: ${result.zoneId}`,
       `Reference: ${result.reference}`,
     ];
 
     await sendResendEmail({
       to: WITHDRAWAL_REQUEST_EMAIL,
-      subject: `Withdrawal request: ${args.venueName || args.ownerName || "Zone Admin"} - PKR ${Math.round(args.amount).toLocaleString("en-US")}`,
+      subject: `Withdrawal request: ${result.venueName || result.ownerName || "Zone Admin"} - PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
       text: lines.join("\n"),
-      html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${lines.join("\n")}</pre>`,
     });
 
     return { ok: true, reference: result.reference };

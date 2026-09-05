@@ -4,7 +4,6 @@ import {
   internalMutation,
 } from "./_generated/server";
 import { v } from "convex/values";
-import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { isUserHiddenFromPublic } from "./userVisibility";
@@ -141,39 +140,12 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
 }
 
 async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string) {
-  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
-  try {
-    authUser = await authComponent.getAuthUser(ctx);
-  } catch {
-    authUser = null;
+  const { user } = await requireCurrentUser(ctx);
+  assertKycAccessAllowed(user, KYC_VERIFICATION_REQUIRED_MESSAGE);
+  if (expectedUid && String(expectedUid) !== String(user._id)) {
+    throw new Error("You can only perform this action for your own account");
   }
-
-  const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
-  console.log("[teams] auth gate", {
-    authId: authUser?.userId ?? null,
-    email: authUser?.email ?? null,
-    expectedUid: expectedUid ?? null,
-    expectedAuthId: expectedUser?.authId ?? null,
-  });
-
-  if (authUser?.userId) {
-    const user = await resolveUserByAnyId(ctx, authUser.userId);
-    if (!user) {
-      throw new Error("User profile not found");
-    }
-    assertKycAccessAllowed(user, KYC_VERIFICATION_REQUIRED_MESSAGE);
-    if (expectedUser && expectedUser._id !== user._id) {
-      throw new Error("You can only perform this action for your own account");
-    }
-    return user;
-  }
-
-  if (!expectedUser) {
-    throw new Error("Not authenticated");
-  }
-  assertKycAccessAllowed(expectedUser, KYC_VERIFICATION_REQUIRED_MESSAGE);
-
-  return expectedUser;
+  return user;
 }
 
 // ============================================

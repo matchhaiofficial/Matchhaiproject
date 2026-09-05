@@ -1665,6 +1665,29 @@ export async function getZoneWithdrawalRequestsPage(
   }
 }
 
+export async function getZoneWithdrawalPayoutDetails(
+  withdrawalId: string,
+): Promise<Result<{ accountNumberFull?: string | null; accountNumberMasked?: string | null; bankName?: string | null }>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const detail = await convex.query((api as any).admin.getZoneWithdrawalPayoutDetails, {
+      sessionToken,
+      withdrawalId: withdrawalId as Id<"walletTransactions">,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_withdrawal_payout_details",
+      module: "withdrawals",
+      targetType: "walletTransaction",
+      targetId: withdrawalId,
+      metadataSafe: { found: Boolean(detail) },
+    });
+    return { ok: true, data: detail || {} };
+  } catch (error) {
+    console.error("[superAdminService] getZoneWithdrawalPayoutDetails error", error);
+    return { ok: false, message: "Failed to load payout details." };
+  }
+}
+
 export async function getAdminPaymentsPage(
   input?: AdminPaymentsQueryInput & { cursor?: string | null },
 ): Promise<Result<SuperAdminPageResult<AdminPaymentListItem>>> {

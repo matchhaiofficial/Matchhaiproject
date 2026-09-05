@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import { useMinuteTicker } from "../../../../src/hooks/useMinuteTicker";
-import { getMatchroomLockAtMs } from "../../../../src/constants/timing";
 import {
   type ZoneBookingQueueItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
@@ -165,8 +164,9 @@ export const isZoneBookingRequestExpired = (
     toScheduleMillis(rawMatchroom.scheduledStartAt) ||
     toScheduledDateTimeMillis(item.preferredDate, item.preferredTime) ||
     toScheduledDateTimeMillis(rawMatchroom.scheduledDate, rawMatchroom.scheduledTime);
-  const lockAt = getMatchroomLockAtMs(scheduledStartAt);
-  if (lockAt !== null && lockAt <= now) return true;
+  // Open booking requests remain actionable until their own response expiry or
+  // scheduled start. Only apply a lock deadline when the backend supplied one;
+  // deriving the matchroom's 24-hour lock here hid otherwise valid requests.
   return scheduledStartAt > 0 && scheduledStartAt <= now;
 };
 
