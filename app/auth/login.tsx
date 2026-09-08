@@ -892,7 +892,7 @@ export default function Login() {
         </View>
 
         {/* Forgot password */}
-        <View className="forgot-row" style={styles.forgotRow}>
+        <View style={styles.forgotRow}>
           <Pressable onPress={handleForgotPassword}>
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </Pressable>
