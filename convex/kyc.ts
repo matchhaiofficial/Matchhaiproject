@@ -1,9 +1,18 @@
 import { v } from "convex/values";
-import { httpAction, action, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./_generated/server";
+import {
+  httpAction,
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type ActionCtx,
+} from "./_generated/server";
 import { api, components, internal } from "./_generated/api";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { notifyKycStatusUpdated, notifySuperAdminsKycReviewNeeded } from "./kycNotifications";
+import { captureServerAnalytics } from "./posthog";
 
 const DEFAULT_DIDIT_BASE_URL = "https://verification.didit.me";
 
@@ -64,7 +73,9 @@ async function getAuthIdFromContextOrSessionToken(ctx: any, sessionToken?: strin
 }
 
 function normalizeAccountEmail(value?: string | null) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function isValidAccountEmail(value?: string | null) {
@@ -91,21 +102,21 @@ async function getBetterAuthEmail(ctx: any, authId?: string | null, fallbackEmai
   return normalizeAccountEmail(authUser?.email);
 }
 
-async function logAuthEmailMismatch(ctx: any, input: {
-  userId: Id<"users">;
-  verificationId?: Id<"identityVerifications">;
-  role: KycRole;
-  authEmail?: string | null;
-  accountEmail: string;
-  timestamp: number;
-}) {
+async function logAuthEmailMismatch(
+  ctx: any,
+  input: {
+    userId: Id<"users">;
+    verificationId?: Id<"identityVerifications">;
+    role: KycRole;
+    authEmail?: string | null;
+    accountEmail: string;
+    timestamp: number;
+  },
+) {
   const authEmail = normalizeAccountEmail(input.authEmail);
   const accountEmail = normalizeAccountEmail(input.accountEmail);
   if (!authEmail || authEmail === accountEmail) return;
-  const [authEmailHash, accountEmailHash] = await Promise.all([
-    sha256Hex(authEmail),
-    sha256Hex(accountEmail),
-  ]);
+  const [authEmailHash, accountEmailHash] = await Promise.all([sha256Hex(authEmail), sha256Hex(accountEmail)]);
 
   await ctx.runMutation(internal.kyc.recordKycAuditEvent, {
     userId: input.userId,
@@ -131,9 +142,7 @@ function getDiditConfig() {
   const webhookUrl = String(process.env.DIDIT_WEBHOOK_URL || "").trim();
   const appScheme = String(process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai").trim() || "matchhai";
   const configuredCallbackUrl = String(
-    process.env.DIDIT_CALLBACK_URL ||
-    process.env.DIDIT_APP_CALLBACK_URL ||
-    `${appScheme}://`
+    process.env.DIDIT_CALLBACK_URL || process.env.DIDIT_APP_CALLBACK_URL || `${appScheme}://`,
   ).trim();
   const callbackUrl = configuredCallbackUrl.includes("/auth/verification-required")
     ? `${appScheme}://`
@@ -148,13 +157,20 @@ function getDiditConfig() {
 }
 
 function splitFullName(value?: string | null) {
-  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+  const parts = String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   if (parts.length === 0) return { firstName: undefined, lastName: undefined };
   if (parts.length === 1) return { firstName: parts[0], lastName: undefined };
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 }
 
-function buildDiditSessionBody(config: ReturnType<typeof getDiditConfig>, verificationId: Id<"identityVerifications">, profile?: any) {
+function buildDiditSessionBody(
+  config: ReturnType<typeof getDiditConfig>,
+  verificationId: Id<"identityVerifications">,
+  profile?: any,
+) {
   const { firstName, lastName } = splitFullName(profile?.fullName || profile?.ownerFullName);
   const contactDetails: Record<string, string> = {};
   const expectedDetails: Record<string, string> = {};
@@ -179,7 +195,10 @@ function getWebhookSecret() {
 }
 
 function normalizeDiditStatus(value: unknown): KycStatus {
-  const key = String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ");
+  const key = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
   if (key === "approved" || key === "verified") return "verified";
   if (key === "declined" || key === "rejected") return "rejected";
   if (key === "in review") return "in_review";
@@ -225,7 +244,12 @@ function extractStatus(payload: any) {
 }
 
 function extractWorkflowId(payload: any) {
-  return extractString(payload?.workflow_id, payload?.workflowId, payload?.session?.workflow_id, payload?.session?.workflowId);
+  return extractString(
+    payload?.workflow_id,
+    payload?.workflowId,
+    payload?.session?.workflow_id,
+    payload?.session?.workflowId,
+  );
 }
 
 function extractVerificationUrl(payload: any) {
@@ -316,7 +340,9 @@ function extractSafeCheckStatuses(payload: any) {
   const diditIp = firstArrayEntry(decision?.ip_analyses, decision?.ipAnalyses);
 
   return {
-    emailVerificationStatus: normalizeCheckStatus(email?.status || diditEmail?.status || payload?.email_verification_status),
+    emailVerificationStatus: normalizeCheckStatus(
+      email?.status || diditEmail?.status || payload?.email_verification_status,
+    ),
     idVerificationStatus: normalizeCheckStatus(id?.status || diditId?.status || payload?.id_verification_status),
     livenessStatus: normalizeCheckStatus(liveness?.status || diditLiveness?.status || payload?.liveness_status),
     faceMatchStatus: normalizeCheckStatus(face?.status || diditFace?.status || payload?.face_match_status),
@@ -330,7 +356,9 @@ function isTerminal(status: KycStatus) {
 }
 
 function bytesToHex(bytes: Uint8Array) {
-  return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 async function sha256Hex(value: string) {
@@ -384,10 +412,12 @@ function canonicalizeJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalizeJson);
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    return Object.keys(record).sort().reduce<Record<string, unknown>>((acc, key) => {
-      acc[key] = canonicalizeJson(record[key]);
-      return acc;
-    }, {});
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = canonicalizeJson(record[key]);
+        return acc;
+      }, {});
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     return Number(value.toString());
@@ -400,13 +430,7 @@ async function verifyDiditSignature(request: Request, rawBody: string, payload: 
   const v2 = parseSignatureHeader(request.headers.get("x-signature-v2"));
   const simple = parseSignatureHeader(request.headers.get("x-signature-simple"));
   const legacy = parseSignatureHeader(request.headers.get("x-signature"));
-  const timestamp = extractString(
-    v2.t,
-    simple.t,
-    legacy.t,
-    request.headers.get("x-timestamp"),
-    payload?.timestamp,
-  );
+  const timestamp = extractString(v2.t, simple.t, legacy.t, request.headers.get("x-timestamp"), payload?.timestamp);
 
   let canonicalJson = rawBody;
   try {
@@ -426,8 +450,8 @@ async function verifyDiditSignature(request: Request, rawBody: string, payload: 
     timestamp ? `${timestamp}${canonicalJson}` : undefined,
   ].filter((value): value is string => Boolean(value));
 
-  const bodySignatures = [v2.v2, v2.value, legacy.v1, legacy.v2, legacy.value].filter(
-    (value): value is string => Boolean(value),
+  const bodySignatures = [v2.v2, v2.value, legacy.v1, legacy.v2, legacy.value].filter((value): value is string =>
+    Boolean(value),
   );
   for (const signature of bodySignatures) {
     for (const message of signedBodyMessages) {
@@ -503,7 +527,11 @@ async function createOrReuseDiditProviderSession(
   ctx: ActionCtx,
   verificationId: Id<"identityVerifications">,
   profile: any,
-): Promise<{ verificationUrl: string; verificationId: Id<"identityVerifications">; status: KycStatus }> {
+): Promise<{
+  verificationUrl: string;
+  verificationId: Id<"identityVerifications">;
+  status: KycStatus;
+}> {
   const leaseToken = createStartToken();
   let claimed = false;
 
@@ -591,7 +619,14 @@ async function createOrReuseDiditProviderSession(
 
 export const startDiditKycSession = action({
   args: { role: kycRoleValidator },
-  handler: async (ctx, args): Promise<{ verificationUrl: string; verificationId: Id<"identityVerifications">; status: KycStatus }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    verificationUrl: string;
+    verificationId: Id<"identityVerifications">;
+    status: KycStatus;
+  }> => {
     if (args.role === "high_risk_dispute" || args.role === "tournament_organizer") {
       throw new Error("This verification role is not available yet.");
     }
@@ -599,7 +634,9 @@ export const startDiditKycSession = action({
     const authUser = await authComponent.getAuthUser(ctx);
     if (!authUser?.userId) throw new Error("Please sign in to continue.");
 
-    const profile: any = await ctx.runQuery(api.users.getByAuthId, { authId: authUser.userId });
+    const profile: any = await ctx.runQuery(api.users.getByAuthId, {
+      authId: authUser.userId,
+    });
     if (!profile?._id) throw new Error("User profile not found.");
     if (args.role === "player" && profile.accountType !== "player") {
       throw new Error("Player verification is only available for player accounts.");
@@ -610,12 +647,15 @@ export const startDiditKycSession = action({
     const accountEmail = requireAccountEmail(profile);
 
     const config = getDiditConfig();
-    const verificationId: Id<"identityVerifications"> = await ctx.runMutation(internal.kyc.createOrReuseKycVerification, {
-      userId: profile._id,
-      role: args.role,
-      workflowId: config.workflowId,
-      now: Date.now(),
-    });
+    const verificationId: Id<"identityVerifications"> = await ctx.runMutation(
+      internal.kyc.createOrReuseKycVerification,
+      {
+        userId: profile._id,
+        role: args.role,
+        workflowId: config.workflowId,
+        now: Date.now(),
+      },
+    );
     await logAuthEmailMismatch(ctx, {
       userId: profile._id,
       verificationId,
@@ -634,7 +674,13 @@ export const createDiditKycStartIntent = mutation({
     role: kycRoleValidator,
     sessionToken: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<{ verificationId: Id<"identityVerifications">; startToken: string }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    verificationId: Id<"identityVerifications">;
+    startToken: string;
+  }> => {
     if (args.role === "high_risk_dispute" || args.role === "tournament_organizer") {
       throw new Error("This verification role is not available yet.");
     }
@@ -661,9 +707,7 @@ export const createDiditKycStartIntent = mutation({
     let currentVerification: any = null;
     if (profile.identityVerificationId) {
       try {
-        currentVerification = await ctx.db.get(
-          profile.identityVerificationId as Id<"identityVerifications">,
-        );
+        currentVerification = await ctx.db.get(profile.identityVerificationId as Id<"identityVerifications">);
       } catch {
         currentVerification = null;
       }
@@ -681,37 +725,42 @@ export const createDiditKycStartIntent = mutation({
           .query("identityVerifications")
           .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "pending"))
           .first();
-    const existingInProgress = currentActive || existingPending
-      ? null
-      : await ctx.db
-          .query("identityVerifications")
-          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "in_progress"))
-          .first();
-    const existingInReview = currentActive || existingPending || existingInProgress
-      ? null
-      : await ctx.db
-          .query("identityVerifications")
-          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "in_review"))
-          .first();
-    const existingNotStarted = currentActive || existingPending || existingInProgress || existingInReview
-      ? null
-      : await ctx.db
-          .query("identityVerifications")
-          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "not_started"))
-          .first();
+    const existingInProgress =
+      currentActive || existingPending
+        ? null
+        : await ctx.db
+            .query("identityVerifications")
+            .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "in_progress"))
+            .first();
+    const existingInReview =
+      currentActive || existingPending || existingInProgress
+        ? null
+        : await ctx.db
+            .query("identityVerifications")
+            .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "in_review"))
+            .first();
+    const existingNotStarted =
+      currentActive || existingPending || existingInProgress || existingInReview
+        ? null
+        : await ctx.db
+            .query("identityVerifications")
+            .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "not_started"))
+            .first();
     const existing = currentActive ?? existingPending ?? existingInProgress ?? existingInReview ?? existingNotStarted;
-    const verificationId = existing?._id ?? await ctx.db.insert("identityVerifications", {
-      userId: profile._id,
-      type: "kyc",
-      role: args.role,
-      provider: "didit",
-      vendorData: "",
-      workflowId: config.workflowId,
-      status: "pending",
-      submittedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const verificationId =
+      existing?._id ??
+      (await ctx.db.insert("identityVerifications", {
+        userId: profile._id,
+        type: "kyc",
+        role: args.role,
+        provider: "didit",
+        vendorData: "",
+        workflowId: config.workflowId,
+        status: "pending",
+        submittedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      }));
     const intentStatus: KycStatus =
       existing?.status === "not_started" ? "pending" : (existing?.status as KycStatus | undefined) || "pending";
 
@@ -750,7 +799,14 @@ export const startDiditKycSessionFromIntent = action({
     verificationId: v.id("identityVerifications"),
     startToken: v.string(),
   },
-  handler: async (ctx, args): Promise<{ verificationUrl: string; verificationId: Id<"identityVerifications">; status: KycStatus }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    verificationUrl: string;
+    verificationId: Id<"identityVerifications">;
+    status: KycStatus;
+  }> => {
     const verification: any = await ctx.runQuery(internal.kyc.getVerificationForStartIntent, {
       verificationId: args.verificationId,
     });
@@ -775,32 +831,54 @@ export const startDiditKycSessionFromIntent = action({
 
 export const refreshDiditVerificationStatus = action({
   args: { verificationId: v.id("identityVerifications") },
-  handler: async (ctx, args): Promise<{ status?: KycStatus; updatedAt?: number; refreshed: boolean }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status?: KycStatus;
+    updatedAt?: number;
+    refreshed: boolean;
+  }> => {
     try {
       const authUser = await authComponent.getAuthUser(ctx);
       if (!authUser?.userId) return { refreshed: false };
 
-      const profile: any = await ctx.runQuery(api.users.getByAuthId, { authId: authUser.userId });
-      const verification: any = await ctx.runQuery(internal.kyc.getVerificationForRefresh, { verificationId: args.verificationId });
+      const profile: any = await ctx.runQuery(api.users.getByAuthId, {
+        authId: authUser.userId,
+      });
+      const verification: any = await ctx.runQuery(internal.kyc.getVerificationForRefresh, {
+        verificationId: args.verificationId,
+      });
       if (!profile?._id || !verification || String(verification.userId) !== String(profile._id)) {
         return { refreshed: false };
       }
 
       if (!verification.providerSessionId) {
-        return { status: verification.status, updatedAt: verification.updatedAt, refreshed: false };
+        return {
+          status: verification.status,
+          updatedAt: verification.updatedAt,
+          refreshed: false,
+        };
       }
 
       const config = getDiditConfig();
-      const response = await fetch(`${config.baseUrl}/v3/session/${encodeURIComponent(verification.providerSessionId)}/decision/`, {
-        method: "GET",
-        headers: {
-          "x-api-key": config.apiKey,
-          accept: "application/json",
+      const response = await fetch(
+        `${config.baseUrl}/v3/session/${encodeURIComponent(verification.providerSessionId)}/decision/`,
+        {
+          method: "GET",
+          headers: {
+            "x-api-key": config.apiKey,
+            accept: "application/json",
+          },
         },
-      });
+      );
 
       if (!response.ok) {
-        return { status: verification.status, updatedAt: verification.updatedAt, refreshed: false };
+        return {
+          status: verification.status,
+          updatedAt: verification.updatedAt,
+          refreshed: false,
+        };
       }
 
       const payload = await response.json();
@@ -877,6 +955,16 @@ export const diditWebhook = httpAction(async (ctx, request) => {
     now: Date.now(),
   });
 
+  await captureServerAnalytics({
+    distinctId: verification.userId,
+    event: "kyc_status_updated",
+    properties: {
+      kyc_role: verification.role,
+      status,
+      provider: "didit",
+    },
+  });
+
   return new Response("OK", { status: 200 });
 });
 
@@ -891,9 +979,7 @@ export const createOrReuseKycVerification = internalMutation({
     const user = await ctx.db.get(args.userId);
     if (user?.identityVerificationId) {
       try {
-        const current = await ctx.db.get(
-          user.identityVerificationId as Id<"identityVerifications">,
-        );
+        const current = await ctx.db.get(user.identityVerificationId as Id<"identityVerifications">);
         if (current && current.role === args.role && !isTerminal(current.status as KycStatus)) {
           return current._id;
         }
@@ -1094,8 +1180,7 @@ export const applyDiditStatusUpdate = internalMutation({
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
     const profile = await ctx.db.get(verification.userId);
-    const isCurrentVerification =
-      String(profile?.identityVerificationId || "") === String(args.verificationId);
+    const isCurrentVerification = String(profile?.identityVerificationId || "") === String(args.verificationId);
     const shouldApplyToUser = isCurrentVerification || args.status === "verified";
     const previousStatus = verification.status as KycStatus;
     const effectiveStatus: KycStatus = args.status;
@@ -1105,8 +1190,10 @@ export const applyDiditStatusUpdate = internalMutation({
       status: effectiveStatus,
       updatedAt: args.now,
     };
-    if (args.providerSessionId || verification.providerSessionId) verificationPatch.providerSessionId = args.providerSessionId || verification.providerSessionId;
-    if (args.workflowId || verification.workflowId) verificationPatch.workflowId = args.workflowId || verification.workflowId;
+    if (args.providerSessionId || verification.providerSessionId)
+      verificationPatch.providerSessionId = args.providerSessionId || verification.providerSessionId;
+    if (args.workflowId || verification.workflowId)
+      verificationPatch.workflowId = args.workflowId || verification.workflowId;
     if (args.decision) verificationPatch.decision = args.decision;
     if (args.rejectionReason) verificationPatch.rejectionReason = args.rejectionReason;
     Object.entries(args.checkStatuses).forEach(([key, value]) => {
@@ -1170,7 +1257,14 @@ export const applyDiditStatusUpdate = internalMutation({
       zoneId: "identity",
       module: "kyc",
       actorUid: String(verification.userId),
-      action: effectiveStatus === "verified" ? "verified" : effectiveStatus === "rejected" ? "rejected" : effectiveStatus === "expired" ? "expired" : "webhook_received",
+      action:
+        effectiveStatus === "verified"
+          ? "verified"
+          : effectiveStatus === "rejected"
+            ? "rejected"
+            : effectiveStatus === "expired"
+              ? "expired"
+              : "webhook_received",
       targetType: "identityVerification",
       targetId: String(args.verificationId),
       summary: `Didit KYC status updated to ${effectiveStatus}`,
@@ -1285,11 +1379,19 @@ export const requestEmailChange = mutation({
   handler: async (ctx, args) => {
     const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
     if (!authId) throw new Error("Please sign in to continue.");
-    const email = String(args.email || "").trim().toLowerCase();
+    const email = String(args.email || "")
+      .trim()
+      .toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
-    const existing = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).unique();
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .unique();
     if (existing) throw new Error("This email is already registered.");
-    const profile = await ctx.db.query("users").withIndex("by_authId", (q) => q.eq("authId", authId)).unique();
+    const profile = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q) => q.eq("authId", authId))
+      .unique();
     if (!profile) throw new Error("User profile not found.");
     await ctx.db.patch(profile._id, {
       pendingEmail: email,
@@ -1311,9 +1413,15 @@ export const requestPhoneChange = mutation({
   handler: async (ctx, args) => {
     const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
     if (!authId) throw new Error("Please sign in to continue.");
-    const existing = await ctx.db.query("users").withIndex("by_phone", (q) => q.eq("phone", args.phoneE164)).unique();
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_phone", (q) => q.eq("phone", args.phoneE164))
+      .unique();
     if (existing) throw new Error("This phone number is already registered.");
-    const profile = await ctx.db.query("users").withIndex("by_authId", (q) => q.eq("authId", authId)).unique();
+    const profile = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q) => q.eq("authId", authId))
+      .unique();
     if (!profile) throw new Error("User profile not found.");
     await ctx.db.patch(profile._id, {
       pendingPhone: null,

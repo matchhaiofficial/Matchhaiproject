@@ -50,6 +50,7 @@ import type * as matchrooms from "../matchrooms.js";
 import type * as migrations from "../migrations.js";
 import type * as notifications from "../notifications.js";
 import type * as phoneOtp from "../phoneOtp.js";
+import type * as posthog from "../posthog.js";
 import type * as presence from "../presence.js";
 import type * as protectedDataReset from "../protectedDataReset.js";
 import type * as psnTokenCache from "../psnTokenCache.js";
@@ -134,6 +135,7 @@ declare const fullApi: ApiFromModules<{
   migrations: typeof migrations;
   notifications: typeof notifications;
   phoneOtp: typeof phoneOtp;
+  posthog: typeof posthog;
   presence: typeof presence;
   protectedDataReset: typeof protectedDataReset;
   psnTokenCache: typeof psnTokenCache;

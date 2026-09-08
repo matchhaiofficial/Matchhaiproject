@@ -15,10 +15,9 @@ import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import { useToast } from "../../src/hooks/useToast";
 import styles from "../../app-shared/auth/register.styles";
-import {
-  DEFAULT_CITY,
-  normalizeKarachiAreaLabel,
-} from "../../constants/profileOptions";
+import { DEFAULT_CITY, normalizeKarachiAreaLabel } from "../../constants/profileOptions";
+import { captureAnalyticsEvent } from "../../src/lib/analytics/posthog";
+import { classifyAnalyticsFailure } from "../../src/lib/analytics/privacy";
 
 export default function AdminRegisterStep4() {
   const {
@@ -46,7 +45,7 @@ export default function AdminRegisterStep4() {
   }, [setCurrentStep]);
 
   useEffect(() => {
-        // Don't redirect away if we're in success flow
+    // Don't redirect away if we're in success flow
     if (visiblePhase === "success" || visiblePhase === "submitting") return;
     if (
       !step1.ownerFullName.trim() ||
@@ -120,8 +119,7 @@ export default function AdminRegisterStep4() {
       showToast({
         type: "info",
         title: "Almost there",
-        message:
-          "Please confirm authority and revenue-share agreement before submitting the zone.",
+        message: "Please confirm authority and revenue-share agreement before submitting the zone.",
       });
       return;
     }
@@ -162,7 +160,10 @@ export default function AdminRegisterStep4() {
         );
 
         if (!resSignUp || !resSignUp.ok) {
-          throw { step: 1, message: resSignUp?.message || "Admin account creation failed." };
+          throw {
+            step: 1,
+            message: resSignUp?.message || "Admin account creation failed.",
+          };
         }
 
         const sessionReady = await refreshSession();
@@ -179,7 +180,10 @@ export default function AdminRegisterStep4() {
         setRegistrationProgress("submitting", 2);
         const resZone = await saveZoneRegistration({ step1, branches });
         if (!resZone.ok) {
-          throw { step: 2, message: resZone.message || "Failed to save zone data." };
+          throw {
+            step: 2,
+            message: resZone.message || "Failed to save zone data.",
+          };
         }
       }
 
@@ -195,6 +199,10 @@ export default function AdminRegisterStep4() {
 
       setPhase("success");
       setRegistrationProgress("success", 3);
+      captureAnalyticsEvent("zone_registered", {
+        account_type: "zone",
+        outcome: "success",
+      });
 
       setTimeout(() => {
         showToast({
@@ -207,7 +215,12 @@ export default function AdminRegisterStep4() {
       }, 650);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
-      setCurrentSubStep(failedAt - 1); 
+      captureAnalyticsEvent("zone_registration_failed", {
+        account_type: "zone",
+        step: failedAt,
+        failure_category: classifyAnalyticsFailure(error),
+      });
+      setCurrentSubStep(failedAt - 1);
       setPhase("partial-fail");
       setRegistrationProgress("partial-fail", failedAt - 1);
       setErrorDetails(error.message || "An unexpected error occurred.");
@@ -231,90 +244,89 @@ export default function AdminRegisterStep4() {
     return (
       <View style={styles.loadingOverlay}>
         <View style={styles.loadingContent}>
-            {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
-              <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
-            ) : null}
-            {visiblePhase === "success" ? (
-              <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
-            ) : null}
-            {visiblePhase === "partial-fail" ? (
-              <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
-            ) : null}
+          {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
+            <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
+          ) : null}
+          {visiblePhase === "success" ? (
+            <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
+          ) : null}
+          {visiblePhase === "partial-fail" ? (
+            <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
+          ) : null}
 
-            <Text style={styles.loadingPhaseTitle}>
-              {visiblePhase === "submitting"
-                ? "Registering your zone..."
-                : visiblePhase === "partial-fail"
-                  ? "Registration interrupted"
-                  : "Zone submitted"}
-            </Text>
+          <Text style={styles.loadingPhaseTitle}>
+            {visiblePhase === "submitting"
+              ? "Registering your zone..."
+              : visiblePhase === "partial-fail"
+                ? "Registration interrupted"
+                : "Zone submitted"}
+          </Text>
 
-            <View style={{ width: "100%", marginBottom: 20 }}>
-              {steps.map((step, index) => {
-                const isDone = visibleSubStep > step.id || visiblePhase === "success";
-                const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
-                const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
+          <View style={{ width: "100%", marginBottom: 20 }}>
+            {steps.map((step, index) => {
+              const isDone = visibleSubStep > step.id || visiblePhase === "success";
+              const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
+              const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
 
-                return (
-                  <View key={step.id}>
-                    <View style={styles.progressStep}>
-                      <View style={styles.progressIcon}>
-                        {isDone ? (
-                          <AppIcon name="check-circle" size={20} color={COLORS.success} />
-                        ) : isFailed ? (
-                          <AppIcon name="cancel" size={20} color={COLORS.error} />
-                        ) : isActive ? (
-                          <ActivityIndicator size="small" color={COLORS.accent} />
-                        ) : (
-                          <AppIcon
-                            name="radio-button-unchecked"
-                            size={20}
-                            color="rgba(255,255,255,0.2)"
-                          />
-                        )}
-                      </View>
-                      <Text
-                        style={[
-                          styles.progressText,
-                          isActive && styles.progressTextActive,
-                          isDone && styles.progressTextDone,
-                          isFailed && { color: COLORS.error },
-                        ]}
-                      >
-                        {step.label}
-                      </Text>
+              return (
+                <View key={step.id}>
+                  <View style={styles.progressStep}>
+                    <View style={styles.progressIcon}>
+                      {isDone ? (
+                        <AppIcon name="check-circle" size={20} color={COLORS.success} />
+                      ) : isFailed ? (
+                        <AppIcon name="cancel" size={20} color={COLORS.error} />
+                      ) : isActive ? (
+                        <ActivityIndicator size="small" color={COLORS.accent} />
+                      ) : (
+                        <AppIcon name="radio-button-unchecked" size={20} color="rgba(255,255,255,0.2)" />
+                      )}
                     </View>
-                    {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                    <Text
+                      style={[
+                        styles.progressText,
+                        isActive && styles.progressTextActive,
+                        isDone && styles.progressTextDone,
+                        isFailed && { color: COLORS.error },
+                      ]}
+                    >
+                      {step.label}
+                    </Text>
                   </View>
-                );
-              })}
-            </View>
+                  {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                </View>
+              );
+            })}
+          </View>
 
-            {visiblePhase === "partial-fail" ? (
-              <>
-                <Text
-                  style={[
-                    styles.helperText,
-                    styles.helperError,
-                    { textAlign: "center", marginBottom: 20 },
-                  ]}
-                >
-                  {errorDetails}
-                </Text>
-                <AppButton onPress={handleFinish} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
-                  Retry submission
-                </AppButton>
-                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); setRegistrationProgress("idle", 0); }} style={{ padding: 10 }}>
-                  <Text style={{ color: COLORS.muted }}>Cancel</Text>
-                </Pressable>
-              </>
-            ) : null}
-
-            {visiblePhase === "success" ? (
-              <Text style={[styles.progressText, { textAlign: "center" }]}>
-                Redirecting to your zone dashboard...
+          {visiblePhase === "partial-fail" ? (
+            <>
+              <Text style={[styles.helperText, styles.helperError, { textAlign: "center", marginBottom: 20 }]}>
+                {errorDetails}
               </Text>
-            ) : null}
+              <AppButton
+                onPress={handleFinish}
+                size="lg"
+                style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}
+              >
+                Retry submission
+              </AppButton>
+              <Pressable
+                onPress={() => {
+                  setPhase("idle");
+                  setSubmitting(false);
+                  setRegistrationProgress("idle", 0);
+                }}
+                style={{ padding: 10 }}
+              >
+                <Text style={{ color: COLORS.muted }}>Cancel</Text>
+              </Pressable>
+            </>
+          ) : null}
+
+          {visiblePhase === "success" ? (
+            <Text style={[styles.progressText, { textAlign: "center" }]}>Redirecting to your zone dashboard...</Text>
+          ) : null}
         </View>
       </View>
     );
@@ -322,11 +334,7 @@ export default function AdminRegisterStep4() {
 
   if (visiblePhase !== "idle") {
     return (
-      <Screen
-        style={styles.screen}
-        contentStyle={styles.loadingScreenContainer}
-        routeKey="/auth/zone-register-step4"
-      >
+      <Screen style={styles.screen} contentStyle={styles.loadingScreenContainer} routeKey="/auth/zone-register-step4">
         {renderLoadingOverlay()}
       </Screen>
     );
@@ -434,8 +442,8 @@ export default function AdminRegisterStep4() {
           </Pressable>
         </View>
         <Text style={styles.reviewValueMuted}>
-          Pricing and inventory are configured per branch and will drive availability across bookings,
-          counters, and zone detail views.
+          Pricing and inventory are configured per branch and will drive availability across bookings, counters, and
+          zone detail views.
         </Text>
       </View>
 
@@ -451,10 +459,7 @@ export default function AdminRegisterStep4() {
           </Text>
         </Pressable>
 
-        <Pressable
-          onPress={() => setStep4({ agreeRevenueShare: !step4.agreeRevenueShare })}
-          style={styles.termRow}
-        >
+        <Pressable onPress={() => setStep4({ agreeRevenueShare: !step4.agreeRevenueShare })} style={styles.termRow}>
           <View style={[styles.termBox, step4.agreeRevenueShare && styles.termBoxChecked]}>
             {step4.agreeRevenueShare ? <View style={styles.termBoxInner} /> : null}
           </View>
@@ -472,27 +477,18 @@ export default function AdminRegisterStep4() {
         ) : null}
       </View>
 
-      <Pressable
-        onPress={() => router.replace("/auth/zone-register-step3")}
-        style={styles.backLinkWrapper}
-      >
+      <Pressable onPress={() => router.replace("/auth/zone-register-step3")} style={styles.backLinkWrapper}>
         <Text style={styles.backLinkText}>Back to branch inventory</Text>
       </Pressable>
 
       <View
-        style={[
-          styles.buttonShadowWrapper,
-          allAgreementsChecked && !submitting && styles.buttonShadowWrapperActive,
-        ]}
+        style={[styles.buttonShadowWrapper, allAgreementsChecked && !submitting && styles.buttonShadowWrapperActive]}
       >
         <AppButton
           onPress={handleFinish}
           disabled={submitting || !allAgreementsChecked}
           size="lg"
-          style={[
-            styles.primaryBtn,
-            !allAgreementsChecked || submitting ? styles.primaryBtnDisabled : null,
-          ]}
+          style={[styles.primaryBtn, !allAgreementsChecked || submitting ? styles.primaryBtnDisabled : null]}
         >
           {submitting ? "Submitting..." : "Submit zone for review"}
         </AppButton>

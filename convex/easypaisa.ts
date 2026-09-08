@@ -2,7 +2,15 @@ import { v } from "convex/values";
 
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import {
+  action,
+  httpAction,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { requireCurrentUser, requireSelf, requireSuperAdmin } from "./authz";
 import { EasypaisaTransactionType } from "./easypaisaRest";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
@@ -16,29 +24,33 @@ import {
   withPaymentNextReconcileAt,
 } from "./maintenanceDue";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
+import { captureServerAnalytics } from "./posthog";
 
-const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
-const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest").trim().toLowerCase();
+const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging")
+  .trim()
+  .toLowerCase();
+const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest")
+  .trim()
+  .toLowerCase();
 const EASYPAISA_HOSTED_FALLBACK_ENABLED = String(process.env.EASYPAISA_HOSTED_FALLBACK_ENABLED || "1").trim() !== "0";
 const EASYPAISA_INDEX_URL =
-  process.env.EASYPAISA_INDEX_URL
-  || (EASYPAISA_ENV === "production"
+  process.env.EASYPAISA_INDEX_URL ||
+  (EASYPAISA_ENV === "production"
     ? "https://easypay.easypaisa.com.pk/easypay/Index.jsf"
     : "https://easypaystg.easypaisa.com.pk/easypay/Index.jsf");
 const EASYPAISA_CONFIRM_URL =
-  process.env.EASYPAISA_CONFIRM_URL
-  || (EASYPAISA_ENV === "production"
+  process.env.EASYPAISA_CONFIRM_URL ||
+  (EASYPAISA_ENV === "production"
     ? "https://easypay.easypaisa.com.pk/easypay/Confirm.jsf"
     : "https://easypaystg.easypaisa.com.pk/easypay/Confirm.jsf");
-const CONVEX_SITE_URL =
-  process.env.EXPO_PUBLIC_CONVEX_SITE_URL
-  || process.env.CONVEX_SITE_URL
-  || "";
+const CONVEX_SITE_URL = process.env.EXPO_PUBLIC_CONVEX_SITE_URL || process.env.CONVEX_SITE_URL || "";
 const EASYPAISA_STORE_ID = String(process.env.EASYPAISA_STORE_ID || "").trim();
 const EASYPAISA_HASH_KEY = String(process.env.EASYPAISA_HASH_KEY || "").trim();
 const EASYPAISA_PAYMENT_METHOD = String(process.env.EASYPAISA_PAYMENT_METHOD || "").trim();
 const EASYPAISA_IPN_ALLOWED_HOSTS = String(process.env.EASYPAISA_IPN_ALLOWED_HOSTS || "").trim();
-const APP_SCHEME = String(process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai").trim().replace(/:\/?\/?$/, "");
+const APP_SCHEME = String(process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai")
+  .trim()
+  .replace(/:\/?\/?$/, "");
 const CHECKOUT_TTL_MS = EASYPAY_CHECKOUT_TTL_MS;
 const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
 const BOOKING_CHECKOUT_RETRY_WINDOW_MS = CHECKOUT_TTL_MS;
@@ -52,14 +64,7 @@ const IPN_PATH = "/payments/easypaisa/ipn";
 type PaymentKind = "booking_intent" | "wallet_topup";
 type ProviderSource = "initiate" | "ipn" | "inquiry" | "hosted_finalize";
 type PaymentStatus =
-  | "created"
-  | "redirected"
-  | "token_received"
-  | "pending"
-  | "paid"
-  | "failed"
-  | "expired"
-  | "cancelled";
+  "created" | "redirected" | "token_received" | "pending" | "paid" | "failed" | "expired" | "cancelled";
 
 async function patchPaymentTransactionWithNextReconcileAt(
   ctx: any,
@@ -67,10 +72,7 @@ async function patchPaymentTransactionWithNextReconcileAt(
   patch: Record<string, any>,
   now = Date.now(),
 ) {
-  await ctx.db.patch(
-    transaction._id,
-    withPaymentNextReconcileAt(transaction, patch, now),
-  );
+  await ctx.db.patch(transaction._id, withPaymentNextReconcileAt(transaction, patch, now));
 }
 
 type FinalizeResult = {
@@ -245,12 +247,7 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;");
 }
 
-function autoSubmitHtml(args: {
-  title: string;
-  action: string;
-  fields: Record<string, string>;
-  message: string;
-}) {
+function autoSubmitHtml(args: { title: string; action: string; fields: Record<string, string>; message: string }) {
   const inputs = Object.entries(args.fields)
     .map(([name, value]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`)
     .join("");
@@ -312,9 +309,7 @@ function isTerminalStatus(status: PaymentStatus) {
 
 function isActiveCheckoutTransaction(transaction: any, now: number) {
   return Boolean(
-    transaction
-    && ACTIVE_PAYMENT_STATUSES.includes(transaction.status)
-    && Number(transaction.expiresAt || 0) > now,
+    transaction && ACTIVE_PAYMENT_STATUSES.includes(transaction.status) && Number(transaction.expiresAt || 0) > now,
   );
 }
 
@@ -326,9 +321,9 @@ function hasDomainCheckoutArgs(args: any) {
 
 function hasDomainCheckoutContext(transaction: any) {
   return Boolean(
-    transaction?.providerPayload?.checkoutContext?.matchroomCreateArgs
-    || transaction?.providerPayload?.checkoutContext?.zoneWalkInCreateArgs
-    || transaction?.providerPayload?.checkoutContext?.teamChallengeHold,
+    transaction?.providerPayload?.checkoutContext?.matchroomCreateArgs ||
+    transaction?.providerPayload?.checkoutContext?.zoneWalkInCreateArgs ||
+    transaction?.providerPayload?.checkoutContext?.teamChallengeHold,
   );
 }
 
@@ -380,11 +375,11 @@ function shouldIgnoreActiveWalletTopupForRequest(transaction: any, args: any, no
 }
 
 function chooseLatestActiveTransaction(transactions: any[], now: number) {
-  return transactions
-    .filter((transaction) => isActiveCheckoutTransaction(transaction, now))
-    .sort((a, b) =>
-      Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0),
-    )[0] || null;
+  return (
+    transactions
+      .filter((transaction) => isActiveCheckoutTransaction(transaction, now))
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))[0] || null
+  );
 }
 
 function buildAttemptFields(attempt: CheckoutAttempt) {
@@ -431,8 +426,10 @@ function isPaymentRosterFull(room: any): boolean {
   const slotsA = room?.slotsA || [];
   const slotsB = room?.slotsB || [];
   if (slotsA.length > 0 || slotsB.length > 0) {
-    const teamAFilled = slotsA.length === 0 || slotsA.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
-    const teamBFilled = slotsB.length === 0 || slotsB.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
+    const teamAFilled =
+      slotsA.length === 0 || slotsA.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
+    const teamBFilled =
+      slotsB.length === 0 || slotsB.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
     return teamAFilled && teamBFilled && getConfirmedPlayerCount(room) >= required;
   }
   return getConfirmedPlayerCount(room) >= required;
@@ -443,11 +440,11 @@ function isPaymentMatchroomExpired(room: any, now = Date.now()): boolean {
   if (room.status === "expired" || room.status === "cancelled") return true;
   const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
   if (
-    ["open", "locked"].includes(String(room.status || ""))
-    && Number.isFinite(scheduledStartAt)
-    && scheduledStartAt > 0
-    && scheduledStartAt <= now
-    && !isPaymentRosterFull(room)
+    ["open", "locked"].includes(String(room.status || "")) &&
+    Number.isFinite(scheduledStartAt) &&
+    scheduledStartAt > 0 &&
+    scheduledStartAt <= now &&
+    !isPaymentRosterFull(room)
   ) {
     return true;
   }
@@ -459,9 +456,10 @@ function isPaymentJoinLocked(room: any, now = Date.now()): boolean {
   if (!room || room.status === "cancelled" || room.status === "expired") return true;
   if (isPaymentRosterFull(room)) return true;
   const explicitLockAt = Number(room?.lockAt || 0);
-  const lockAt = Number.isFinite(explicitLockAt) && explicitLockAt > 0
-    ? explicitLockAt
-    : getMatchroomLockAt(room?.scheduledStartAt || room?.startTime);
+  const lockAt =
+    Number.isFinite(explicitLockAt) && explicitLockAt > 0
+      ? explicitLockAt
+      : getMatchroomLockAt(room?.scheduledStartAt || room?.startTime);
   return typeof lockAt === "number" && lockAt <= now;
 }
 
@@ -485,11 +483,11 @@ function isRecoverableCheckoutStartError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "");
   const lower = message.toLowerCase();
   return (
-    lower.includes("taking too long")
-    || lower.includes("timeout")
-    || lower.includes("timed out")
-    || lower.includes("signal timed out")
-    || lower.includes("aborted due to timeout")
+    lower.includes("taking too long") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("signal timed out") ||
+    lower.includes("aborted due to timeout")
   );
 }
 
@@ -515,7 +513,7 @@ function getPlayerPaymentOutcomeCopy(
         ? "Your Easypaisa payment was received, but the team challenge hold could not be placed. Funds remain available in your MatchHai wallet."
         : isWalkIn
           ? "Your Easypaisa payment was received, but the walk-in booking could not be created. Funds remain available in your MatchHai wallet."
-        : "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
+          : "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
     };
   }
   if (kind === "wallet_topup") {
@@ -560,11 +558,14 @@ function getPlayerPaymentRoute(kind: PaymentKind, decision: "paid" | "failed" | 
   return PLAYER_INBOX_ROUTE;
 }
 
-async function notifyPlayerPaymentOutcome(ctx: any, input: {
-  payment: any;
-  decision: "paid" | "failed" | "expired" | "wallet_credit_only";
-  status: "accepted" | "rejected" | "expired";
-}) {
+async function notifyPlayerPaymentOutcome(
+  ctx: any,
+  input: {
+    payment: any;
+    decision: "paid" | "failed" | "expired" | "wallet_credit_only";
+    status: "accepted" | "rejected" | "expired";
+  },
+) {
   const kind = input.payment.kind as PaymentKind;
   const route = getPlayerPaymentRoute(kind, input.decision);
   const copy = getPlayerPaymentOutcomeCopy(kind, input.decision, input.payment);
@@ -596,9 +597,9 @@ function collectPaymentAttentionFlags(input: {
   const status = String(input.payment.status || "");
   const isPaid = status === "paid";
   const activePastExpiry =
-    ["created", "redirected", "token_received", "pending"].includes(status)
-    && Boolean(input.payment.expiresAt)
-    && Number(input.payment.expiresAt) < input.now;
+    ["created", "redirected", "token_received", "pending"].includes(status) &&
+    Boolean(input.payment.expiresAt) &&
+    Number(input.payment.expiresAt) < input.now;
   const flags: PaymentAttentionFlag[] = [];
 
   if (isPaid && !input.walletTxExists) flags.push("paid_no_wallet_tx");
@@ -615,11 +616,14 @@ function collectPaymentAttentionFlags(input: {
   return flags;
 }
 
-async function notifySuperAdminsPaymentAttentionRequired(ctx: any, input: {
-  payment: any;
-  status?: PaymentStatus;
-  now: number;
-}) {
+async function notifySuperAdminsPaymentAttentionRequired(
+  ctx: any,
+  input: {
+    payment: any;
+    status?: PaymentStatus;
+    now: number;
+  },
+) {
   const payment = {
     ...input.payment,
     status: input.status || input.payment.status,
@@ -684,7 +688,9 @@ function getDefaultIpnAllowedHosts() {
 
 function getAllowedIpnHosts() {
   const configuredHosts = EASYPAISA_IPN_ALLOWED_HOSTS
-    ? EASYPAISA_IPN_ALLOWED_HOSTS.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+    ? EASYPAISA_IPN_ALLOWED_HOSTS.split(",")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
     : [];
 
   return Array.from(new Set([...getDefaultIpnAllowedHosts(), ...configuredHosts]));
@@ -726,27 +732,28 @@ function sanitizeForDebug(input: Record<string, unknown>) {
 
 function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnapshot) {
   const paymentMode = String(
-    snapshot.paymentMode
-    || snapshot.paymentMethod
-    || snapshot.rawPayload?.paymentMode
-    || snapshot.rawPayload?.paymentMethod
-    || "",
-  ).trim().toUpperCase();
+    snapshot.paymentMode ||
+      snapshot.paymentMethod ||
+      snapshot.rawPayload?.paymentMode ||
+      snapshot.rawPayload?.paymentMethod ||
+      "",
+  )
+    .trim()
+    .toUpperCase();
   const transactionStatus = String(
-    snapshot.transactionStatus
-    || snapshot.rawPayload?.transactionStatus
-    || snapshot.rawPayload?.status
-    || "",
-  ).trim().toUpperCase();
+    snapshot.transactionStatus || snapshot.rawPayload?.transactionStatus || snapshot.rawPayload?.status || "",
+  )
+    .trim()
+    .toUpperCase();
   const responseCode = String(snapshot.responseCode || snapshot.rawPayload?.responseCode || "").trim();
   const responseDesc = String(
-    snapshot.responseDesc
-    || snapshot.rawPayload?.responseDesc
-    || snapshot.rawPayload?.errorReason
-    || snapshot.rawPayload?.responseMessage
-    || snapshot.rawPayload?.description
-    || snapshot.rawPayload?.errorMessage
-    || "",
+    snapshot.responseDesc ||
+      snapshot.rawPayload?.responseDesc ||
+      snapshot.rawPayload?.errorReason ||
+      snapshot.rawPayload?.responseMessage ||
+      snapshot.rawPayload?.description ||
+      snapshot.rawPayload?.errorMessage ||
+      "",
   ).trim();
   const combined = `${transactionStatus} ${responseCode} ${responseDesc}`.toUpperCase();
 
@@ -765,14 +772,7 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
   ]);
   const EXPIRED_STATUSES = new Set(["EXPIRED", "TIMEOUT", "TIMED_OUT"]);
   const PAID_STATUSES = new Set(["PAID", "SUCCESS", "COMPLETED", "COMPLETE"]);
-  const PENDING_STATUSES = new Set([
-    "PENDING",
-    "BLOCKED",
-    "INITIATED",
-    "CREATED",
-    "REQUESTED",
-    "PROCESSING",
-  ]);
+  const PENDING_STATUSES = new Set(["PENDING", "BLOCKED", "INITIATED", "CREATED", "REQUESTED", "PROCESSING"]);
 
   let resolvedStatus: PaymentStatus = "failed";
 
@@ -795,7 +795,12 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
     resolvedStatus = "paid";
   } else if (!transactionStatus && (source === "ipn" || source === "hosted_finalize")) {
     // Provider webhooks/finalize responses sometimes omit a normalized transactionStatus.
-    if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE")) {
+    if (
+      combined.includes("CANCEL") ||
+      combined.includes("REJECT") ||
+      combined.includes("DECLIN") ||
+      combined.includes("REVERSE")
+    ) {
       resolvedStatus = "failed";
     } else if (combined.includes("EXPIRE")) {
       resolvedStatus = "expired";
@@ -806,7 +811,13 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
     } else if (responseCode === "0000") {
       resolvedStatus = "pending";
     }
-  } else if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE") || combined.includes("FAILED")) {
+  } else if (
+    combined.includes("CANCEL") ||
+    combined.includes("REJECT") ||
+    combined.includes("DECLIN") ||
+    combined.includes("REVERSE") ||
+    combined.includes("FAILED")
+  ) {
     resolvedStatus = "failed";
   } else if (combined.includes("EXPIRE")) {
     resolvedStatus = "expired";
@@ -827,13 +838,13 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
 
 function getProviderReference(snapshot: ProviderSnapshot, orderRefNum: string) {
   return String(
-    snapshot.providerReference
-    || snapshot.transactionId
-    || snapshot.paymentToken
-    || snapshot.rawPayload?.transactionId
-    || snapshot.rawPayload?.txnId
-    || snapshot.rawPayload?.paymentToken
-    || orderRefNum,
+    snapshot.providerReference ||
+      snapshot.transactionId ||
+      snapshot.paymentToken ||
+      snapshot.rawPayload?.transactionId ||
+      snapshot.rawPayload?.txnId ||
+      snapshot.rawPayload?.paymentToken ||
+      orderRefNum,
   );
 }
 
@@ -845,14 +856,7 @@ function parseProviderAmountValue(value: unknown) {
 
 function findProviderAmount(payload: any): number | null {
   if (!payload || typeof payload !== "object") return null;
-  const directKeys = [
-    "amount",
-    "transactionAmount",
-    "txnAmount",
-    "paidAmount",
-    "totalAmount",
-    "grossAmount",
-  ];
+  const directKeys = ["amount", "transactionAmount", "txnAmount", "paidAmount", "totalAmount", "grossAmount"];
   for (const key of directKeys) {
     const parsed = parseProviderAmountValue(payload[key]);
     if (parsed !== null) return parsed;
@@ -868,14 +872,7 @@ function findProviderAmount(payload: any): number | null {
 
 function findProviderOrderRef(payload: any): string | null {
   if (!payload || typeof payload !== "object") return null;
-  const directKeys = [
-    "orderRefNum",
-    "orderRefNumber",
-    "orderId",
-    "orderID",
-    "order_id",
-    "merchantTxnRefNo",
-  ];
+  const directKeys = ["orderRefNum", "orderRefNumber", "orderId", "orderID", "order_id", "merchantTxnRefNo"];
   for (const key of directKeys) {
     const value = String(payload[key] || "").trim();
     if (value) return value;
@@ -890,11 +887,7 @@ function findProviderOrderRef(payload: any): string | null {
 }
 
 function getProviderOrderRef(snapshot: ProviderSnapshot) {
-  return String(
-    snapshot.orderRefNumber
-    || findProviderOrderRef(snapshot.rawPayload)
-    || "",
-  ).trim();
+  return String(snapshot.orderRefNumber || findProviderOrderRef(snapshot.rawPayload) || "").trim();
 }
 
 function getProviderAmount(snapshot: ProviderSnapshot) {
@@ -911,7 +904,11 @@ function getRestInquiryResponse(snapshot: ProviderSnapshot) {
   return snapshot.rawPayload?.rest?.inquiry?.response || {};
 }
 
-function isInvalidOrderInquiryFailure(source: ProviderSource, snapshot: ProviderSnapshot, normalized: ReturnType<typeof normalizeProviderUpdate>) {
+function isInvalidOrderInquiryFailure(
+  source: ProviderSource,
+  snapshot: ProviderSnapshot,
+  normalized: ReturnType<typeof normalizeProviderUpdate>,
+) {
   if (source !== "inquiry" || normalized.resolvedStatus !== "failed") {
     return false;
   }
@@ -931,42 +928,43 @@ function isInvalidOrderInquiryFailure(source: ProviderSource, snapshot: Provider
   ];
 
   return values.some((value) => {
-    const text = String(value || "").trim().toUpperCase();
+    const text = String(value || "")
+      .trim()
+      .toUpperCase();
     if (!text) return false;
     const compact = text.replace(/[^A-Z0-9]/g, "");
     return compact.includes("INVALIDORDER");
   });
 }
 
-function isMaNoResponseFailure(source: ProviderSource, snapshot: ProviderSnapshot, normalized: ReturnType<typeof normalizeProviderUpdate>) {
+function isMaNoResponseFailure(
+  source: ProviderSource,
+  snapshot: ProviderSnapshot,
+  normalized: ReturnType<typeof normalizeProviderUpdate>,
+) {
   if (source !== "inquiry" || normalized.resolvedStatus !== "failed") {
     return false;
   }
 
   const inquiryResponse = getRestInquiryResponse(snapshot);
   const paymentMode = String(
-    snapshot.paymentMode
-    || snapshot.paymentMethod
-    || inquiryResponse.paymentMode
-    || inquiryResponse.paymentMethod
-    || "",
+    snapshot.paymentMode ||
+      snapshot.paymentMethod ||
+      inquiryResponse.paymentMode ||
+      inquiryResponse.paymentMethod ||
+      "",
   ).toUpperCase();
   const errorCode = String(inquiryResponse.errorCode || snapshot.rawPayload?.errorCode || "").toUpperCase();
   const errorText = String(
-    inquiryResponse.errorReason
-    || inquiryResponse.responseDesc
-    || normalized.responseDesc
-    || "",
+    inquiryResponse.errorReason || inquiryResponse.responseDesc || normalized.responseDesc || "",
   ).toLowerCase();
 
   return (
-    paymentMode === "MA"
-    && (
-      errorCode === "NO_RESPONSE_FROM_EWP"
-      || errorText.includes("approve this transaction")
-      || errorText.includes("mobile account pin")
-      || errorText.includes("no response")
-    )
+    paymentMode === "MA" &&
+    (errorCode === "NO_RESPONSE_FROM_EWP" ||
+      errorText.includes("approve this transaction") ||
+      errorText.includes("mobile account pin") ||
+      errorText.includes("no response"))
   );
 }
 
@@ -983,12 +981,7 @@ function parseDirectIpnPayload(url: URL, formEntries: Record<string, string>) {
     paymentMethod: merged.paymentMethod || merged.paymentMode || null,
     authToken: merged.auth_token || merged.authToken || null,
     orderRefNumber:
-      merged.orderRefNum
-      || merged.orderRefNumber
-      || merged.orderId
-      || merged.orderID
-      || merged.order_id
-      || null,
+      merged.orderRefNum || merged.orderRefNumber || merged.orderId || merged.orderID || merged.order_id || null,
     rawPayload: merged,
   };
 }
@@ -1071,7 +1064,7 @@ export const getStartCheckoutContext = internalQuery({
         throw new Error("This slot is no longer available.");
       }
 
-      const targetSlots = side === "A" ? (room.slotsA || []) : side === "B" ? (room.slotsB || []) : [];
+      const targetSlots = side === "A" ? room.slotsA || [] : side === "B" ? room.slotsB || [] : [];
       const slot = targetSlots.find((entry: any) => String(entry?.slotId || "") === selectedSlotId);
       if (!slot) {
         console.warn("[easypaisa] booking checkout blocked: selected slot missing", {
@@ -1106,14 +1099,15 @@ export const getStartCheckoutContext = internalQuery({
       const relatedIntents = await ctx.db
         .query("bookingIntents")
         .withIndex("by_createdByUid_matchroomId", (q: any) =>
-          q.eq("createdByUid", user._id).eq("matchroomId", intent.matchroomId)
+          q.eq("createdByUid", user._id).eq("matchroomId", intent.matchroomId),
         )
         .order("desc")
         .take(25);
-      const duplicateIntent = relatedIntents.find((otherIntent: any) =>
-        String(otherIntent._id) !== String(args.bookingIntentId)
-        && isActiveUnpaidBookingIntent(otherIntent)
-        && getIntentSelectedSlotId(otherIntent) === selectedSlotId
+      const duplicateIntent = relatedIntents.find(
+        (otherIntent: any) =>
+          String(otherIntent._id) !== String(args.bookingIntentId) &&
+          isActiveUnpaidBookingIntent(otherIntent) &&
+          getIntentSelectedSlotId(otherIntent) === selectedSlotId,
       );
       if (duplicateIntent) {
         console.warn("[easypaisa] booking checkout blocked: duplicate payable intent", {
@@ -1129,16 +1123,12 @@ export const getStartCheckoutContext = internalQuery({
       const targetStart = Number(room.scheduledStartAt || 0);
       const targetDurationMinutes = Number(room.durationMinutes || 60);
       if (
-        Number.isFinite(targetStart)
-        && targetStart > 0
-        && Number.isFinite(targetDurationMinutes)
-        && targetDurationMinutes > 0
+        Number.isFinite(targetStart) &&
+        targetStart > 0 &&
+        Number.isFinite(targetDurationMinutes) &&
+        targetDurationMinutes > 0
       ) {
-        const recentRooms = await ctx.db
-          .query("matchrooms")
-          .withIndex("by_createdAt")
-          .order("desc")
-          .take(100);
+        const recentRooms = await ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(100);
         const conflict = recentRooms.find((candidate: any) => {
           if (String(candidate._id) === String(room._id)) return false;
           if (!getMatchroomPlayerUids(candidate).includes(payerUid)) return false;
@@ -1164,9 +1154,9 @@ export const getStartCheckoutContext = internalQuery({
       if (intent.activePaymentTransactionId) {
         const pointedTransaction = await ctx.db.get(intent.activePaymentTransactionId);
         if (
-          pointedTransaction
-          && String(pointedTransaction.bookingIntentId || "") === String(bookingIntentId)
-          && isActiveCheckoutTransaction(pointedTransaction, now)
+          pointedTransaction &&
+          String(pointedTransaction.bookingIntentId || "") === String(bookingIntentId) &&
+          isActiveCheckoutTransaction(pointedTransaction, now)
         ) {
           activeTransaction = pointedTransaction;
         }
@@ -1228,15 +1218,18 @@ export const getStartCheckoutContext = internalQuery({
       const lineupIds = Array.isArray(lineup) ? lineup.map(String) : [];
       const uniqueLineupIds = new Set(lineupIds);
       const members = team
-        ? await ctx.db.query("teamMembers").withIndex("by_teamId", (q) => q.eq("teamId", team._id)).take(100)
+        ? await ctx.db
+            .query("teamMembers")
+            .withIndex("by_teamId", (q) => q.eq("teamId", team._id))
+            .take(100)
         : [];
       const memberIds = new Set(members.map((member: any) => String(member.odxerId)));
       if (
-        !team
-        || lineupIds.length !== teamSize
-        || uniqueLineupIds.size !== teamSize
-        || !uniqueLineupIds.has(String(captainUid))
-        || lineupIds.some((uid: string) => !memberIds.has(uid))
+        !team ||
+        lineupIds.length !== teamSize ||
+        uniqueLineupIds.size !== teamSize ||
+        !uniqueLineupIds.has(String(captainUid)) ||
+        lineupIds.some((uid: string) => !memberIds.has(uid))
       ) {
         throw new Error(`Select exactly ${teamSize} valid team players before paying.`);
       }
@@ -1259,10 +1252,10 @@ export const getStartCheckoutContext = internalQuery({
     if (user.activeTopupPaymentTransactionId) {
       const pointedTransaction: any = await ctx.db.get(user.activeTopupPaymentTransactionId);
       if (
-        pointedTransaction
-        && pointedTransaction.kind === "wallet_topup"
-        && String(pointedTransaction.userId) === String(user._id)
-        && isActiveCheckoutTransaction(pointedTransaction, now)
+        pointedTransaction &&
+        pointedTransaction.kind === "wallet_topup" &&
+        String(pointedTransaction.userId) === String(user._id) &&
+        isActiveCheckoutTransaction(pointedTransaction, now)
       ) {
         activeTransaction = pointedTransaction;
       }
@@ -1275,19 +1268,22 @@ export const getStartCheckoutContext = internalQuery({
           .withIndex("by_userId_and_status", (q) => q.eq("userId", user._id).eq("status", status))
           .order("desc")
           .take(5);
-        activeTopups.push(...rows.filter((transaction: any) =>
-          transaction.kind === "wallet_topup"
-          && isActiveCheckoutTransaction(transaction, now),
-        ));
+        activeTopups.push(
+          ...rows.filter(
+            (transaction: any) => transaction.kind === "wallet_topup" && isActiveCheckoutTransaction(transaction, now),
+          ),
+        );
       }
       activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
     }
 
-    if (shouldIgnoreActiveWalletTopupForRequest(
-      activeTransaction,
-      { ...args, amount, teamChallengeHold: sanitizedTeamChallengeHold },
-      now,
-    )) {
+    if (
+      shouldIgnoreActiveWalletTopupForRequest(
+        activeTransaction,
+        { ...args, amount, teamChallengeHold: sanitizedTeamChallengeHold },
+        now,
+      )
+    ) {
       activeTransaction = null;
     }
 
@@ -1346,11 +1342,14 @@ export const createCheckoutTransactionWithLock = internalMutation({
       if (intent.activePaymentTransactionId) {
         const pointedTransaction = await ctx.db.get(intent.activePaymentTransactionId);
         if (
-          pointedTransaction
-          && String(pointedTransaction.bookingIntentId || "") === String(args.bookingIntentId)
-          && isActiveCheckoutTransaction(pointedTransaction, now)
+          pointedTransaction &&
+          String(pointedTransaction.bookingIntentId || "") === String(args.bookingIntentId) &&
+          isActiveCheckoutTransaction(pointedTransaction, now)
         ) {
-          return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
+          return {
+            transaction: pointedTransaction,
+            ...buildAttemptFields("reused"),
+          };
         }
       }
 
@@ -1367,7 +1366,10 @@ export const createCheckoutTransactionWithLock = internalMutation({
           activePaymentExpiresAt: activeTransaction.expiresAt,
           updatedAt: now,
         });
-        return { transaction: activeTransaction, ...buildAttemptFields("reused") };
+        return {
+          transaction: activeTransaction,
+          ...buildAttemptFields("reused"),
+        };
       }
     } else {
       const user = await ctx.db.get(args.userId);
@@ -1378,10 +1380,10 @@ export const createCheckoutTransactionWithLock = internalMutation({
       if (user.activeTopupPaymentTransactionId) {
         const pointedTransaction: any = await ctx.db.get(user.activeTopupPaymentTransactionId);
         if (
-          pointedTransaction
-          && pointedTransaction.kind === "wallet_topup"
-          && String(pointedTransaction.userId) === String(args.userId)
-          && isActiveCheckoutTransaction(pointedTransaction, now)
+          pointedTransaction &&
+          pointedTransaction.kind === "wallet_topup" &&
+          String(pointedTransaction.userId) === String(args.userId) &&
+          isActiveCheckoutTransaction(pointedTransaction, now)
         ) {
           if (shouldIgnoreActiveWalletTopupForRequest(pointedTransaction, args, now)) {
             await ctx.db.patch(args.userId, {
@@ -1394,7 +1396,10 @@ export const createCheckoutTransactionWithLock = internalMutation({
             if (Number(pointedTransaction.amount || 0) !== Number(args.amount || 0)) {
               throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
             }
-            return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
+            return {
+              transaction: pointedTransaction,
+              ...buildAttemptFields("reused"),
+            };
           }
         }
       }
@@ -1406,10 +1411,11 @@ export const createCheckoutTransactionWithLock = internalMutation({
           .withIndex("by_userId_and_status", (q) => q.eq("userId", args.userId).eq("status", status))
           .order("desc")
           .take(5);
-        activeTopups.push(...rows.filter((transaction: any) =>
-          transaction.kind === "wallet_topup"
-          && isActiveCheckoutTransaction(transaction, now),
-        ));
+        activeTopups.push(
+          ...rows.filter(
+            (transaction: any) => transaction.kind === "wallet_topup" && isActiveCheckoutTransaction(transaction, now),
+          ),
+        );
       }
       const activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
       if (activeTransaction) {
@@ -1432,7 +1438,10 @@ export const createCheckoutTransactionWithLock = internalMutation({
             activeTopupExpiresAt: activeTransaction.expiresAt,
             updatedAt: now,
           });
-          return { transaction: activeTransaction, ...buildAttemptFields("reused") };
+          return {
+            transaction: activeTransaction,
+            ...buildAttemptFields("reused"),
+          };
         }
       }
     }
@@ -1482,11 +1491,9 @@ export const createCheckoutTransactionWithLock = internalMutation({
       throw new Error("Could not start the payment attempt.");
     }
     if (typeof transaction.nextReconcileAt === "number") {
-      await ctx.scheduler.runAt(
-        transaction.nextReconcileAt,
-        internal.easypaisa.reconcilePaymentByOrderRef,
-        { orderRefNum: transaction.orderRefNum },
-      );
+      await ctx.scheduler.runAt(transaction.nextReconcileAt, internal.easypaisa.reconcilePaymentByOrderRef, {
+        orderRefNum: transaction.orderRefNum,
+      });
     }
 
     if (args.kind === "booking_intent" && args.bookingIntentId) {
@@ -1512,10 +1519,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
 async function clearActivePaymentPointerIfMatching(ctx: any, transaction: any, now: number) {
   if (transaction.kind === "booking_intent" && transaction.bookingIntentId) {
     const intent = await ctx.db.get(transaction.bookingIntentId);
-    if (
-      intent?.activePaymentTransactionId
-      && String(intent.activePaymentTransactionId) === String(transaction._id)
-    ) {
+    if (intent?.activePaymentTransactionId && String(intent.activePaymentTransactionId) === String(transaction._id)) {
       await ctx.db.patch(transaction.bookingIntentId, {
         activePaymentTransactionId: undefined,
         activePaymentOrderRefNum: undefined,
@@ -1528,8 +1532,8 @@ async function clearActivePaymentPointerIfMatching(ctx: any, transaction: any, n
   if (transaction.kind === "wallet_topup") {
     const user = await ctx.db.get(transaction.userId);
     if (
-      user?.activeTopupPaymentTransactionId
-      && String(user.activeTopupPaymentTransactionId) === String(transaction._id)
+      user?.activeTopupPaymentTransactionId &&
+      String(user.activeTopupPaymentTransactionId) === String(transaction._id)
     ) {
       await ctx.db.patch(transaction.userId, {
         activeTopupPaymentTransactionId: undefined,
@@ -1704,7 +1708,8 @@ export const startCheckout = action({
         hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
         actionRequired: active.providerPayload?.rest?.initiate?.actionRequired || "approve_in_easypaisa",
         paymentToken: active.providerPayload?.rest?.initiate?.response?.paymentToken || null,
-        paymentTokenExpiryDateTime: active.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
+        paymentTokenExpiryDateTime:
+          active.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
         teamChallengeHoldStatus: active.providerPayload?.teamChallengeHold?.status || null,
       };
     }
@@ -1766,7 +1771,8 @@ export const startCheckout = action({
         hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
         actionRequired: transaction.providerPayload?.rest?.initiate?.actionRequired || "approve_in_easypaisa",
         paymentToken: transaction.providerPayload?.rest?.initiate?.response?.paymentToken || null,
-        paymentTokenExpiryDateTime: transaction.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
+        paymentTokenExpiryDateTime:
+          transaction.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
         teamChallengeHoldStatus: transaction.providerPayload?.teamChallengeHold?.status || null,
       };
     }
@@ -1808,31 +1814,30 @@ export const startCheckout = action({
       throw new Error("Your account email is required for Easypaisa.");
     }
 
-    const requestPayload = transactionType === "OTC"
-      ? {
-          orderId: orderRefNum,
-          storeId: EASYPAISA_STORE_ID,
-          transactionAmount: Number(amount).toFixed(2),
-          transactionType: "OTC",
-          msisdn: normalizedPhone,
-          emailAddress,
-          tokenExpiry: formatTokenExpiry(expiresAt),
-          optional1: args.kind,
-          optional2: bookingIntentId ? String(bookingIntentId) : String(userId),
-        }
-      : {
-          orderId: orderRefNum,
-          storeId: EASYPAISA_STORE_ID,
-          transactionAmount: Number(amount).toFixed(2),
-          transactionType: "MA",
-          mobileAccountNo: normalizedPhone,
-          emailAddress,
-          optional1: args.kind,
-          optional2: bookingIntentId ? String(bookingIntentId) : String(userId),
-        };
-    const endpointPath = transactionType === "OTC"
-      ? "/initiate-otc-transaction"
-      : "/initiate-ma-transaction";
+    const requestPayload =
+      transactionType === "OTC"
+        ? {
+            orderId: orderRefNum,
+            storeId: EASYPAISA_STORE_ID,
+            transactionAmount: Number(amount).toFixed(2),
+            transactionType: "OTC",
+            msisdn: normalizedPhone,
+            emailAddress,
+            tokenExpiry: formatTokenExpiry(expiresAt),
+            optional1: args.kind,
+            optional2: bookingIntentId ? String(bookingIntentId) : String(userId),
+          }
+        : {
+            orderId: orderRefNum,
+            storeId: EASYPAISA_STORE_ID,
+            transactionAmount: Number(amount).toFixed(2),
+            transactionType: "MA",
+            mobileAccountNo: normalizedPhone,
+            emailAddress,
+            optional1: args.kind,
+            optional2: bookingIntentId ? String(bookingIntentId) : String(userId),
+          };
+    const endpointPath = transactionType === "OTC" ? "/initiate-otc-transaction" : "/initiate-ma-transaction";
     logGatewayDebug("rest.initiate.request", {
       transactionId: String(transactionId),
       orderRefNum,
@@ -2073,22 +2078,14 @@ export const listStaleActivePaymentTransactions = internalQuery({
         ? await ctx.db
             .query("paymentTransactions")
             .withIndex("by_provider_and_status_and_nextReconcileAt", (q: any) =>
-              q
-                .eq("provider", "easypaisa")
-                .eq("status", status)
-                .gte("nextReconcileAt", 0)
-                .lte("nextReconcileAt", now),
+              q.eq("provider", "easypaisa").eq("status", status).gte("nextReconcileAt", 0).lte("nextReconcileAt", now),
             )
             .order("asc")
             .take(remaining)
         : await ctx.db
             .query("paymentTransactions")
             .withIndex("by_provider_and_status_and_createdAt", (q: any) =>
-              q
-                .eq("provider", "easypaisa")
-                .eq("status", status)
-                .gte("createdAt", floor)
-                .lte("createdAt", cutoff),
+              q.eq("provider", "easypaisa").eq("status", status).gte("createdAt", floor).lte("createdAt", cutoff),
             )
             .order("asc")
             .take(remaining);
@@ -2132,10 +2129,9 @@ export const claimPaymentForReconciliation = internalMutation({
 export const reconcilePaymentByOrderRef = internalAction({
   args: { orderRefNum: v.string() },
   handler: async (ctx, args) => {
-    const row: any = await ctx.runMutation(
-      (internal as any).easypaisa.claimPaymentForReconciliation,
-      { orderRefNum: args.orderRefNum },
-    );
+    const row: any = await ctx.runMutation((internal as any).easypaisa.claimPaymentForReconciliation, {
+      orderRefNum: args.orderRefNum,
+    });
     if (!row) return { ok: true, skipped: true };
     try {
       const result: any = await performProviderInquiryAndApply(ctx, row);
@@ -2148,12 +2144,13 @@ export const reconcilePaymentByOrderRef = internalAction({
       }
       return { ok: true, status: result?.status || null };
     } catch (error) {
-      await ctx.scheduler.runAfter(
-        STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
-        internal.easypaisa.reconcilePaymentByOrderRef,
-        { orderRefNum: args.orderRefNum },
-      );
-      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      await ctx.scheduler.runAfter(STALE_PAYMENT_RECONCILE_COOLDOWN_MS, internal.easypaisa.reconcilePaymentByOrderRef, {
+        orderRefNum: args.orderRefNum,
+      });
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
     }
   },
 });
@@ -2179,7 +2176,12 @@ export const reconcileStalePayments = internalAction({
       logGatewayDebug("reconcile.cron.config_unavailable", {
         message: error instanceof Error ? error.message : String(error),
       });
-      return { ok: false, reason: "payment_config_unavailable", scanned: 0, processed: 0 };
+      return {
+        ok: false,
+        reason: "payment_config_unavailable",
+        scanned: 0,
+        processed: 0,
+      };
     }
 
     const limit = Math.max(1, Math.min(Number(args.batchSize || 15), 50));
@@ -2218,7 +2220,14 @@ export const reconcileStalePayments = internalAction({
       }
     }
 
-    return { ok: true, scanned: staleRows.length, processed, paid, failedOrExpired, errors };
+    return {
+      ok: true,
+      scanned: staleRows.length,
+      processed,
+      paid,
+      failedOrExpired,
+      errors,
+    };
   },
 });
 
@@ -2247,11 +2256,13 @@ export const getCheckoutStatus = query({
           .query("paymentTransactions")
           .withIndex("by_orderRefNum", (q) => q.eq("orderRefNum", args.orderRefNum!))
           .unique()
-      : (await ctx.db
-          .query("paymentTransactions")
-          .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
-          .order("desc")
-          .take(1))[0];
+      : (
+          await ctx.db
+            .query("paymentTransactions")
+            .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
+            .order("desc")
+            .take(1)
+        )[0];
     if (!latest) {
       return null;
     }
@@ -2276,7 +2287,9 @@ export const getCheckoutStatus = query({
       actionRequired: latest.providerPayload?.rest?.initiate?.actionRequired || null,
       hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
       hasSyncIssue: Boolean(latest.lastError),
-      startTimedOut: String(latest.lastError || "").toLowerCase().includes("taking too long"),
+      startTimedOut: String(latest.lastError || "")
+        .toLowerCase()
+        .includes("taking too long"),
       callbackCount: latest.callbackCount || 0,
       finalizedMatchroomId: latest.providerPayload?.matchroomCreate?.matchroomId || null,
       teamChallengeHoldStatus: latest.providerPayload?.teamChallengeHold?.status || null,
@@ -2373,12 +2386,7 @@ export const registerProviderToken = internalMutation({
 export const applyProviderUpdate = internalMutation({
   args: {
     orderRefNum: v.string(),
-    source: v.union(
-      v.literal("initiate"),
-      v.literal("ipn"),
-      v.literal("inquiry"),
-      v.literal("hosted_finalize"),
-    ),
+    source: v.union(v.literal("initiate"), v.literal("ipn"), v.literal("inquiry"), v.literal("hosted_finalize")),
     snapshot: v.any(),
   },
   handler: async (ctx, args): Promise<FinalizeResult> => {
@@ -2395,8 +2403,7 @@ export const applyProviderUpdate = internalMutation({
     const normalized = normalizeProviderUpdate(args.source, snapshot);
     const keepMaNoResponsePending = isMaNoResponseFailure(args.source, snapshot, normalized);
     const keepInvalidOrderInquiryPending =
-      isInvalidOrderInquiryFailure(args.source, snapshot, normalized)
-      && Number(row.expiresAt || 0) > now;
+      isInvalidOrderInquiryFailure(args.source, snapshot, normalized) && Number(row.expiresAt || 0) > now;
     const keepInquiryPending = keepMaNoResponsePending || keepInvalidOrderInquiryPending;
     const providerReference = getProviderReference(snapshot, row.orderRefNum);
     const providerOrderRef = getProviderOrderRef(snapshot);
@@ -2424,12 +2431,13 @@ export const applyProviderUpdate = internalMutation({
     });
 
     const payloadMismatch =
-      (providerOrderRef && providerOrderRef !== row.orderRefNum)
-      || (providerAmount !== null && !amountsMatch(row.amount, providerAmount));
+      (providerOrderRef && providerOrderRef !== row.orderRefNum) ||
+      (providerAmount !== null && !amountsMatch(row.amount, providerAmount));
     if (payloadMismatch) {
-      const reason = providerOrderRef && providerOrderRef !== row.orderRefNum
-        ? "provider_order_reference_mismatch"
-        : "provider_amount_mismatch";
+      const reason =
+        providerOrderRef && providerOrderRef !== row.orderRefNum
+          ? "provider_order_reference_mismatch"
+          : "provider_amount_mismatch";
       const currentPayload = row.providerPayload || {};
       await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         providerStatus: normalized.transactionStatus || normalized.responseCode || undefined,
@@ -2469,37 +2477,38 @@ export const applyProviderUpdate = internalMutation({
       };
     }
     const currentPayload = row.providerPayload || {};
-    let sourcePayload = args.source === "ipn"
-      ? {
-          ...currentPayload,
-          ipn: {
-            ...(currentPayload.ipn || {}),
-            lastIpnAt: now,
-            lastPayload: snapshot.rawPayload || null,
-          },
-          lastProviderStatus: normalized.transactionStatus || normalized.responseCode,
-          lastSyncAt: now,
-        }
-      : args.source === "hosted_finalize"
+    let sourcePayload =
+      args.source === "ipn"
         ? {
             ...currentPayload,
-            hosted: {
-              ...(currentPayload.hosted || {}),
-              finalize: snapshot.rawPayload || null,
-              lastFinalizeAt: now,
+            ipn: {
+              ...(currentPayload.ipn || {}),
+              lastIpnAt: now,
+              lastPayload: snapshot.rawPayload || null,
             },
             lastProviderStatus: normalized.transactionStatus || normalized.responseCode,
             lastSyncAt: now,
           }
-        : {
-            ...currentPayload,
-            rest: {
-              ...(currentPayload.rest || {}),
-              ...(snapshot.rawPayload?.rest || {}),
-            },
-            lastProviderStatus: normalized.transactionStatus || normalized.responseCode,
-            lastSyncAt: now,
-          };
+        : args.source === "hosted_finalize"
+          ? {
+              ...currentPayload,
+              hosted: {
+                ...(currentPayload.hosted || {}),
+                finalize: snapshot.rawPayload || null,
+                lastFinalizeAt: now,
+              },
+              lastProviderStatus: normalized.transactionStatus || normalized.responseCode,
+              lastSyncAt: now,
+            }
+          : {
+              ...currentPayload,
+              rest: {
+                ...(currentPayload.rest || {}),
+                ...(snapshot.rawPayload?.rest || {}),
+              },
+              lastProviderStatus: normalized.transactionStatus || normalized.responseCode,
+              lastSyncAt: now,
+            };
 
     const callbackPatch: Record<string, unknown> = {
       providerStatus: normalized.transactionStatus || normalized.responseCode || undefined,
@@ -2513,10 +2522,10 @@ export const applyProviderUpdate = internalMutation({
     };
 
     if (
-      isTerminalStatus(row.status as PaymentStatus)
-      && row.status !== "paid"
-      && normalized.resolvedStatus === "paid"
-      && args.source !== "inquiry"
+      isTerminalStatus(row.status as PaymentStatus) &&
+      row.status !== "paid" &&
+      normalized.resolvedStatus === "paid" &&
+      args.source !== "inquiry"
     ) {
       await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
@@ -2539,30 +2548,26 @@ export const applyProviderUpdate = internalMutation({
     }
 
     if (row.processedAt || row.status === "paid") {
-      const matchroomCreateArgs = row.kind === "wallet_topup"
-        ? row.providerPayload?.checkoutContext?.matchroomCreateArgs
-        : null;
-      const zoneWalkInCreateArgs = row.kind === "wallet_topup"
-        ? row.providerPayload?.checkoutContext?.zoneWalkInCreateArgs
-        : null;
+      const matchroomCreateArgs =
+        row.kind === "wallet_topup" ? row.providerPayload?.checkoutContext?.matchroomCreateArgs : null;
+      const zoneWalkInCreateArgs =
+        row.kind === "wallet_topup" ? row.providerPayload?.checkoutContext?.zoneWalkInCreateArgs : null;
       if (matchroomCreateArgs && !row.providerPayload?.matchroomCreate?.matchroomId) {
-        const finalizeResult: any = await ctx.runMutation(
-          internal.matchrooms.finalizePaidCreateFromProvider,
-          {
-            orderRefNum: row.orderRefNum,
-            userId: row.userId,
-            amount: row.amount,
-            matchroomCreateArgs,
-          },
-        );
+        const finalizeResult: any = await ctx.runMutation(internal.matchrooms.finalizePaidCreateFromProvider, {
+          orderRefNum: row.orderRefNum,
+          userId: row.userId,
+          amount: row.amount,
+          matchroomCreateArgs,
+        });
         const matchroomId = finalizeResult?.matchroomId;
         if (matchroomId) {
           await ctx.runMutation(internal.wallet.deductFundsInternal, {
             amount: row.amount,
             metadata: {
-              flow: String(matchroomCreateArgs.locationMode || "") === "broadcast"
-                ? "broadcast_matchroom_create"
-                : "zone_matchroom_create",
+              flow:
+                String(matchroomCreateArgs.locationMode || "") === "broadcast"
+                  ? "broadcast_matchroom_create"
+                  : "zone_matchroom_create",
               matchroomId: String(matchroomId),
               provider: "easypaisa",
               orderRefNum: row.orderRefNum,
@@ -2637,9 +2642,9 @@ export const applyProviderUpdate = internalMutation({
     }
 
     if (
-      Number(row.expiresAt || 0) > 0
-      && now > Number(row.expiresAt || 0)
-      && (normalized.resolvedStatus === "pending" || keepInquiryPending)
+      Number(row.expiresAt || 0) > 0 &&
+      now > Number(row.expiresAt || 0) &&
+      (normalized.resolvedStatus === "pending" || keepInquiryPending)
     ) {
       if (row.bookingIntentId) {
         await ctx.db.patch(row.bookingIntentId, {
@@ -2803,9 +2808,8 @@ export const applyProviderUpdate = internalMutation({
         });
       }
 
-      walletTopupMatchroomCreateArgs = row.kind === "wallet_topup"
-        ? row.providerPayload?.checkoutContext?.matchroomCreateArgs
-        : null;
+      walletTopupMatchroomCreateArgs =
+        row.kind === "wallet_topup" ? row.providerPayload?.checkoutContext?.matchroomCreateArgs : null;
       if (walletTopupMatchroomCreateArgs) {
         logGatewayDebug("reconcile.matchroom_create.begin", {
           transactionId: String(row._id),
@@ -2813,24 +2817,22 @@ export const applyProviderUpdate = internalMutation({
           userId: String(row.userId),
           amount: row.amount,
         });
-        const finalizeResult: any = await ctx.runMutation(
-          internal.matchrooms.finalizePaidCreateFromProvider,
-          {
-            orderRefNum: row.orderRefNum,
-            userId: row.userId,
-            amount: row.amount,
-            matchroomCreateArgs: walletTopupMatchroomCreateArgs,
-          },
-        );
+        const finalizeResult: any = await ctx.runMutation(internal.matchrooms.finalizePaidCreateFromProvider, {
+          orderRefNum: row.orderRefNum,
+          userId: row.userId,
+          amount: row.amount,
+          matchroomCreateArgs: walletTopupMatchroomCreateArgs,
+        });
         const matchroomId = finalizeResult?.matchroomId;
         if (matchroomId) {
           createdWalletTopupMatchroomId = String(matchroomId);
           await ctx.runMutation(internal.wallet.deductFundsInternal, {
             amount: row.amount,
             metadata: {
-              flow: String(walletTopupMatchroomCreateArgs.locationMode || "") === "broadcast"
-                ? "broadcast_matchroom_create"
-                : "zone_matchroom_create",
+              flow:
+                String(walletTopupMatchroomCreateArgs.locationMode || "") === "broadcast"
+                  ? "broadcast_matchroom_create"
+                  : "zone_matchroom_create",
               matchroomId: String(matchroomId),
               provider: "easypaisa",
               orderRefNum: row.orderRefNum,
@@ -2850,9 +2852,8 @@ export const applyProviderUpdate = internalMutation({
         }
       }
 
-      walletTopupZoneWalkInCreateArgs = row.kind === "wallet_topup"
-        ? row.providerPayload?.checkoutContext?.zoneWalkInCreateArgs
-        : null;
+      walletTopupZoneWalkInCreateArgs =
+        row.kind === "wallet_topup" ? row.providerPayload?.checkoutContext?.zoneWalkInCreateArgs : null;
       if (walletTopupZoneWalkInCreateArgs) {
         logGatewayDebug("reconcile.zone_walkin_create.begin", {
           transactionId: String(row._id),
@@ -2900,10 +2901,12 @@ export const applyProviderUpdate = internalMutation({
       // team side. holdSideFromProvider is defensive (never throws on a
       // recoverable condition) so the credited top-up is preserved as wallet
       // credit if the hold cannot be placed.
-      walletTopupTeamChallengeHold = row.kind === "wallet_topup"
-        ? row.providerPayload?.checkoutContext?.teamChallengeHold
-        : null;
-      if (walletTopupTeamChallengeHold?.challengeId && (walletTopupTeamChallengeHold?.side === "teamA" || walletTopupTeamChallengeHold?.side === "teamB")) {
+      walletTopupTeamChallengeHold =
+        row.kind === "wallet_topup" ? row.providerPayload?.checkoutContext?.teamChallengeHold : null;
+      if (
+        walletTopupTeamChallengeHold?.challengeId &&
+        (walletTopupTeamChallengeHold?.side === "teamA" || walletTopupTeamChallengeHold?.side === "teamB")
+      ) {
         const holdResult: any = await ctx.runMutation(internal.teamChallenges.holdSideFromProvider, {
           challengeId: walletTopupTeamChallengeHold.challengeId,
           side: walletTopupTeamChallengeHold.side,
@@ -2939,9 +2942,8 @@ export const applyProviderUpdate = internalMutation({
 
       await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
-        providerPayload: row.kind === "booking_intent"
-          ? { ...sourcePayload, bookingFundsMode: "wallet_hold" }
-          : sourcePayload,
+        providerPayload:
+          row.kind === "booking_intent" ? { ...sourcePayload, bookingFundsMode: "wallet_hold" } : sourcePayload,
         status: "paid",
         processedAt: now,
         lastError: undefined,
@@ -2964,9 +2966,8 @@ export const applyProviderUpdate = internalMutation({
         const createWasAttempted = Boolean(walletTopupMatchroomCreateArgs || walletTopupZoneWalkInCreateArgs);
         const createFinalized = Boolean((sourcePayload as any)?.matchroomCreate?.matchroomId);
         const teamHoldFellBackToWallet = Boolean(walletTopupTeamChallengeHold) && teamChallengeHoldStatus !== "held";
-        const decision = (createWasAttempted && !createFinalized) || teamHoldFellBackToWallet
-          ? "wallet_credit_only"
-          : "paid";
+        const decision =
+          (createWasAttempted && !createFinalized) || teamHoldFellBackToWallet ? "wallet_credit_only" : "paid";
         await notifyPlayerPaymentOutcome(ctx, {
           payment: row,
           decision,
@@ -2993,15 +2994,18 @@ export const applyProviderUpdate = internalMutation({
         row.kind === "booking_intent" &&
         /slot is no longer available|payment window expired|matchroom has expired|matchroom is locked/i.test(message);
       const walletTopupCompletionFellBackToWallet =
-        row.kind === "wallet_topup"
-        && walletCreditApplied
-        && (walletTopupMatchroomCreateArgs || walletTopupZoneWalkInCreateArgs || walletTopupTeamChallengeHold)
-        && !createdWalletTopupMatchroomId;
+        row.kind === "wallet_topup" &&
+        walletCreditApplied &&
+        (walletTopupMatchroomCreateArgs || walletTopupZoneWalkInCreateArgs || walletTopupTeamChallengeHold) &&
+        !createdWalletTopupMatchroomId;
 
       if (walletCreditedBookingFailure) {
         await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
           ...callbackPatch,
-          providerPayload: { ...sourcePayload, bookingFundsMode: "wallet_hold" },
+          providerPayload: {
+            ...sourcePayload,
+            bookingFundsMode: "wallet_hold",
+          },
           status: "paid",
           processedAt: now,
           lastError: message,
@@ -3143,7 +3147,9 @@ export const easypaisaCheckoutPage = httpAction(async (ctx, request) => {
   const session: any = await ctx.runQuery(internal.easypaisa.getCheckoutSessionByToken, { token });
 
   if (!EASYPAISA_HOSTED_FALLBACK_ENABLED) {
-    return new Response("Hosted Easypaisa fallback is disabled.", { status: 410 });
+    return new Response("Hosted Easypaisa fallback is disabled.", {
+      status: 410,
+    });
   }
 
   if (!session?.transaction || !session?.user) {
@@ -3152,7 +3158,9 @@ export const easypaisaCheckoutPage = httpAction(async (ctx, request) => {
 
   const transaction = session.transaction;
   if (transaction.processedAt || transaction.status === "paid") {
-    return new Response("This payment session is no longer active.", { status: 410 });
+    return new Response("This payment session is no longer active.", {
+      status: 410,
+    });
   }
 
   const fields: Record<string, string> = {
@@ -3222,7 +3230,9 @@ export const easypaisaTokenHandler = httpAction(async (ctx, request) => {
   const authToken = url.searchParams.get("auth_token") || "";
 
   if (!token || !authToken) {
-    return new Response("Missing checkout token or auth token.", { status: 400 });
+    return new Response("Missing checkout token or auth token.", {
+      status: 400,
+    });
   }
 
   await ctx.runMutation(internal.easypaisa.registerProviderToken, {
@@ -3272,10 +3282,10 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
   const inboundStatus = url.searchParams.get("status") || String(formData?.get?.("status") || "");
   const inboundDesc = url.searchParams.get("desc") || String(formData?.get?.("desc") || "");
   const orderRefNumber =
-    url.searchParams.get("orderRefNumber")
-    || url.searchParams.get("orderRefNum")
-    || String(formData?.get?.("orderRefNumber") || formData?.get?.("orderRefNum") || "")
-    || session.transaction.orderRefNum;
+    url.searchParams.get("orderRefNumber") ||
+    url.searchParams.get("orderRefNum") ||
+    String(formData?.get?.("orderRefNumber") || formData?.get?.("orderRefNum") || "") ||
+    session.transaction.orderRefNum;
   const authToken = url.searchParams.get("auth_token") || String(formData?.get?.("auth_token") || "");
   if (orderRefNumber !== session.transaction.orderRefNum) {
     return new Response("Payment reference mismatch.", { status: 400 });
@@ -3309,17 +3319,17 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
         transactionDateTime: inquiryBody?.transactionDateTime || null,
         paymentMode: inquiryBody?.paymentMode || null,
         paymentMethod:
-          inquiryBody?.paymentMethod
-          || inquiryBody?.paymentMode
-          || session.transaction.paymentMethod
-          || EASYPAISA_PAYMENT_METHOD
-          || null,
+          inquiryBody?.paymentMethod ||
+          inquiryBody?.paymentMode ||
+          session.transaction.paymentMethod ||
+          EASYPAISA_PAYMENT_METHOD ||
+          null,
         authToken: inquiryBody?.auth_token || inquiryBody?.authToken || authToken || null,
         providerReference:
-          inquiryBody?.transactionId
-          || inquiryBody?.txnId
-          || inquiryBody?.paymentToken
-          || session.transaction.orderRefNum,
+          inquiryBody?.transactionId ||
+          inquiryBody?.txnId ||
+          inquiryBody?.paymentToken ||
+          session.transaction.orderRefNum,
         rawPayload: {
           rest: {
             inquiry: {
@@ -3442,13 +3452,13 @@ export const easypaisaIpnHandler = httpAction(async (ctx, request) => {
 
     const directPayload = parseDirectIpnPayload(url, formEntries);
     const orderRefNumber =
-      parsedPayload?.orderRefNum
-      || parsedPayload?.orderRefNumber
-      || parsedPayload?.orderId
-      || parsedPayload?.orderID
-      || parsedPayload?.order_id
-      || parsedPayload?.merchantTxnRefNo
-      || directPayload.orderRefNumber;
+      parsedPayload?.orderRefNum ||
+      parsedPayload?.orderRefNumber ||
+      parsedPayload?.orderId ||
+      parsedPayload?.orderID ||
+      parsedPayload?.order_id ||
+      parsedPayload?.merchantTxnRefNo ||
+      directPayload.orderRefNumber;
 
     if (!orderRefNumber) {
       return new Response("Missing IPN order reference.", { status: 400 });
@@ -3482,7 +3492,8 @@ export const easypaisaIpnHandler = httpAction(async (ctx, request) => {
         paymentMode: inquiryBody?.paymentMode || null,
         paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || null,
         authToken: inquiryBody?.auth_token || inquiryBody?.authToken || null,
-        providerReference: inquiryBody?.transactionId || inquiryBody?.txnId || inquiryBody?.paymentToken || row.orderRefNum,
+        providerReference:
+          inquiryBody?.transactionId || inquiryBody?.txnId || inquiryBody?.paymentToken || row.orderRefNum,
         rawPayload: {
           rest: {
             inquiry: {
@@ -3504,8 +3515,22 @@ export const easypaisaIpnHandler = httpAction(async (ctx, request) => {
     });
 
     if (!result.ok && result.shouldRetry) {
-      return new Response(result.message || "Retrying reconciliation.", { status: 503 });
+      return new Response(result.message || "Retrying reconciliation.", {
+        status: 503,
+      });
     }
+
+    await captureServerAnalytics({
+      distinctId: row.userId,
+      event: "easypaisa_payment_status_updated",
+      properties: {
+        status: result.status || "unknown",
+        payment_kind: row.kind || "unknown",
+        amount: Number(row.amount || 0),
+        currency: "PKR",
+        provider: "easypaisa",
+      },
+    });
 
     return new Response("ok", { status: 200 });
   } catch (error) {
@@ -3532,11 +3557,7 @@ export const getLatestCheckoutDebug = query({
           .query("paymentTransactions")
           .withIndex("by_orderRefNum", (q) => q.eq("orderRefNum", args.orderRefNum!))
           .unique()
-      : (await ctx.db
-          .query("paymentTransactions")
-          .withIndex("by_createdAt")
-          .order("desc")
-          .take(1))[0];
+      : (await ctx.db.query("paymentTransactions").withIndex("by_createdAt").order("desc").take(1))[0];
     if (!latest) return null;
 
     return {

@@ -17,11 +17,7 @@ import LogoHalo from "../../src/components/LogoHalo";
 import { useAuth } from "../../src/context/AuthContext";
 import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
-import {
-  recoverMissingProfileAfterLogin,
-  signInWithEmail,
-  signOutUser,
-} from "../../src/services/convex/authService";
+import { recoverMissingProfileAfterLogin, signInWithEmail, signOutUser } from "../../src/services/convex/authService";
 import { getUserProfile } from "../../src/services/convex/userService";
 import { useLoginFormStore } from "../../src/store/loginFormStore";
 import { getLoginButtonState } from "../../src/utils/loginButtonState";
@@ -29,6 +25,8 @@ import { COLORS, INPUT_PADDING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { APP_ROUTES } from "../../src/navigation/routes";
 import { isSuperAdminProfile } from "../../src/utils/accountRouting";
+import { captureAnalyticsEvent } from "../../src/lib/analytics/posthog";
+import { classifyAnalyticsFailure } from "../../src/lib/analytics/privacy";
 import styles from "../../app-shared/auth/login.styles";
 
 // 📱 Pakistani phone formatter
@@ -57,8 +55,7 @@ const formatPakistaniPhone = (value: string) => {
   } else if (rest.length <= 7) {
     formatted += rest.slice(0, 3) + " " + rest.slice(3);
   } else {
-    formatted +=
-      rest.slice(0, 3) + " " + rest.slice(3, 7) + " " + rest.slice(7);
+    formatted += rest.slice(0, 3) + " " + rest.slice(3, 7) + " " + rest.slice(7);
   }
 
   return formatted.trim();
@@ -89,25 +86,14 @@ const EMAIL_DOMAIN_TYPO_MAP: Record<string, string> = {
   "outlok.com": "outlook.com",
 };
 
-const COMMON_EMAIL_DOMAINS = [
-  "gmail.com",
-  "hotmail.com",
-  "outlook.com",
-  "yahoo.com",
-  "live.com",
-  "icloud.com",
-];
+const COMMON_EMAIL_DOMAINS = ["gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "live.com", "icloud.com"];
 
 const MAX_ATTEMPTS = 5; // (7)
 const LOCKOUT_SECONDS = 30; // (7)
 const LOGIN_REQUEST_TIMEOUT_MS = 20000;
 const LOGIN_CLEANUP_TIMEOUT_MS = 5000;
 
-async function withLoginTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
+async function withLoginTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
@@ -242,10 +228,7 @@ export default function Login() {
         const domain = parts[1].toLowerCase();
         if (EMAIL_DOMAIN_TYPO_MAP[domain]) {
           domainWarning = `Did you mean ${EMAIL_DOMAIN_TYPO_MAP[domain]}?`;
-        } else if (
-          !COMMON_EMAIL_DOMAINS.includes(domain) &&
-          !domain.includes(".")
-        ) {
+        } else if (!COMMON_EMAIL_DOMAINS.includes(domain) && !domain.includes(".")) {
           domainWarning = "This email domain looks unusual. Please check it.";
         }
       }
@@ -259,9 +242,7 @@ export default function Login() {
     const hasMinLength = password.length >= 6;
 
     // (3) reject "all same" or repetitive type passwords
-    const allSameChar =
-      password.length > 0 &&
-      password.split("").every((ch) => ch === password[0]);
+    const allSameChar = password.length > 0 && password.split("").every((ch) => ch === password[0]);
 
     // (2) common weak passwords
     const isCommonWeak = COMMON_WEAK_PASSWORDS.includes(password.toLowerCase());
@@ -337,10 +318,8 @@ export default function Login() {
   }, [emailOrPhone, password, userType]);
 
   const isLockedOut = lockoutSecondsLeft > 0;
-  const emailErrorToShow =
-    emailServerError || (emailTouched && !emailFocused ? emailFormatError : "");
-  const passwordErrorToShow =
-    passwordServerError || (passwordTouched && !passFocused ? passwordError : "");
+  const emailErrorToShow = emailServerError || (emailTouched && !emailFocused ? emailFormatError : "");
+  const passwordErrorToShow = passwordServerError || (passwordTouched && !passFocused ? passwordError : "");
 
   // Keyboard handling
   const Container = KeyboardAvoidingView;
@@ -393,11 +372,24 @@ export default function Login() {
     };
 
     setLoading(true);
+    captureAnalyticsEvent("user_sign_in_attempted", {
+      account_type: userType,
+      auth_method: "password",
+      identifier_type: emailOrPhone.includes("@") ? "email" : "phone",
+    });
     const timeout = setTimeout(() => {
       if (loginAttemptRef.current !== attemptId) return;
       loginAttemptRef.current = attemptId + 1;
       setLoading(false);
-      showToast({ type: "error", title: "Timed out", message: "Request took too long. Please try again." });
+      captureAnalyticsEvent("user_sign_in_failed", {
+        account_type: userType,
+        failure_category: "timeout",
+      });
+      showToast({
+        type: "error",
+        title: "Timed out",
+        message: "Request took too long. Please try again.",
+      });
     }, LOGIN_REQUEST_TIMEOUT_MS);
 
     try {
@@ -413,6 +405,10 @@ export default function Login() {
       if (loginAttemptRef.current !== attemptId) return;
 
       if (!res.ok) {
+        captureAnalyticsEvent("user_sign_in_failed", {
+          account_type: userType,
+          failure_category: res.code || classifyAnalyticsFailure(res.message),
+        });
         finishAttempt();
         Logger.warn("Login", "signInWithEmail failed", {
           code: res.code,
@@ -480,10 +476,7 @@ export default function Login() {
         });
         const isMissing = profileRes.message === "User profile not found.";
         if (isMissing) {
-          const recovered = await recoverMissingProfileAfterLogin(
-            res.user,
-            userType === "zone" ? "zone" : "player",
-          );
+          const recovered = await recoverMissingProfileAfterLogin(res.user, userType === "zone" ? "zone" : "player");
           if (loginAttemptRef.current !== attemptId) return;
 
           if (recovered.ok) {
@@ -496,29 +489,38 @@ export default function Login() {
               title: "Profile restored",
               message: "We rebuilt your MatchHai profile and signed you in.",
             });
-            router.replace(userType === "zone" ? APP_ROUTES.zoneHome as any : APP_ROUTES.playerHome as any);
+            captureAnalyticsEvent("user_signed_in", {
+              account_type: userType,
+              auth_method: "password",
+              outcome: "profile_recovered",
+            });
+            router.replace(userType === "zone" ? (APP_ROUTES.zoneHome as any) : (APP_ROUTES.playerHome as any));
             return;
           }
 
-          setRecoveryHelper("We authenticated your account, but your MatchHai profile is missing. Please retry once or contact support.");
+          setRecoveryHelper(
+            "We authenticated your account, but your MatchHai profile is missing. Please retry once or contact support.",
+          );
         } else {
           setRecoveryHelper("We signed you in, but could not verify your MatchHai profile yet. Please try again.");
         }
 
         finishAttempt();
-        await withLoginTimeout(
-          signOutUser(),
-          LOGIN_CLEANUP_TIMEOUT_MS,
-          "Sign-out cleanup timed out.",
-        ).catch((cleanupError) => {
-          Logger.warn("Login", "Profile verification cleanup failed", cleanupError);
-        });
+        await withLoginTimeout(signOutUser(), LOGIN_CLEANUP_TIMEOUT_MS, "Sign-out cleanup timed out.").catch(
+          (cleanupError) => {
+            Logger.warn("Login", "Profile verification cleanup failed", cleanupError);
+          },
+        );
         showToast({
           type: "error",
           title: isMissing ? "Profile Missing" : "Login Error",
           message: isMissing
             ? "Your account authenticated but the app profile could not be loaded."
             : "Could not verify your account type. Please try again.",
+        });
+        captureAnalyticsEvent("user_sign_in_failed", {
+          account_type: userType,
+          failure_category: isMissing ? "profile_missing" : "profile_lookup",
         });
         return;
       }
@@ -545,13 +547,11 @@ export default function Login() {
             userId: res.userId,
           });
           finishAttempt();
-          await withLoginTimeout(
-            signOutUser(),
-            LOGIN_CLEANUP_TIMEOUT_MS,
-            "Sign-out cleanup timed out.",
-          ).catch((cleanupError) => {
-            Logger.warn("Login", "Zone mismatch cleanup failed", cleanupError);
-          });
+          await withLoginTimeout(signOutUser(), LOGIN_CLEANUP_TIMEOUT_MS, "Sign-out cleanup timed out.").catch(
+            (cleanupError) => {
+              Logger.warn("Login", "Zone mismatch cleanup failed", cleanupError);
+            },
+          );
           setEmailServerError("This account is registered as a player account.");
           setModeHelper({
             message: "This email is registered as a Player account. Use Player mode to continue.",
@@ -563,6 +563,10 @@ export default function Login() {
             title: "Player Account Detected",
             message: "Switch to Player mode and try again.",
           });
+          captureAnalyticsEvent("user_sign_in_failed", {
+            account_type: userType,
+            failure_category: "account_type_mismatch",
+          });
           return;
         }
 
@@ -572,13 +576,11 @@ export default function Login() {
             userId: res.userId,
           });
           finishAttempt();
-          await withLoginTimeout(
-            signOutUser(),
-            LOGIN_CLEANUP_TIMEOUT_MS,
-            "Sign-out cleanup timed out.",
-          ).catch((cleanupError) => {
-            Logger.warn("Login", "Player mismatch cleanup failed", cleanupError);
-          });
+          await withLoginTimeout(signOutUser(), LOGIN_CLEANUP_TIMEOUT_MS, "Sign-out cleanup timed out.").catch(
+            (cleanupError) => {
+              Logger.warn("Login", "Player mismatch cleanup failed", cleanupError);
+            },
+          );
           setEmailServerError("This account is registered as a zone account.");
           setModeHelper({
             message: "This email is registered as a Zone Admin account. Use Zone Admin mode to continue.",
@@ -589,6 +591,10 @@ export default function Login() {
             type: "error",
             title: "Zone Account Detected",
             message: "Switch to Zone Admin mode and try again.",
+          });
+          captureAnalyticsEvent("user_sign_in_failed", {
+            account_type: userType,
+            failure_category: "account_type_mismatch",
           });
           return;
         }
@@ -613,6 +619,11 @@ export default function Login() {
         title: "Welcome back",
         message: isSuperAdmin ? "Signed in as Super Admin" : "You're now signed in.",
       });
+      captureAnalyticsEvent("user_signed_in", {
+        account_type: isSuperAdmin ? "super_admin" : accountType,
+        auth_method: "password",
+        outcome: "success",
+      });
 
       // ✅ Redirect based on user type or role
       if (isSuperAdmin) {
@@ -633,6 +644,10 @@ export default function Login() {
       }
     } catch (e) {
       Logger.error("Login", "signInWithEmail threw error", e);
+      captureAnalyticsEvent("user_sign_in_failed", {
+        account_type: userType,
+        failure_category: classifyAnalyticsFailure(e),
+      });
       finishAttempt();
       showToast({
         type: "error",
@@ -652,31 +667,14 @@ export default function Login() {
     router.push("/auth/forgot-password");
   };
 
-
-
-
   const showPasswordHints = password.length > 0 || passFocused;
 
   const renderPasswordHintItem = (satisfied: boolean, label: string) => (
     <View style={styles.passwordHintItem}>
-      <Text
-        style={[
-          styles.passwordHintIcon,
-          satisfied
-            ? styles.passwordHintIconDone
-            : styles.passwordHintIconPending,
-        ]}
-      >
+      <Text style={[styles.passwordHintIcon, satisfied ? styles.passwordHintIconDone : styles.passwordHintIconPending]}>
         {satisfied ? "✓" : "×"}
       </Text>
-      <Text
-        style={[
-          styles.passwordHintText,
-          satisfied
-            ? styles.passwordHintTextDone
-            : styles.passwordHintTextPending,
-        ]}
-      >
+      <Text style={[styles.passwordHintText, satisfied ? styles.passwordHintTextDone : styles.passwordHintTextPending]}>
         {label}
       </Text>
     </View>
@@ -691,11 +689,9 @@ export default function Login() {
   const isSubmitDisabled = !canSubmit;
 
   // Bottom CTA text + href based on role
-  const bottomLabel =
-    userType === "zone" ? "Sign up as Admin" : "Create an account";
+  const bottomLabel = userType === "zone" ? "Sign up as Admin" : "Create an account";
   const bottomPrefix = userType === "zone" ? "New zone? " : "New here? ";
-  const bottomHref =
-    userType === "zone" ? "/auth/zone-register" : "/auth/register";
+  const bottomHref = userType === "zone" ? "/auth/zone-register" : "/auth/register";
 
   useEffect(() => {
     Logger.info("Login", "Footer CTA updated", { bottomHref });
@@ -719,36 +715,16 @@ export default function Login() {
         <View style={styles.roleToggleRow}>
           <Pressable
             onPress={() => handleUserTypeChange("player")}
-            style={[
-              styles.roleChip,
-              userType === "player" && styles.roleChipActive,
-            ]}
+            style={[styles.roleChip, userType === "player" && styles.roleChipActive]}
           >
-            <Text
-              style={[
-                styles.roleChipText,
-                userType === "player" && styles.roleChipTextActive,
-              ]}
-            >
-              Player
-            </Text>
+            <Text style={[styles.roleChipText, userType === "player" && styles.roleChipTextActive]}>Player</Text>
           </Pressable>
 
           <Pressable
             onPress={() => handleUserTypeChange("zone")}
-            style={[
-              styles.roleChip,
-              userType === "zone" && styles.roleChipActive,
-            ]}
+            style={[styles.roleChip, userType === "zone" && styles.roleChipActive]}
           >
-            <Text
-              style={[
-                styles.roleChipText,
-                userType === "zone" && styles.roleChipTextActive,
-              ]}
-            >
-              Zone Admin
-            </Text>
+            <Text style={[styles.roleChipText, userType === "zone" && styles.roleChipTextActive]}>Zone Admin</Text>
           </Pressable>
         </View>
 
@@ -767,10 +743,7 @@ export default function Login() {
               onPress={() => {
                 handleUserTypeChange(modeHelper.targetMode);
               }}
-              style={({ pressed }) => [
-                styles.modeHelperButton,
-                pressed && styles.modeHelperButtonPressed,
-              ]}
+              style={({ pressed }) => [styles.modeHelperButton, pressed && styles.modeHelperButtonPressed]}
             >
               <Text style={styles.modeHelperButtonText}>{modeHelper.cta}</Text>
               <AppIcon name="arrow-forward" size={18} color={COLORS.text} />
@@ -794,11 +767,7 @@ export default function Login() {
                 name="email"
                 size={22}
                 style={styles.prefixIcon}
-                color={
-                  isEmailValid && emailOrPhone.trim().length > 0
-                    ? COLORS.accent
-                    : COLORS.muted
-                }
+                color={isEmailValid && emailOrPhone.trim().length > 0 ? COLORS.accent : COLORS.muted}
               />
 
               <TextInput
@@ -843,25 +812,16 @@ export default function Login() {
               )}
             </View>
 
-            <View
-              style={[styles.focusBar, { opacity: emailFocused ? 1 : 0 }]}
-            />
+            <View style={[styles.focusBar, { opacity: emailFocused ? 1 : 0 }]} />
           </View>
 
-          {emailErrorToShow ? (
-            <Text style={styles.errorText}>{emailErrorToShow}</Text>
-          ) : null}
+          {emailErrorToShow ? <Text style={styles.errorText}>{emailErrorToShow}</Text> : null}
 
-          {!emailErrorToShow &&
-            emailTouched &&
-            !emailFocused &&
-            emailDomainWarning && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  {emailDomainWarning}
-                </Text>
-              </View>
-            )}
+          {!emailErrorToShow && emailTouched && !emailFocused && emailDomainWarning && (
+            <View style={styles.helperTextRow}>
+              <Text style={[styles.helperText, styles.helperWarning]}>{emailDomainWarning}</Text>
+            </View>
+          )}
         </View>
 
         {/* Password */}
@@ -874,11 +834,7 @@ export default function Login() {
                 name="lock"
                 size={22}
                 style={styles.prefixIcon}
-                color={
-                  isPasswordValid && password.length > 0
-                    ? COLORS.accent
-                    : COLORS.muted
-                }
+                color={isPasswordValid && password.length > 0 ? COLORS.accent : COLORS.muted}
               />
 
               <TextInput
@@ -925,17 +881,12 @@ export default function Login() {
             </View>
           </View>
 
-          {passwordErrorToShow ? (
-            <Text style={styles.errorText}>{passwordErrorToShow}</Text>
-          ) : null}
-
+          {passwordErrorToShow ? <Text style={styles.errorText}>{passwordErrorToShow}</Text> : null}
 
           {/* Caps Lock heuristic warning */}
           {capsLockLikely && (
             <View style={styles.helperTextRow}>
-              <Text style={[styles.helperText, styles.helperWarning]}>
-                It looks like Caps Lock might be on.
-              </Text>
+              <Text style={[styles.helperText, styles.helperWarning]}>It looks like Caps Lock might be on.</Text>
             </View>
           )}
         </View>
@@ -972,18 +923,11 @@ export default function Login() {
           {isLockedOut && (
             <View style={styles.helperTextRow}>
               <Text style={[styles.helperText, styles.helperWarning]}>
-                Too many failed attempts. Please wait {lockoutSecondsLeft}s
-                before trying again.
+                Too many failed attempts. Please wait {lockoutSecondsLeft}s before trying again.
               </Text>
             </View>
           )}
         </View>
-
-
-
-
-
-
 
         {/* Bottom link (dynamic text + Link navigation) */}
         <View style={{ flexDirection: "row", justifyContent: "center" }}>
@@ -991,23 +935,13 @@ export default function Login() {
           <Link
             href={bottomHref}
             asChild
-            onPress={() =>
-              console.log(
-                "[Login] Link pressed → userType=",
-                userType,
-                "href=",
-                bottomHref
-              )
-            }
+            onPress={() => console.log("[Login] Link pressed → userType=", userType, "href=", bottomHref)}
           >
             <Pressable>
-              <Text style={[styles.bottomText, { color: COLORS.accent }]}>
-                {bottomLabel}
-              </Text>
+              <Text style={[styles.bottomText, { color: COLORS.accent }]}>{bottomLabel}</Text>
             </Pressable>
           </Link>
         </View>
-
       </ScrollView>
     </Container>
   );

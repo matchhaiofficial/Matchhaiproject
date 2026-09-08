@@ -10,15 +10,10 @@ import { normalizeGameKey } from "../../features/discover/utils/gameKeys";
 import { initializeSkillIfMissing, type GameKey, type GameSkillScore } from "../skillRatingService";
 import { isProfileGameEnabled } from "../userService";
 import { getCanonicalGameLabel } from "../../utils/gameLabels";
-import {
-  getMatchroomLockAtMs,
-  validateMatchroomScheduleWindow,
-} from "../../constants/timing";
-import {
-  cleanConvexErrorMessage,
-  getUserFacingErrorMessage,
-  isAuthSessionError,
-} from "../../utils/userFacingErrors";
+import { getMatchroomLockAtMs, validateMatchroomScheduleWindow } from "../../constants/timing";
+import { cleanConvexErrorMessage, getUserFacingErrorMessage, isAuthSessionError } from "../../utils/userFacingErrors";
+import { captureAnalyticsEvent } from "../../lib/analytics/posthog";
+import { classifyAnalyticsFailure } from "../../lib/analytics/privacy";
 
 export interface Slot {
   slotId: string;
@@ -68,13 +63,7 @@ export interface Matchroom {
   locationMode?: "zone" | "broadcast";
   broadcastAreas?: string[];
   broadcastRequestStatus?:
-    | "idle"
-    | "waiting_for_fill"
-    | "waiting_for_zones"
-    | "zone_confirmed"
-    | "failed"
-    | "expired"
-    | "cancelled";
+    "idle" | "waiting_for_fill" | "waiting_for_zones" | "zone_confirmed" | "failed" | "expired" | "cancelled";
   broadcastRequestStartedAt?: number;
   broadcastRequestExpiresAt?: number;
   confirmedZoneId?: string;
@@ -199,10 +188,7 @@ function normalizeCreateMatchroomMutationResult(result: any): Result<{ id: strin
     };
   }
 
-  const id =
-    typeof result === "string"
-      ? result
-      : String(result?.matchroomId || result?.id || "");
+  const id = typeof result === "string" ? result : String(result?.matchroomId || result?.id || "");
 
   if (!id) {
     return { ok: false, message: "Failed to create matchroom." };
@@ -326,7 +312,10 @@ export async function prepareProfileForMatchParticipation(
     if (initializedSkill) {
       workingProfile = {
         ...workingProfile,
-        skillScores: { ...(workingProfile.skillScores || {}), [normalizedGameKey]: initializedSkill },
+        skillScores: {
+          ...(workingProfile.skillScores || {}),
+          [normalizedGameKey]: initializedSkill,
+        },
       };
       skill = initializedSkill;
     }
@@ -357,7 +346,9 @@ async function getCurrentIdentity() {
     throw new Error("Not authenticated");
   }
 
-  const convexUser = await convex.query(api.users.getByAuthId, { authId: authUser.id });
+  const convexUser = await convex.query(api.users.getByAuthId, {
+    authId: authUser.id,
+  });
   if (!convexUser) {
     throw new Error("User profile not found");
   }
@@ -371,7 +362,9 @@ async function getCurrentIdentity() {
 
 async function getUserByAnyId(uid: string) {
   try {
-    const directUser = await convex.query(api.users.getById, { userId: uid as Id<"users"> });
+    const directUser = await convex.query(api.users.getById, {
+      userId: uid as Id<"users">,
+    });
     if (directUser) {
       return directUser;
     }
@@ -401,7 +394,11 @@ function generateSlots(teamSize: number, side: "A" | "B", players: any[] = []): 
       role: player?.role || "Player",
       uid: player?.uid,
       user: player
-        ? { uid: player.uid, username: player.username, skillTier: player.skillTier }
+        ? {
+            uid: player.uid,
+            username: player.username,
+            skillTier: player.skillTier,
+          }
         : undefined,
     };
   });
@@ -457,21 +454,14 @@ export function buildMatchroomCreateMutationArgs(roomData: Matchroom) {
   let slotsA = roomData.slotsA || [];
   let slotsB = roomData.slotsB || [];
 
-  if (
-    (!slotsA.length || !slotsB.length) &&
-    normalizedMaxPlayers &&
-    normalizedMaxPlayers % 2 === 0
-  ) {
+  if ((!slotsA.length || !slotsB.length) && normalizedMaxPlayers && normalizedMaxPlayers % 2 === 0) {
     const teamSize = normalizedMaxPlayers / 2;
     slotsA = generateSlots(teamSize, "A", players.slice(0, teamSize));
     slotsB = generateSlots(teamSize, "B", players.slice(teamSize));
   }
 
   // Calculate timing
-  const scheduledStartAt = parseScheduledStartAt(
-    roomData.scheduledDate,
-    roomData.scheduledTime
-  ) ?? undefined;
+  const scheduledStartAt = parseScheduledStartAt(roomData.scheduledDate, roomData.scheduledTime) ?? undefined;
   const lockAt = getMatchroomLockAtMs(scheduledStartAt) ?? undefined;
   const expiresAt = undefined;
 
@@ -544,27 +534,49 @@ export function buildMatchroomCreateMutationArgs(roomData: Matchroom) {
 /**
  * Create a new matchroom
  */
-export async function createMatchroom(
-  roomData: Matchroom
-): Promise<Result<{ id: string }>> {
+export async function createMatchroom(roomData: Matchroom): Promise<Result<{ id: string }>> {
+  const analyticsProperties = {
+    game: normalizeGameKey(roomData.game) || "unknown",
+    format: roomData.format || "unknown",
+    location_mode: roomData.locationMode || "unknown",
+    booking_source: roomData.bookingSource || "app",
+    team_mode: roomData.teamMode || "solo",
+    payment_mode: roomData.teamPaymentMode || "individual",
+    max_players: roomData.maxPlayers,
+    resource_asset_type: roomData.requestedResourceAssetType || undefined,
+    resource_tier: roomData.requestedResourceTier || undefined,
+  } as const;
   try {
     const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
-      return { ok: false, message: verificationGate.message, code: verificationGate.code };
+      captureAnalyticsEvent("matchroom_create_failed", {
+        ...analyticsProperties,
+        failure_category: "kyc_required",
+      });
+      return {
+        ok: false,
+        message: verificationGate.message,
+        code: verificationGate.code,
+      };
     }
 
     // Validate lead time for non-walk-ins
     if (roomData.bookingSource !== "walkin") {
-      const scheduledStartAt = parseScheduledStartAt(
-        roomData.scheduledDate,
-        roomData.scheduledTime
-      );
+      const scheduledStartAt = parseScheduledStartAt(roomData.scheduledDate, roomData.scheduledTime);
       if (!scheduledStartAt) {
+        captureAnalyticsEvent("matchroom_create_failed", {
+          ...analyticsProperties,
+          failure_category: "schedule",
+        });
         return { ok: false, message: "Scheduled date/time is required." };
       }
 
       const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, Date.now());
       if (!scheduleValidation.ok) {
+        captureAnalyticsEvent("matchroom_create_failed", {
+          ...analyticsProperties,
+          failure_category: "schedule",
+        });
         return {
           ok: false,
           message: scheduleValidation.message,
@@ -582,9 +594,19 @@ export async function createMatchroom(
       matchroomId = await convex.mutation(api.matchrooms.create, mutationArgs);
     }
 
-    return normalizeCreateMatchroomMutationResult(matchroomId);
+    const result = normalizeCreateMatchroomMutationResult(matchroomId);
+    captureAnalyticsEvent(result.ok ? "matchroom_created" : "matchroom_create_failed", {
+      ...analyticsProperties,
+      outcome: result.ok ? "success" : "failed",
+      failure_category: result.ok ? undefined : classifyAnalyticsFailure(result.message),
+    });
+    return result;
   } catch (error: any) {
     const message = getUserFacingErrorMessage(error, "Failed to create matchroom");
+    captureAnalyticsEvent("matchroom_create_failed", {
+      ...analyticsProperties,
+      failure_category: classifyAnalyticsFailure(error),
+    });
     return { ok: false, message };
   }
 }
@@ -601,7 +623,13 @@ export async function checkMatchroomCreateAvailability(input: {
   requestedResourceSurface?: string | null;
   requestedResourceTier?: string | null;
   selectedZoneRateKey?: string | null;
-}): Promise<Result<{ available: boolean; message?: string | null; reason?: string | null }>> {
+}): Promise<
+  Result<{
+    available: boolean;
+    message?: string | null;
+    reason?: string | null;
+  }>
+> {
   try {
     const scheduledStartAt = parseScheduledStartAt(input.scheduledDate, input.scheduledTime);
     if (!scheduledStartAt) {
@@ -653,9 +681,7 @@ export async function checkMatchroomCreateAvailability(input: {
 /**
  * Get all matchrooms (with optional limit)
  */
-export async function getMatchrooms(
-  limitCount = 20
-): Promise<Result<Matchroom[]>> {
+export async function getMatchrooms(limitCount = 20): Promise<Result<Matchroom[]>> {
   try {
     const rooms = await convex.query(api.matchrooms.list, {
       limit: limitCount,
@@ -680,7 +706,9 @@ export async function getMatchroom(id: string): Promise<Result<Matchroom>> {
       // Ignore invalid ids and fall back to the read path.
     }
 
-    const room = await convex.query(api.matchrooms.getById, { matchroomId: id });
+    const room = await convex.query(api.matchrooms.getById, {
+      matchroomId: id,
+    });
     if (!room) {
       return { ok: false, message: "Matchroom not found" };
     }
@@ -697,11 +725,11 @@ export const getMatchroomById = getMatchroom;
 /**
  * Get user's matchrooms (hosted + joined)
  */
-export async function getUserMatchrooms(
-  uid: string
-): Promise<Result<{ hosted: Matchroom[]; joined: Matchroom[] }>> {
+export async function getUserMatchrooms(uid: string): Promise<Result<{ hosted: Matchroom[]; joined: Matchroom[] }>> {
   try {
-    const result = await convex.query(api.matchrooms.getUserMatchrooms, { uid });
+    const result = await convex.query(api.matchrooms.getUserMatchrooms, {
+      uid,
+    });
     return {
       ok: true,
       data: {
@@ -816,17 +844,29 @@ export async function joinMatchroom(
   roomId: string,
   user: { uid: string; username: string },
   role?: string,
-  _joinCode?: string
+  _joinCode?: string,
 ): Promise<Result> {
   try {
     const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
-      return { ok: false, message: verificationGate.message, code: verificationGate.code };
+      captureAnalyticsEvent("matchroom_join_failed", {
+        failure_category: "kyc_required",
+      });
+      return {
+        ok: false,
+        message: verificationGate.message,
+        code: verificationGate.code,
+      };
     }
 
     // Check time conflicts first
-    const room = await convex.query(api.matchrooms.getById, { matchroomId: roomId });
+    const room = await convex.query(api.matchrooms.getById, {
+      matchroomId: roomId,
+    });
     if (!room) {
+      captureAnalyticsEvent("matchroom_join_failed", {
+        failure_category: "not_found",
+      });
       return { ok: false, message: "Matchroom not found" };
     }
 
@@ -839,7 +879,13 @@ export async function joinMatchroom(
       });
 
       if (conflict.conflict) {
-        return { ok: false, message: conflict.message || "Time conflict with another match" };
+        captureAnalyticsEvent("matchroom_join_failed", {
+          failure_category: "schedule",
+        });
+        return {
+          ok: false,
+          message: conflict.message || "Time conflict with another match",
+        };
       }
     }
 
@@ -850,20 +896,27 @@ export async function joinMatchroom(
       role,
     });
 
+    captureAnalyticsEvent("matchroom_joined", {
+      game: normalizeGameKey(room.game) || "unknown",
+      outcome: "success",
+    });
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] joinMatchroom error:", error);
-    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to join matchroom") };
+    captureAnalyticsEvent("matchroom_join_failed", {
+      failure_category: classifyAnalyticsFailure(error),
+    });
+    return {
+      ok: false,
+      message: getUserFacingErrorMessage(error, "Failed to join matchroom"),
+    };
   }
 }
 
 /**
  * Leave a matchroom
  */
-export async function leaveMatchroom(
-  roomId: string,
-  userUid: string
-): Promise<Result> {
+export async function leaveMatchroom(roomId: string, userUid: string): Promise<Result> {
   try {
     await convex.mutation(api.matchrooms.leave, {
       matchroomId: roomId as Id<"matchrooms">,
@@ -901,7 +954,7 @@ export async function startMatch(
   roomId: string,
   ratings: Record<string, number>,
   hostUid: string,
-  team2Captain?: string
+  team2Captain?: string,
 ): Promise<Result> {
   try {
     await convex.mutation(api.matchrooms.startMatch, {
@@ -923,7 +976,7 @@ export async function startMatch(
 export async function submitCaptainReport(
   matchroomId: string,
   captainUid: string,
-  winner: "team1" | "team2"
+  winner: "team1" | "team2",
 ): Promise<Result> {
   try {
     await convex.mutation(api.matchrooms.submitCaptainReport, {
@@ -934,7 +987,10 @@ export async function submitCaptainReport(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] submitCaptainReport error:", error);
-    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report") };
+    return {
+      ok: false,
+      message: getUserFacingErrorMessage(error, "Failed to submit report"),
+    };
   }
 }
 
@@ -944,7 +1000,7 @@ export async function submitCaptainReport(
 export async function submitParticipantVote(
   matchroomId: string,
   participantUid: string,
-  vote: "team1" | "team2" | "unknown"
+  vote: "team1" | "team2" | "unknown",
 ): Promise<Result> {
   try {
     await convex.mutation(api.matchrooms.submitParticipantVote, {
@@ -955,7 +1011,10 @@ export async function submitParticipantVote(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] submitParticipantVote error:", error);
-    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit vote") };
+    return {
+      ok: false,
+      message: getUserFacingErrorMessage(error, "Failed to submit vote"),
+    };
   }
 }
 
@@ -966,7 +1025,7 @@ export async function adminCancelMatchroom(
   roomId: string,
   adminUid: string,
   reason: string,
-  note?: string
+  note?: string,
 ): Promise<Result> {
   try {
     const result = await convex.mutation(api.matchrooms.adminCancel, {
@@ -978,7 +1037,10 @@ export async function adminCancelMatchroom(
     return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] adminCancelMatchroom error:", error);
-    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to cancel lobby") };
+    return {
+      ok: false,
+      message: getUserFacingErrorMessage(error, "Failed to cancel lobby"),
+    };
   }
 }
 
@@ -988,7 +1050,7 @@ export async function adminCancelMatchroom(
 export async function findUserTimeConflict(
   uid: string,
   targetRoom: Matchroom,
-  excludeRoomId?: string
+  excludeRoomId?: string,
 ): Promise<{ conflict: true; room: Matchroom; message: string } | { conflict: false }> {
   try {
     if (!targetRoom.scheduledStartAt) {
@@ -1022,7 +1084,7 @@ export async function findUserTimeConflict(
  */
 export async function isUserInActiveMatchroom(
   uid: string,
-  targetRoom?: Matchroom
+  targetRoom?: Matchroom,
 ): Promise<{ inRoom: boolean; roomId?: string; message?: string }> {
   if (!targetRoom) return { inRoom: false };
 
@@ -1045,7 +1107,7 @@ export async function requestJoinMatchroom(
   user: { uid: string; username: string },
   role?: string,
   targetTeam?: string,
-  slotId?: string
+  slotId?: string,
 ): Promise<Result<{ id: string }>> {
   try {
     // Note: email verification and time conflict checks are already performed
@@ -1053,6 +1115,9 @@ export async function requestJoinMatchroom(
 
     const roomId = room.id || room._id;
     if (!roomId) {
+      captureAnalyticsEvent("matchroom_join_request_failed", {
+        failure_category: "validation",
+      });
       return { ok: false, message: "Matchroom ID missing" };
     }
 
@@ -1066,6 +1131,10 @@ export async function requestJoinMatchroom(
     });
 
     if (result && typeof result === "object" && result.ok === false) {
+      captureAnalyticsEvent("matchroom_join_request_failed", {
+        game: normalizeGameKey(room.game) || "unknown",
+        failure_category: classifyAnalyticsFailure(result.message),
+      });
       return {
         ok: false,
         code: "code" in result && typeof result.code === "string" ? result.code : undefined,
@@ -1073,16 +1142,26 @@ export async function requestJoinMatchroom(
       };
     }
 
+    captureAnalyticsEvent("matchroom_join_requested", {
+      game: normalizeGameKey(room.game) || "unknown",
+      outcome: "success",
+    });
     return {
       ok: true,
       id: Array.isArray((result as any)?.notificationIds)
         ? String((result as any).notificationIds[0] || "")
-        : (typeof (result as any)?._id === "string" ? (result as any)._id : undefined),
+        : typeof (result as any)?._id === "string"
+          ? (result as any)._id
+          : undefined,
       data: result as any,
       message: (result as any)?.message,
     };
   } catch (error: any) {
     console.error("[matchService] requestJoinMatchroom error:", error);
+    captureAnalyticsEvent("matchroom_join_request_failed", {
+      game: normalizeGameKey(room.game) || "unknown",
+      failure_category: classifyAnalyticsFailure(error),
+    });
     return { ok: false, message: normalizeMatchroomRequestError(error) };
   }
 }
@@ -1090,10 +1169,7 @@ export async function requestJoinMatchroom(
 /**
  * Cancel join request
  */
-export async function cancelMatchJoinRequest(
-  roomId: string,
-  _userId: string
-): Promise<Result> {
+export async function cancelMatchJoinRequest(roomId: string, _userId: string): Promise<Result> {
   try {
     const me = await getCurrentIdentity();
     const requests = await convex.query(api.notifications.listOutgoingMatchroomJoinRequests, {
@@ -1128,7 +1204,7 @@ export async function cancelMatchJoinRequest(
 export async function respondToMatchJoinRequest(
   requestId: string,
   decision: "accept" | "reject",
-  _adminUid: string
+  _adminUid: string,
 ): Promise<Result> {
   try {
     const me = await getCurrentIdentity();
@@ -1140,6 +1216,9 @@ export async function respondToMatchJoinRequest(
     return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] respondToMatchJoinRequest error:", error);
-    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to process request") };
+    return {
+      ok: false,
+      message: getUserFacingErrorMessage(error, "Failed to process request"),
+    };
   }
 }
