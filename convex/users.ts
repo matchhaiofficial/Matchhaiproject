@@ -2,6 +2,7 @@ import { query, mutation, action, internalQuery, internalMutation } from "./_gen
 import { ConvexError, v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
+import { authComponent } from "./auth";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
 import { getCurrentUser, publicUser, requireCurrentUser, requireSelf, requireSelfOrSuperAdmin } from "./authz";
 import { markUserPresent } from "./presence";
@@ -713,11 +714,42 @@ export const create = mutation({
     ageRange: v.optional(v.string()),
     accountType: v.union(v.literal("player"), v.literal("zone")),
   },
+  returns: v.id("users"),
   handler: async (ctx, args) => {
     const now = Date.now();
 
     const email = normalizeEmail(args.email);
     const normalizedPhone = args.phone ? normalizePhone(args.phone) : undefined;
+    const authUser = await authComponent.getAuthUser(ctx);
+    const requestedAuthId = String(args.authId || "").trim();
+    const candidateAuthIds = [authUser?.userId, (authUser as any)?.id, authUser?._id]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    if (
+      !authUser
+      || !requestedAuthId
+      || !candidateAuthIds.includes(requestedAuthId)
+      || normalizeEmail(authUser.email) !== email
+    ) {
+      throw new Error("Authenticated account does not match profile creation request.");
+    }
+
+    let verifiedPhoneHash: string | undefined;
+    let verifiedPhone: { phoneMasked: string; updatedAt: number } | null = null;
+    if (normalizedPhone && args.accountType === "player") {
+      verifiedPhoneHash = await sha256(normalizedPhone);
+      if (isPhoneOtpBypassEnabled()) {
+        verifiedPhone = { phoneMasked: normalizedPhone, updatedAt: now };
+      } else {
+        verifiedPhone = await ctx.runQuery(internal.phoneOtp.getRecentVerified, {
+          phoneHash: verifiedPhoneHash,
+          since: now - 24 * 60 * 60 * 1000,
+        });
+      }
+      if (!verifiedPhone) {
+        throw new Error("Please verify this phone number again before creating your profile.");
+      }
+    }
 
     // Generate username if not provided
     const username = args.username || `user_${Date.now()}`;
@@ -747,7 +779,7 @@ export const create = mutation({
     if (existingUsername) throw new Error("This username is already in use.");
 
     const insertData: Record<string, unknown> = {
-      authId: args.authId,
+      authId: requestedAuthId,
       email,
       fullName: args.fullName || "User",
       username,
@@ -756,10 +788,10 @@ export const create = mutation({
       phoneValidated: args.phoneValidated ?? false,
       phoneValidationProvider: args.phoneValidationProvider,
       phoneValidationCheckedAt: args.phoneValidationCheckedAt,
-      phoneOtpVerified: args.phoneOtpVerified ?? false,
-      phoneOtpVerifiedAt: args.phoneOtpVerifiedAt,
-      phoneNumberMasked: args.phoneNumberMasked,
-      phoneNumberHash: args.phoneNumberHash,
+      phoneOtpVerified: Boolean(verifiedPhone),
+      phoneOtpVerifiedAt: verifiedPhone?.updatedAt,
+      phoneNumberMasked: verifiedPhone?.phoneMasked,
+      phoneNumberHash: verifiedPhoneHash,
       accountType: args.accountType,
       isOnline: true,
       lastActiveAt: now,
@@ -1104,12 +1136,49 @@ export const updateSkillScores = mutation({
   },
 });
 
-// NOTE: The former client-callable `applyMatchSkillUpdates` batch mutation was
-// removed. It allowed any client to set any user's rating with no auth, no
-// validation and no idempotency. Match-result ELO is now computed and applied
-// entirely server-side inside convex/matchrooms.ts `finalizeMatchroomResult`
-// (see applyRatingsForFinalizedMatch) using convex/ratingEngine.ts, guarded by a
-// per-matchroom idempotency marker and recorded in the `ratingHistory` ledger.
+// Legacy signature retained for installed clients. Client-calculated values are
+// deliberately ignored; the authenticated participant can only ask the server
+// to reconcile ratings from an already-finalized canonical match result.
+export const applyMatchSkillUpdates = mutation({
+  args: {
+    updates: v.array(v.object({
+      userId: v.id("users"),
+      game: v.string(),
+      skillScore: v.object({
+        rating: v.number(),
+        tier: v.string(),
+        matchesPlayed: v.number(),
+        wins: v.number(),
+        losses: v.number(),
+        initialSource: v.optional(v.string()),
+        initialRating: v.optional(v.number()),
+        lastMatchDate: v.optional(v.union(v.number(), v.null())),
+        lastUpdated: v.number(),
+      }),
+    })),
+    matchroomId: v.optional(v.id("matchrooms")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (!args.matchroomId) {
+      throw new Error("A finalized matchroom is required to reconcile ratings.");
+    }
+    const room: any = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found.");
+    const actorIds = new Set([String(actor.user._id), String(actor.user.authId || "")]);
+    const participantIds = new Set([
+      String(room.hostUid || ""),
+      ...(Array.isArray(room.playerUids) ? room.playerUids.map(String) : []),
+    ]);
+    if (![...actorIds].some((id) => id && participantIds.has(id))) {
+      throw new Error("Only a match participant can reconcile its ratings.");
+    }
+    await ctx.runMutation(internal.matchrooms.reconcileFinalizedRatings, {
+      matchroomId: args.matchroomId,
+    });
+    return true;
+  },
+});
 
 // Mark onboarding as completed
 export const completeOnboarding = mutation({

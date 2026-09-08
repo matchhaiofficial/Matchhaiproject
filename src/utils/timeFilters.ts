@@ -2,6 +2,7 @@
 // Helpers for timeline-based filtering of matchrooms
 
 import { TimelineFilterKey } from '../constants/timelineFilters';
+import { combineKarachiDateTime } from './scheduleTime';
 
 /**
  * Normalize Firestore timestamp or date to a Date object.
@@ -41,8 +42,8 @@ export function getRoomStartDate(room: any): Date | null {
     if (room.scheduledDate) {
         const dateStr = room.scheduledDate;
         const timeStr = room.scheduledTime || '00:00';
-        const combined = new Date(`${dateStr}T${timeStr}`);
-        if (!isNaN(combined.getTime())) return combined;
+        const millis = combineKarachiDateTime(dateStr, timeStr);
+        if (millis !== null) return new Date(millis);
     }
 
     return null;

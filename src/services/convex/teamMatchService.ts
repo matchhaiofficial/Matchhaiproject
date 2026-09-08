@@ -59,6 +59,7 @@ export interface TeamMatchChallenge {
     alternativeVenueByCaptainB?: TeamChallengeVenueChoice | null;
     captainVenueChoices?: Record<string, TeamChallengeVenueChoice>;
     confirmedVenue?: TeamChallengeVenueChoice | null;
+    confirmedVenueIsActive?: boolean | null;
     chatId?: string | null;
     matchroomId?: string | null;
     bookingRequestId?: string | null;
@@ -610,7 +611,10 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
             actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
-        if (!["accepted", "venue_proposed"].includes(challenge.status)) {
+        if (
+            !["accepted", "venue_proposed"].includes(challenge.status) &&
+            !(challenge.status === "venue_confirmed" && challenge.confirmedVenueIsActive === false)
+        ) {
             return { ok: false, message: "Accept the challenge before suggesting an alternative zone." };
         }
 
@@ -685,7 +689,10 @@ export const proposeTeamChallengeVenue = async (input: {
             actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
-        if (!["accepted", "venue_proposed", "venue_confirmed"].includes(challenge.status)) {
+        if (
+            !["accepted", "venue_proposed"].includes(challenge.status) &&
+            !(challenge.status === "venue_confirmed" && challenge.confirmedVenueIsActive === false)
+        ) {
             return { ok: false, message: "Challenge is not in venue proposal state." };
         }
 

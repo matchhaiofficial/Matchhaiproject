@@ -221,12 +221,7 @@ const resourceMatchesAllocationProfile = (
     request?: ZoneBookingQueueItem | null,
 ) => {
     if (!resource.isActive) return false;
-    if (resource.lifecycleStatus === "held") {
-        const linkedRequestId = String(resource.holdRequestId || resource.bookingRequestId || "");
-        if (!linkedRequestId || linkedRequestId !== String(request?.id || "")) {
-            return false;
-        }
-    }
+    if (resource.lifecycleStatus === "maintenance") return false;
     if (normalizeResourceToken(resource.assetType) !== profile.assetType) return false;
     if ("tier" in profile && profile.tier && inferResourceTier(resource) !== profile.tier) {
         return false;
@@ -1253,7 +1248,7 @@ export default function ZoneBookingsModule() {
                 allocationBranchId,
                 (rows) => {
                     setAllocationResources(
-                        rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
+                        rows.filter((resource) => resource.isActive !== false && resource.lifecycleStatus !== "maintenance"),
                     );
                     setLoadingAllocationResources(false);
                 },

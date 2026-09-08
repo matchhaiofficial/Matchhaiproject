@@ -143,7 +143,12 @@ export default function TeamMatchChallengeDetails() {
     const alternativeFromB = challenge?.alternativeVenueByCaptainB || null;
     const canAcceptNow = !!(isPending && !isAdminPending && isCaptainB);
     const canRejectNow = !!(isPending && !isAdminPending && isCaptain);
-    const canProposeVenue = !!(isAcceptedFlow && isCaptain && !challenge?.matchroomId);
+    const canProposeVenue = !!(
+        isCaptain &&
+        !challenge?.matchroomId &&
+        (["accepted", "venue_proposed"].includes(normalizedStatus) ||
+            (normalizedStatus === "venue_confirmed" && challenge?.confirmedVenueIsActive === false))
+    );
 
     // ---- Captain-paid payment state (server-owned, read via summary) ----
     const mySide: "teamA" | "teamB" | null = isCaptainA ? "teamA" : isCaptainB ? "teamB" : null;

@@ -4,6 +4,7 @@ import {
   internalMutation,
 } from "./_generated/server";
 import { v } from "convex/values";
+import { assertNewGameEntityCreationAllowed } from "./gameAvailabilityPolicy";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { isUserHiddenFromPublic } from "./userVisibility";
@@ -313,6 +314,7 @@ export const create = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<any> => {
+    assertNewGameEntityCreationAllowed(args.game);
     const actor = await getAuthenticatedConvexUser(ctx, args.captainUid);
     if (actor._id !== args.captainUid) {
       throw new Error("You can only create a team for your own account");

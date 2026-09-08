@@ -4,7 +4,7 @@ import { useMinuteTicker } from "../../../../src/hooks/useMinuteTicker";
 import {
   type ZoneBookingQueueItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
-import { toLocalDateString } from "../../../../src/utils/scheduleTime";
+import { combineKarachiDateTime, toLocalDateString } from "../../../../src/utils/scheduleTime";
 
 type GameFilter = "all" | string;
 type TimeOfDayFilter = "all" | "day" | "night";
@@ -130,8 +130,7 @@ const toScheduledDateTimeMillis = (dateValue: any, timeValue: any) => {
     if (period === "AM" && hour === 12) hour = 0;
     time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   }
-  const scheduledStartAt = new Date(`${date}T${time}`).getTime();
-  return Number.isFinite(scheduledStartAt) ? scheduledStartAt : 0;
+  return combineKarachiDateTime(date, time) || 0;
 };
 
 export const getRequestMatchroomId = (item?: ZoneBookingQueueItem | null) => {

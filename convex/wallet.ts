@@ -60,6 +60,42 @@ async function getWalletUserRecord(
   throw new Error("Authentication required.");
 }
 
+export async function interruptAccountDeletionForIncomingFunds(ctx: any, user: any, reason: string) {
+  const deletionStatus = String(user.accountDeletionStatus || "");
+  if (!["queued", "running", "completed"].includes(deletionStatus)) return {};
+  const job = user.accountDeletionJobId ? await ctx.db.get(user.accountDeletionJobId) : null;
+  const wasCompleted = deletionStatus === "completed";
+  const inPreflight = !wasCompleted && String(job?.stage || "").startsWith("preflight_");
+  const nextStatus = inPreflight || wasCompleted ? "blocked" : "failed";
+  const nextStage = wasCompleted ? "preflight_final" : String(job?.stage || user.accountDeletionStage || "preflight_basics");
+  const message = `Account deletion stopped because ${reason}. Settle the balance, then retry deletion.`;
+  if (job) {
+    await ctx.db.patch(job._id, {
+      status: nextStatus,
+      stage: nextStage,
+      error: message,
+      updatedAt: Date.now(),
+    });
+  }
+  return {
+    ...(inPreflight && job ? {
+      accountStatus: job.priorAccountStatus,
+      suspendedAt: job.priorSuspendedAt,
+      suspendedUntil: job.priorSuspendedUntil,
+      suspensionReason: job.priorSuspensionReason,
+      suspendedByAdminUserId: job.priorSuspendedByAdminUserId,
+    } : {
+      accountStatus: "suspended",
+      suspendedUntil: null,
+      suspensionReason: "account_deletion_requires_review",
+    }),
+    accountDeletionStatus: nextStatus,
+    accountDeletionStage: nextStage,
+    accountDeletionError: message,
+    accountDeletionUpdatedAt: Date.now(),
+  };
+}
+
 // ============================================
 // WALLET QUERIES
 // ============================================
@@ -318,7 +354,7 @@ export const createZoneWithdrawalTransaction = mutation({
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
-    requestKey: v.string(),
+    requestKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (args.amount <= 0) {
@@ -369,10 +405,59 @@ export const createZoneWithdrawalTransaction = mutation({
     const accountNumberMasked = `${"*".repeat(Math.max(2, compactAccountNumber.length - 4))}${accountNumberLast4}`;
 
     const now = Date.now();
-    const requestKey = String(args.requestKey || "").trim();
-    if (!/^[A-Za-z0-9:_-]{16,160}$/.test(requestKey)) {
+    const suppliedRequestKey = String(args.requestKey || "").trim();
+    if (suppliedRequestKey && !/^[A-Za-z0-9:_-]{16,160}$/.test(suppliedRequestKey)) {
       throw new Error("Withdrawal request identifier is invalid. Please reopen the form and try again.");
     }
+    if (!suppliedRequestKey) {
+      const recentWithdrawals = await ctx.db
+        .query("walletTransactions")
+        .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .take(25);
+      const recentDuplicate = recentWithdrawals.find((transaction: any) => {
+        const metadata = transaction.metadata || {};
+        return transaction.type === "withdrawal"
+          && transaction.status === "pending"
+          && Number(transaction.createdAt || 0) >= now - 10 * 60 * 1000
+          && Number(transaction.amount) === amount
+          && String(metadata.zoneId || "") === String(zone._id)
+          && String(metadata.branchId || "") === String(args.branchId)
+          && String(metadata.bankName || "") === String(args.bankName || "").trim().slice(0, 80)
+          && String(metadata.accountNumberLast4 || "") === accountNumberLast4;
+      });
+      if (recentDuplicate) {
+        const metadata: any = recentDuplicate.metadata || {};
+        return {
+          reference: String(recentDuplicate.reference),
+          createdAt: recentDuplicate.createdAt,
+          walletBalance,
+          amount,
+          bankName: String(metadata.bankName || ""),
+          accountNumberMasked: String(metadata.accountNumberMasked || accountNumberMasked),
+          branchId: String(metadata.branchId || args.branchId),
+          branchName: String(metadata.branchName || safeBranchName),
+          ownerName: metadata.ownerName || user.fullName || user.username || null,
+          ownerEmail: metadata.ownerEmail || user.email || null,
+          venueName: metadata.venueName || zone.venueBrandName || zone.name || null,
+          zoneId: String(zone._id),
+        };
+      }
+    }
+    const legacyFingerprint = [
+      String(zone._id),
+      String(args.branchId),
+      String(amount),
+      String(args.bankName || "").trim().slice(0, 80),
+      accountNumberLast4,
+    ].join("|");
+    let legacyHash = 2166136261;
+    for (let index = 0; index < legacyFingerprint.length; index += 1) {
+      legacyHash ^= legacyFingerprint.charCodeAt(index);
+      legacyHash = Math.imul(legacyHash, 16777619);
+    }
+    const requestKey = suppliedRequestKey
+      || `legacy_${Math.floor(now / (10 * 60 * 1000))}_${(legacyHash >>> 0).toString(36)}`;
     const reference = `zone_withdrawal:${String(user._id)}:${requestKey}`;
     const existing = await ctx.db
       .query("walletTransactions")
@@ -493,10 +578,12 @@ export const addFunds = internalMutation({
 
     const currentBalance = user.walletBalance ?? 0;
     const now = Date.now();
+    const deletionPatch = await interruptAccountDeletionForIncomingFunds(ctx, user, "new wallet funds arrived");
 
     // Update user wallet balance
     await ctx.db.patch(user._id, {
       walletBalance: currentBalance + args.amount,
+      ...deletionPatch,
       updatedAt: now,
     });
 
@@ -604,9 +691,11 @@ export const releaseHeldFunds = internalMutation({
     }
 
     const now = Date.now();
+    const deletionPatch = await interruptAccountDeletionForIncomingFunds(ctx, user, "held funds were released");
     await ctx.db.patch(user._id, {
       walletBalance: currentBalance + args.amount,
       walletHeldBalance: currentHeldBalance - args.amount,
+      ...deletionPatch,
       updatedAt: now,
     });
 
@@ -717,8 +806,10 @@ export const refundFunds = internalMutation({
 
     const currentBalance = Number(user.walletBalance || 0);
     const now = Date.now();
+    const deletionPatch = await interruptAccountDeletionForIncomingFunds(ctx, user, "a refund arrived");
     await ctx.db.patch(user._id, {
       walletBalance: currentBalance + args.amount,
+      ...deletionPatch,
       updatedAt: now,
     });
 

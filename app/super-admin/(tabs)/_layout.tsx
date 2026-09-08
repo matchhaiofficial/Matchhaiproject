@@ -77,7 +77,6 @@ export default function SuperAdminTabsLayout() {
       <Tabs.Screen name="payments" options={{ title: "Payments" }} />
       <Tabs.Screen name="reports" options={{ title: "Reports" }} />
       <Tabs.Screen name="profile" options={{ title: "Profile" }} />
-      <Tabs.Screen name="index.styles" options={{ href: null }} />
     </Tabs>
   );
 }

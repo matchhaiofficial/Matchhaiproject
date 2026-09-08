@@ -10,6 +10,11 @@ import { notifyKycStatusUpdated } from "./kycNotifications";
 import { notifyZoneAdminWithdrawalDecision } from "./withdrawalNotifications";
 import { performAdminCancel } from "./matchrooms";
 import {
+  accountDeletionLocksReactivation,
+  isAccountSuspensionActive,
+} from "./accountStatusPolicy";
+import { interruptAccountDeletionForIncomingFunds } from "./wallet";
+import {
   SUPER_ADMIN_ROLE,
   LEGACY_SUPER_ADMIN_ROLE,
   SUPER_ADMIN_PRIMARY_EMAIL,
@@ -319,7 +324,7 @@ async function getAuthenticatedAdmin(ctx: any, sessionToken: string) {
   const email = normalizeEmail(authUser.email || "");
   const isSuperAdmin = isAuthorizedSuperAdmin(profile, email);
 
-  if (!profile || profile.accountStatus === "suspended" || !isSuperAdmin) {
+  if (!profile || isAccountSuspensionActive(profile) || !isSuperAdmin) {
     throw new Error("Super admin access required");
   }
 
@@ -675,6 +680,18 @@ function buildWithdrawalDecisionMetadata(row: any, input: {
 async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = false) {
   const user = await ctx.db.get(ticket.userId);
   const assignedAdmin = ticket.assignedAdminId ? await ctx.db.get(ticket.assignedAdminId) : null;
+  let deletionJob = includeDetail && ticket.category === "account_deletion"
+    ? await ctx.db.query("accountDeletionJobs")
+        .withIndex("by_ticketId", (q: any) => q.eq("ticketId", ticket._id))
+        .order("desc")
+        .first()
+    : null;
+  if (!deletionJob && includeDetail && ticket.category === "account_deletion" && user?.accountDeletionJobId) {
+    const linkedJob = await ctx.db.get(user.accountDeletionJobId);
+    if (linkedJob && (linkedJob.ticketIds || []).some((id: Id<"supportTickets">) => String(id) === String(ticket._id))) {
+      deletionJob = linkedJob;
+    }
+  }
   const base = {
     id: ticket._id,
     _id: ticket._id,
@@ -705,6 +722,15 @@ async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = fal
     userDisplayName: user?.fullName || user?.username || "Unknown user",
     userEmail: user?.email,
     excerptPreview: formatSupportTicketExcerpt(ticket),
+    accountDeletionJob: deletionJob ? {
+      id: String(deletionJob._id),
+      status: deletionJob.status,
+      stage: deletionJob.stage,
+      error: deletionJob.error || null,
+      attempts: deletionJob.attempts,
+      updatedAt: deletionJob.updatedAt,
+      completedAt: deletionJob.completedAt || null,
+    } : null,
   };
 
   if (!includeDetail) return base;
@@ -2788,8 +2814,14 @@ export const rejectZoneWithdrawal = mutation({
     const user = await ctx.db.get(withdrawal.userId);
     if (withdrawal.metadata?.fundsReservedAt) {
       if (!user) throw new Error("Withdrawal owner not found.");
+      const deletionPatch = await interruptAccountDeletionForIncomingFunds(
+        ctx,
+        user,
+        "a rejected withdrawal returned reserved funds",
+      );
       await ctx.db.patch(user._id, {
         walletBalance: Number(user.walletBalance || 0) + Number(withdrawal.amount || 0),
+        ...deletionPatch,
         updatedAt: now,
       });
     }
@@ -2950,7 +2982,19 @@ export const setZoneStatus = mutation({
     }
 
     await ctx.db.patch(args.zoneId, patch);
+    if (shouldStartPilot && typeof patch.pilotEndsAt === "number") {
+      await ctx.scheduler.runAt(
+        patch.pilotEndsAt,
+        internal.zonePilot.processScheduledPilotExpiry,
+        { zoneId: args.zoneId, expectedEndsAt: patch.pilotEndsAt },
+      );
+    }
     const nextStatus = String((patch.status || zone.status) || "pending-review");
+    if (nextStatus === "active" && Number(zone.scheduleIndexVersion || 0) < 1) {
+      await ctx.scheduler.runAfter(0, (internal as any).scheduleIndexMigration.prepareZoneScheduleIndex, {
+        zoneId: args.zoneId,
+      });
+    }
     const shouldNotifyPlayersZoneLive =
       nextStatus === "active" &&
       ["pending-review", "approved_pending_migration"].includes(String(zone.status || ""));
@@ -3037,34 +3081,9 @@ export const retryZoneMigration = mutation({
       throw new Error("No branches found to migrate.");
     }
 
+    let result: Awaited<ReturnType<typeof migrateZoneBranchesInternal>>;
     try {
-      const result = await migrateZoneBranchesInternal(ctx, args.zoneId);
-      await ctx.db.patch(args.zoneId, {
-        status: "active",
-        approvedAt: zone.approvedAt || Date.now(),
-        migration: {
-          ...zone.migration,
-          perBranchSeatModel: true,
-          status: "succeeded",
-          migratedAt: Date.now(),
-          lastAttemptAt: Date.now(),
-          lastError: undefined,
-          branchCount: result.branchCount,
-          resourceCount: result.resourceCount,
-          resourceModelVersion: 1,
-        },
-        updatedAt: Date.now(),
-      });
-      await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
-      await insertSuperAdminAuditLog(ctx, admin, {
-        action: "retry_zone_migration",
-        module: "zones",
-        targetType: "zone",
-        targetId: String(args.zoneId),
-        status: "success",
-        metadataSafe: { branchCount: result.branchCount, resourceCount: result.resourceCount },
-      });
-      return { ok: true };
+      result = await migrateZoneBranchesInternal(ctx, args.zoneId);
     } catch (error: any) {
       await ctx.db.patch(args.zoneId, {
         status: "approved_pending_migration",
@@ -3079,6 +3098,81 @@ export const retryZoneMigration = mutation({
       });
       throw error;
     }
+
+    const now = Date.now();
+    const shouldStartPilot = !zone.pilotStartedAt;
+    const pilotEndsAt = shouldStartPilot ? addMonthsClamped(now, 1) : zone.pilotEndsAt;
+    await ctx.db.patch(args.zoneId, {
+      status: "active",
+      approvedAt: zone.approvedAt || now,
+      ...(shouldStartPilot ? {
+        pilotStatus: "active" as const,
+        pilotStartedAt: now,
+        pilotEndsAt,
+        pilotEndedAt: undefined,
+        pilotPayoutRate: 1.0,
+        normalPayoutRate: 0.9,
+      } : {}),
+      migration: {
+        ...zone.migration,
+        perBranchSeatModel: true,
+        status: "succeeded",
+        migratedAt: now,
+        lastAttemptAt: now,
+        lastError: undefined,
+        branchCount: result.branchCount,
+        resourceCount: result.resourceCount,
+        resourceModelVersion: 1,
+      },
+      updatedAt: now,
+    });
+    if (shouldStartPilot && typeof pilotEndsAt === "number") {
+      await ctx.scheduler.runAt(
+        pilotEndsAt,
+        internal.zonePilot.processScheduledPilotExpiry,
+        { zoneId: args.zoneId, expectedEndsAt: pilotEndsAt },
+      );
+      if (zone.ownerUid) {
+        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+          type: "zone.pilot_started",
+          toUid: zone.ownerUid,
+          recipientRole: "zone_admin",
+          status: "pending",
+          dedupeKey: `zone.pilot_started:${String(args.zoneId)}`,
+          dedupePolicy: "replace_active",
+          pushPolicy: "force",
+          route: "/zone/(tabs)/profile",
+          entity: { kind: "zone", id: String(args.zoneId) },
+          entityId: String(args.zoneId),
+          title: "Pilot period started",
+          body: "Your zone is now live. For the first month, you'll receive 100% of Matchhai booking payouts. After the pilot period ends, the standard 90% payout rate will apply.",
+          data: {
+            zoneId: String(args.zoneId),
+            pilotStartedAt: now,
+            pilotEndsAt,
+            pilotPayoutRate: 1.0,
+            normalPayoutRate: 0.9,
+            route: "/zone/(tabs)/profile",
+            href: "/zone/(tabs)/profile",
+          },
+        });
+      }
+    }
+    if (Number(zone.scheduleIndexVersion || 0) < 1) {
+      await ctx.scheduler.runAfter(0, (internal as any).scheduleIndexMigration.prepareZoneScheduleIndex, {
+        zoneId: args.zoneId,
+      });
+    }
+    await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "retry_zone_migration",
+      module: "zones",
+      targetType: "zone",
+      targetId: String(args.zoneId),
+      status: "success",
+      metadataSafe: { branchCount: result.branchCount, resourceCount: result.resourceCount, pilotStarted: shouldStartPilot },
+    });
+    return { ok: true };
   },
 });
 
@@ -4036,303 +4130,158 @@ export const resolveSupportTicket = mutation({
   },
 });
 
-// Shared core for account deletion. Anonymizes PII in both the Convex users table
-// and the Better Auth auth record, then revokes all active sessions.
-// Financial/KYC/audit records are intentionally retained for legal compliance.
-async function assertAccountDeletionIsSafe(ctx: any, user: any) {
-  const availableBalance = Number(user.walletBalance || 0);
-  const heldBalance = Number(user.walletHeldBalance || 0);
-  if (availableBalance !== 0 || heldBalance !== 0) {
-    throw new Error("Account deletion is blocked until wallet funds and active holds are fully settled.");
-  }
 
-  const pendingTransaction = await ctx.db
-    .query("walletTransactions")
-    .withIndex("by_userId_and_status", (q: any) => q.eq("userId", user._id).eq("status", "pending"))
-    .first();
-  if (pendingTransaction) {
-    throw new Error("Account deletion is blocked while a wallet transaction is pending.");
-  }
-
-  const providerPaymentPendingStatuses = [
-    "created",
-    "redirected",
-    "token_received",
-    "pending",
-  ] as const;
-  for (const status of providerPaymentPendingStatuses) {
-    const pendingProviderPayment = await ctx.db
-      .query("paymentTransactions")
-      .withIndex("by_userId_and_status", (q: any) =>
-        q.eq("userId", user._id).eq("status", status),
-      )
-      .first();
-    if (pendingProviderPayment) {
-      throw new Error("Account deletion is blocked while a provider payment is pending.");
+async function enqueueAccountDeletion(ctx: any, input: {
+  admin: any;
+  user: any;
+  ticketId?: Id<"supportTickets">;
+}) {
+  const mergeTicketIds = (job: any) => {
+    const ticketIds = Array.from(new Set([
+      ...(Array.isArray(job?.ticketIds) ? job.ticketIds : []),
+      job?.ticketId,
+      input.ticketId,
+    ].filter(Boolean).map(String)));
+    if (ticketIds.length > 25) {
+      throw new Error("Too many account deletion tickets are linked to this cleanup job.");
     }
-  }
-
-  const memberships = await ctx.db
-    .query("matchroomMembers")
-    .withIndex("by_uid", (q: any) => q.eq("uid", String(user._id)))
-    .collect();
-  for (const membership of memberships) {
-    const room = await ctx.db.get(membership.matchroomId);
-    if (room && ["open", "locked", "in-progress"].includes(String(room.status))) {
-      throw new Error("Account deletion is blocked until active matchrooms are completed or cancelled.");
-    }
-  }
-
-  const activeChallengeStatuses = [
-    "pending",
-    "accepted",
-    "venue_proposed",
-    "venue_confirmed",
-    "admin_pending",
-  ] as const;
-  for (const status of activeChallengeStatuses) {
-    const [asCaptainA, asCaptainB] = await Promise.all([
-      ctx.db
-        .query("teamChallenges")
-        .withIndex("by_captainAUid_and_status", (q: any) =>
-          q.eq("captainAUid", user._id).eq("status", status),
-        )
-        .first(),
-      ctx.db
-        .query("teamChallenges")
-        .withIndex("by_captainBUid_and_status", (q: any) =>
-          q.eq("captainBUid", user._id).eq("status", status),
-        )
-        .first(),
-    ]);
-    if (asCaptainA || asCaptainB) {
-      throw new Error("Account deletion is blocked until active team challenges are resolved.");
-    }
-  }
-
-  const teamMemberships = await ctx.db
-    .query("teamMembers")
-    .withIndex("by_userId", (q: any) => q.eq("odxerId", user._id))
-    .collect();
-  for (const membership of teamMemberships) {
-    const team = await ctx.db.get(membership.teamId);
-    if (team && team.status !== "deleted") {
-      throw new Error("Account deletion is blocked until active team membership is removed or transferred.");
-    }
-  }
-
-  const captainedTeams = await ctx.db
-    .query("teams")
-    .withIndex("by_captainUid", (q: any) => q.eq("captainUid", user._id))
-    .collect();
-  if (captainedTeams.some((team: any) => team.status !== "deleted")) {
-    throw new Error("Account deletion is blocked until active team captaincy is transferred.");
-  }
-
-  const ownedZones = await ctx.db
-    .query("zones")
-    .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))
-    .collect();
-  if (ownedZones.some((zone: any) => zone.status !== "rejected")) {
-    throw new Error("Account deletion is blocked until venue ownership is transferred or the venue application is rejected.");
-  }
-}
-
-async function applyAccountDeletion(ctx: any, user: any, now: number) {
-  const shortId = String(user._id).slice(-8);
-  const anonEmail = `deleted_${shortId}@deleted.matchhai.internal`;
-
-  await assertAccountDeletionIsSafe(ctx, user);
-
-  // 1. Anonymize the auth identity and revoke sessions. These operations are
-  // required; never resolve a deletion request while a usable login remains.
-  if (user.authId) {
-    const verificationIdentifiers = Array.from(new Set([
-      user.email,
-      user.phone,
-      user.pendingEmail,
-      user.pendingPhone,
-    ].map((value) => String(value || "").trim()).filter(Boolean)));
-    if (verificationIdentifiers.length > 0) {
-      await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
-        input: {
-          model: "verification",
-          where: [{ field: "identifier", operator: "in", value: verificationIdentifiers }],
-        },
-        paginationOpts: { cursor: null, numItems: 100000 },
-      });
-    }
-    await ctx.runMutation(components.betterAuth.adapter.updateOne, {
-      input: {
-        model: "user",
-        where: [{ field: "_id", operator: "eq", value: user.authId }],
-        update: {
-          email: anonEmail,
-          name: "Deleted User",
-          image: null,
-          username: `deleted_${shortId}`,
-          displayUsername: "Deleted User",
-          phoneNumber: null,
-          phoneNumberVerified: false,
-          updatedAt: now,
-        },
-      },
-    });
-
-    await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
-      input: {
-        model: "session",
-        where: [{ field: "userId", operator: "eq", value: user.authId }],
-      },
-      paginationOpts: { cursor: null, numItems: 100000 },
-    });
-    await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
-      input: {
-        model: "account",
-        where: [{ field: "userId", operator: "eq", value: user.authId }],
-      },
-      paginationOpts: { cursor: null, numItems: 100000 },
-    });
-  }
-
-  // 2. Anonymize Convex user record.
-  if (user.profileImageStorageId) {
-    await ctx.storage.delete(user.profileImageStorageId);
-  }
-  await ctx.db.patch(user._id, {
-    fullName: "Deleted User",
-    username: `deleted_${shortId}`,
-    usernameLower: `deleted_${shortId}`,
-    email: anonEmail,
-    photoURL: undefined,
-    phone: undefined,
-    phoneValidated: undefined,
-    phoneValidationProvider: undefined,
-    phoneValidationCheckedAt: undefined,
-    phoneOtpVerified: undefined,
-    phoneOtpVerifiedAt: undefined,
-    phoneNumberMasked: undefined,
-    phoneNumberHash: undefined,
-    pendingEmail: undefined,
-    pendingPhone: undefined,
-    profileImageStorageId: undefined,
-    profileImageUpdatedAt: undefined,
-    bio: undefined,
-    areasPreferred: undefined,
-    city: undefined,
-    ageRange: undefined,
-    playsCs2: undefined,
-    cs2Role: undefined,
-    playsCs16: undefined,
-    cs16Role: undefined,
-    playsValorant: undefined,
-    valorantRole: undefined,
-    valorantAgent: undefined,
-    playsFc: undefined,
-    fcTeam: undefined,
-    fcFormation: undefined,
-    selectedFcLeagueId: undefined,
-    playsTekken: undefined,
-    tekkenFavorites: undefined,
-    playsFutsal: undefined,
-    playsIndoorCricket: undefined,
-    playsPadel: undefined,
-    playsPickleball: undefined,
-    futsalPosition: undefined,
-    futsalPositions: undefined,
-    indoorCricketRole: undefined,
-    indoorCricketBowlingStyle: undefined,
-    indoorCricketBattingStyle: undefined,
-    padelRole: undefined,
-    pickleballRole: undefined,
-    // Platform URLs and external IDs
-    steamProfileUrl: undefined,
-    faceitProfileUrl: undefined,
-    eaProfileUrl: undefined,
-    xboxGamertag: undefined,
-    steamId: undefined,
-    steamPersonaName: undefined,
-    steamCs2Hours: undefined,
-    steamFc26Hours: undefined,
-    steamTekken8Hours: undefined,
-    eaId: undefined,
-    faceitId: undefined,
-    faceitNickname: undefined,
-    faceitElo: undefined,
-    faceitSkillLevel: undefined,
-    faceitGame: undefined,
-    faceitStats: undefined,
-    psnAccountId: undefined,
-    psnOnlineId: undefined,
-    psnStats: undefined,
-    steamStats: undefined,
-    lastExternalSyncAt: undefined,
-    steamLastSyncedAt: undefined,
-    faceitLastSyncedAt: undefined,
-    psnLastSyncedAt: undefined,
-    identityVerificationId: undefined,
-    emailVerificationStatus: undefined,
-    emailVerifiedAt: undefined,
-    cnicMasked: undefined,
-    skillScores: undefined,
-    teamsByGame: undefined,
-    trustScore: undefined,
-    role: undefined,
-    mustChangePassword: undefined,
-    passwordChangedAt: undefined,
-    passwordResetRequestedAt: undefined,
-    createdBySuperAdmin: undefined,
-    isSystemAdminAccount: undefined,
-    hiddenFromPublic: true,
-    isHiddenFromDiscovery: true,
-    lastActiveAt: undefined,
-    chatMuted: undefined,
-    isOnline: false,
-    accountStatus: "suspended",
-    suspendedAt: now,
-    suspensionReason: "account_deletion_processed",
-    updatedAt: now,
-  });
-
-  // Historical rows can remain for audit/referential integrity, but they must
-  // not preserve the deleted user's display name or contact details.
-  const teamMemberships = await ctx.db
-    .query("teamMembers")
-    .withIndex("by_userId", (q: any) => q.eq("odxerId", user._id))
-    .collect();
-  for (const membership of teamMemberships) {
-    await ctx.db.patch(membership._id, { username: "Deleted User" });
-  }
-
-  const captainedTeams = await ctx.db
-    .query("teams")
-    .withIndex("by_captainUid", (q: any) => q.eq("captainUid", user._id))
-    .collect();
-  for (const team of captainedTeams) {
-    await ctx.db.patch(team._id, { captainUsername: "Deleted User", updatedAt: now });
-  }
-
-  const rejectedZones = await ctx.db
-    .query("zones")
-    .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))
-    .collect();
-  for (const zone of rejectedZones) {
-    if (zone.status !== "rejected") continue;
-    await ctx.db.patch(zone._id, {
-      ownerUsername: "Deleted User",
-      ownerFullName: "Deleted User",
-      contactEmail: anonEmail,
-      contactPhone: undefined,
-      phone: undefined,
+    return ticketIds as Id<"supportTickets">[];
+  };
+  const lockUser = async (jobId: Id<"accountDeletionJobs">) => {
+    const now = Date.now();
+    await ctx.db.patch(input.user._id, {
+      accountStatus: "suspended",
+      suspendedAt: now,
+      suspendedUntil: null,
+      suspensionReason: "account_deletion_pending",
+      suspendedByAdminUserId: input.admin.profile._id,
+      accountDeletionJobId: jobId,
+      accountDeletionStatus: "queued",
+      accountDeletionError: undefined,
+      accountDeletionUpdatedAt: now,
       updatedAt: now,
     });
+  };
+
+  for (const status of ["queued", "running"] as const) {
+    const existing = await ctx.db
+      .query("accountDeletionJobs")
+      .withIndex("by_userId_and_status", (q: any) =>
+        q.eq("userId", input.user._id).eq("status", status),
+      )
+      .first();
+    if (existing) {
+      const ticketIds = mergeTicketIds(existing);
+      await ctx.db.patch(existing._id, {
+        ticketId: existing.ticketId || input.ticketId,
+        ticketIds,
+        updatedAt: Date.now(),
+      });
+      await lockUser(existing._id);
+      await ctx.scheduler.runAfter(0, (internal as any).accountDeletion.processAccountDeletionJob, {
+        jobId: existing._id,
+      });
+      return existing;
+    }
   }
 
-  return { shortId, anonEmail };
+  const verificationIdentifiers = Array.from(new Set([
+    input.user.email,
+    input.user.phone,
+    input.user.pendingEmail,
+    input.user.pendingPhone,
+  ].map((value) => String(value || "").trim()).filter(Boolean)));
+  const displayNames = Array.from(new Set([
+    input.user.fullName,
+    input.user.username,
+  ].map((value) => String(value || "").trim()).filter((value) => value && value !== "Deleted User")));
+  let resolvedAuthId = String(input.user.authId || "").trim() || undefined;
+  if (!resolvedAuthId) {
+    const linkedAuthUser = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: "user",
+      where: [{ field: "userId", operator: "eq", value: String(input.user._id) }],
+    });
+    resolvedAuthId = String(linkedAuthUser?._id || linkedAuthUser?.id || "").trim() || undefined;
+  }
+  if (!resolvedAuthId && input.user.email) {
+    const authUser = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: "user",
+      where: [{ field: "email", operator: "eq", value: String(input.user.email).trim().toLowerCase() }],
+    });
+    resolvedAuthId = String(authUser?._id || authUser?.id || "").trim() || undefined;
+  }
+
+  const latestStopped = await ctx.db.query("accountDeletionJobs")
+    .withIndex("by_userId_and_createdAt", (q: any) => q.eq("userId", input.user._id))
+    .order("desc")
+    .first();
+  if (latestStopped && (latestStopped.status === "blocked" || latestStopped.status === "failed")) {
+    const retryIdentity = resolveSuperAdminAuditIdentity(input.admin.authUser, input.admin.profile);
+    await ctx.db.patch(latestStopped._id, {
+      requestedByAdminId: retryIdentity.superAdminUserId,
+      requestedByAdminName: retryIdentity.superAdminName,
+      requestedByAdminEmail: retryIdentity.superAdminEmail,
+      ticketId: input.ticketId || latestStopped.ticketId,
+      ticketIds: mergeTicketIds(latestStopped),
+      status: "queued",
+      // Every retry re-runs the full safety preflight. A failed destructive
+      // stage may have been interrupted by a late refund or other new work;
+      // resuming that stage directly could delete an account holding funds.
+      stage: "preflight_basics",
+      cursor: undefined,
+      authId: resolvedAuthId || latestStopped.authId,
+      verificationIdentifiers,
+      displayNames: displayNames.length ? displayNames : latestStopped.displayNames,
+      priorAccountStatus: input.user.accountStatus,
+      priorSuspendedAt: input.user.suspendedAt,
+      priorSuspendedUntil: input.user.suspendedUntil,
+      priorSuspensionReason: input.user.suspensionReason,
+      priorSuspendedByAdminUserId: input.user.suspendedByAdminUserId,
+      error: undefined,
+      updatedAt: Date.now(),
+    });
+    await lockUser(latestStopped._id);
+    await ctx.scheduler.runAfter(0, (internal as any).accountDeletion.processAccountDeletionJob, {
+      jobId: latestStopped._id,
+    });
+    return await ctx.db.get(latestStopped._id);
+  }
+
+  const now = Date.now();
+  const shortId = String(input.user._id).slice(-8);
+  const identity = resolveSuperAdminAuditIdentity(input.admin.authUser, input.admin.profile);
+  const jobId = await ctx.db.insert("accountDeletionJobs", {
+    userId: input.user._id,
+    ticketId: input.ticketId,
+    ticketIds: input.ticketId ? [input.ticketId] : [],
+    requestedByAdminId: identity.superAdminUserId,
+    requestedByAdminName: identity.superAdminName,
+    requestedByAdminEmail: identity.superAdminEmail,
+    status: "queued",
+    stage: "preflight_basics",
+    authId: resolvedAuthId,
+    verificationIdentifiers,
+    displayNames,
+    shortId,
+    anonEmail: `deleted_${shortId}@deleted.matchhai.internal`,
+    processedRows: 0,
+    attempts: 0,
+    createdAt: now,
+    updatedAt: now,
+    priorAccountStatus: input.user.accountStatus,
+    priorSuspendedAt: input.user.suspendedAt,
+    priorSuspendedUntil: input.user.suspendedUntil,
+    priorSuspensionReason: input.user.suspensionReason,
+    priorSuspendedByAdminUserId: input.user.suspendedByAdminUserId,
+  });
+  await lockUser(jobId);
+  await ctx.scheduler.runAfter(0, (internal as any).accountDeletion.processAccountDeletionJob, { jobId });
+  return await ctx.db.get(jobId);
 }
 
 // Processes an account deletion ticket submitted via the in-app deletion flow.
-// Call this from the support ticket detail screen.
+// The endpoint preserves its public contract but now schedules bounded work;
+// the worker resolves the ticket only after every stage completes.
 export const processAccountDeletion = mutation({
   args: {
     sessionToken: v.string(),
@@ -4353,26 +4302,8 @@ export const processAccountDeletion = mutation({
     if (!user) throw new Error("User not found — account may already be deleted.");
     assertCanActOnSuperAdminTarget(admin, user);
 
-    const now = Date.now();
-    const { shortId } = await applyAccountDeletion(ctx, user, now);
-
-    await ctx.db.patch(args.ticketId, {
-      status: "resolved",
-      assignedAdminId: ticket.assignedAdminId || admin.profile._id,
-      resolutionSummary: `Account deletion processed by ${admin.profile.fullName || admin.profile.username || "super admin"}. PII anonymized, auth email cleared, sessions revoked. Financial and KYC records retained.`,
-      updatedAt: now,
-    });
-
-    await insertSuperAdminAuditLog(ctx, admin, {
-      action: "process_account_deletion",
-      module: "users",
-      targetType: "user",
-      targetId: String(user._id),
-      status: "success",
-      metadataSafe: { reference: ticket.reference, ticketId: String(args.ticketId), anonymizedUsername: `deleted_${shortId}` },
-    });
-
-    return { ok: true };
+    const job = await enqueueAccountDeletion(ctx, { admin, user, ticketId: args.ticketId });
+    return { ok: true, status: "scheduled", jobId: String(job?._id || "") };
   },
 });
 
@@ -4404,19 +4335,8 @@ export const deleteUserAccount = mutation({
     // Allow re-running on already-deleted accounts so stale deletions (run before
     // auth-email anonymization was added) can have their Better Auth record cleaned up.
 
-    const now = Date.now();
-    const { shortId } = await applyAccountDeletion(ctx, user, now);
-
-    await insertSuperAdminAuditLog(ctx, admin, {
-      action: "delete_user_account",
-      module: "users",
-      targetType: "user",
-      targetId: String(user._id),
-      status: "success",
-      metadataSafe: { anonymizedUsername: `deleted_${shortId}` },
-    });
-
-    return { ok: true };
+    const job = await enqueueAccountDeletion(ctx, { admin, user });
+    return { ok: true, status: "scheduled", jobId: String(job?._id || "") };
   },
 });
 
@@ -4501,6 +4421,13 @@ async function applyUserSuspension(
   const target = await ctx.db.get(args.userId);
   if (!target) {
     throw new Error("User not found.");
+  }
+  if (args.status === "active" && accountDeletionLocksReactivation(target.accountDeletionStatus)) {
+    throw new Error("Account access cannot be restored until account deletion cleanup succeeds.");
+  }
+  if (args.status === "suspended"
+    && (target.accountDeletionStatus === "queued" || target.accountDeletionStatus === "running")) {
+    throw new Error("Account access cannot be changed while deletion is in progress.");
   }
 
   if (String(admin.profile._id) === String(args.userId) && args.status === "suspended") {

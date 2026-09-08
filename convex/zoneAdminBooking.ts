@@ -6,6 +6,7 @@ import { api, internal } from "./_generated/api";
 import {
   closeBroadcastOfferRequest,
   confirmBroadcastVenue,
+  finalizeBroadcastFailure,
   getBroadcastOfferExpiresAt,
   notifyBroadcastOfferReceived,
 } from "./matchroomBroadcast";
@@ -16,6 +17,7 @@ import {
   assertSelectedResourcesAvailableForSlot,
   assertZoneResourceCapacityAvailable,
   getBookingRequestStartAtForConflict,
+  reconcileResourceLegacyAssignment,
 } from "./bookingConflicts";
 import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
 import {
@@ -23,6 +25,11 @@ import {
   withBookingRequestLifecycleDueAt,
 } from "./maintenanceDue";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
+import { requireCurrentUser } from "./authz";
+import { assertNewGameEntityCreationAllowed } from "./gameAvailabilityPolicy";
+import { syncMatchroomMembers } from "./matchroomMembers";
+import { assertBranchOperatingHoursAvailable } from "./branchOperatingHours";
+import { getKarachiDateString, getKarachiDayStartMillis, parseKarachiDateTimeMillis } from "./karachiDateTime";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -31,66 +38,6 @@ function normalizeGameKey(value?: string | null) {
 
 function normalizeResourceToken(value?: string | null) {
   return String(value || "").trim().toLowerCase();
-}
-
-function parseLocalDateTimeMillis(dateValue?: string | null, timeValue?: string | null) {
-  const date = String(dateValue || "").trim();
-  let time = String(timeValue || "").trim();
-  if (!date || !time) return null;
-  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
-  if (twelveHour) {
-    let hour = Number(twelveHour[1]);
-    const minute = Number(twelveHour[2]);
-    const period = twelveHour[3].toUpperCase();
-    if (period === "PM" && hour !== 12) hour += 12;
-    if (period === "AM" && hour === 12) hour = 0;
-    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-  const parsed = new Date(`${date}T${time}`).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getKarachiDateString(value: unknown): string | null {
-  if (typeof value === "string") {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-    return match ? match[0] : null;
-  }
-  const timestamp = Number(value || 0);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Karachi",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(timestamp));
-  const part = (type: string) => parts.find((entry) => entry.type === type)?.value;
-  const year = part("year");
-  const month = part("month");
-  const day = part("day");
-  return year && month && day ? `${year}-${month}-${day}` : null;
-}
-
-function parseKarachiDateTimeMillis(dateValue: unknown, timeValue: unknown): number | null {
-  const date = getKarachiDateString(dateValue);
-  let time = String(timeValue || "").trim();
-  if (!date || !time) return null;
-  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
-  if (twelveHour) {
-    let hour = Number(twelveHour[1]);
-    const minute = Number(twelveHour[2]);
-    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
-    const period = twelveHour[3].toUpperCase();
-    if (period === "PM" && hour !== 12) hour += 12;
-    if (period === "AM" && hour === 12) hour = 0;
-    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-  const twentyFourHour = /^(\d{2}):(\d{2})$/.exec(time);
-  if (!twentyFourHour) return null;
-  const hour = Number(twentyFourHour[1]);
-  const minute = Number(twentyFourHour[2]);
-  if (hour > 23 || minute > 59) return null;
-  const parsed = new Date(`${date}T${time}:00+05:00`).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizeMatchCodePrefix(value?: string | null) {
@@ -116,20 +63,7 @@ async function generateUniqueMatchCode(ctx: any, label?: string | null) {
 }
 
 function getScheduledStartMillis(dateValue: unknown, timeValue: unknown) {
-  const time = String(timeValue || "").trim();
-  if (!time) return null;
-
-  if (typeof dateValue === "number" && Number.isFinite(dateValue)) {
-    const date = new Date(dateValue);
-    const localDate = [
-      date.getFullYear(),
-      String(date.getMonth() + 1).padStart(2, "0"),
-      String(date.getDate()).padStart(2, "0"),
-    ].join("-");
-    return parseLocalDateTimeMillis(localDate, time);
-  }
-
-  return parseLocalDateTimeMillis(String(dateValue || ""), time);
+  return parseKarachiDateTimeMillis(dateValue, timeValue);
 }
 
 function getPositiveTimestamp(value: unknown) {
@@ -426,7 +360,7 @@ function getRequiredResourceProfile(request: any) {
     return {
       assetType: "console",
       requiredResourceIds: 1,
-      tier: ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
+    tier: ["regular", "premium", "elite", "ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
     };
   }
 
@@ -497,8 +431,7 @@ async function holdResourcesForBroadcastOffer(ctx: any, input: {
       throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
     }
     const status = String(resource.lifecycleStatus || "");
-    const heldForSameRequest = isResourceHeldForRequest(resource, input.request);
-    if (status !== "available" && !heldForSameRequest) {
+    if (resource.isActive === false || status === "maintenance") {
       throw new Error(`${resource.name || `Resource ${index + 1}`} is no longer available.`);
     }
   });
@@ -543,8 +476,7 @@ async function holdResourcesForZoneCounterOffer(ctx: any, input: {
       throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
     }
     const status = String(resource.lifecycleStatus || "");
-    const heldForSameRequest = isResourceHeldForRequest(resource, input.request);
-    if (status !== "available" && !heldForSameRequest) {
+    if (resource.isActive === false || status === "maintenance") {
       throw new Error(`${resource.name || `Resource ${index + 1}`} is no longer available.`);
     }
   });
@@ -582,13 +514,11 @@ async function releaseHeldResourcesForRequest(ctx: any, request: any, now = Date
       String(resource.bookingRequestId || "") === String(request?._id || "") &&
       String(resource.lifecycleStatus || "") === "held"
     ) {
-      await ctx.db.patch(resource._id, {
-        lifecycleStatus: "available",
-        bookingRequestId: undefined,
-        matchroomId: undefined,
-        bookedAt: undefined,
-        bookedByUid: undefined,
-        updatedAt: now,
+      await reconcileResourceLegacyAssignment(ctx, {
+        resourceId: resource._id,
+        excludeBookingRequestId: String(request?._id || ""),
+        excludeMatchroomId: request?.matchroomId ? String(request.matchroomId) : null,
+        now,
       });
     }
   }
@@ -721,20 +651,8 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
 // Auth identity. Never trusts a client-passed uid — the actor is derived purely
 // from the session. Throws a clean, generic message when unauthenticated.
 async function requireAuthenticatedActor(ctx: any) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Please sign in to continue.");
-
-  const candidates = [identity.tokenIdentifier, identity.subject]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-
-  let actor: any = null;
-  for (const candidate of candidates) {
-    actor = await resolveUserByAnyId(ctx, candidate);
-    if (actor) break;
-  }
-  if (!actor) throw new Error("Signed-in user profile not found.");
-  return actor;
+  const { user } = await requireCurrentUser(ctx);
+  return user;
 }
 
 // Authorize a zone-owner action: caller must be authenticated AND own `zoneId`.
@@ -796,6 +714,27 @@ async function scheduleMatchroomLifecycle(ctx: any, matchroomId: any) {
     lifecycleScheduledAt: dueAt,
     lifecycleScheduledFnId: String(scheduledId),
   });
+}
+
+async function extendBroadcastDeadlineThroughOffer(
+  ctx: any,
+  matchroomId: any,
+  offerExpiresAt: number,
+) {
+  const room: any = await ctx.db.get(matchroomId);
+  if (!room || room.locationMode !== "broadcast" || room.broadcastRequestStatus !== "waiting_for_zones") {
+    return false;
+  }
+  const currentDeadline = Number(room.broadcastRequestExpiresAt || 0);
+  if (!Number.isFinite(offerExpiresAt) || offerExpiresAt <= Date.now() || currentDeadline >= offerExpiresAt) {
+    return false;
+  }
+  const now = Date.now();
+  await ctx.db.patch(room._id, withLifecycleDueAt(room, {
+    broadcastRequestExpiresAt: offerExpiresAt,
+    updatedAt: now,
+  }, now));
+  return true;
 }
 
 function buildZoneBookingNotificationData(input: {
@@ -1076,7 +1015,6 @@ async function markCounterOfferUnavailable(ctx: any, input: {
     offerId: String(input.offerId),
     recipientUids: input.recipientUids,
     status: "expired",
-    responderUid: input.responderUid,
   });
 
   return {
@@ -1238,7 +1176,7 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
   const acceptedStartAt =
     typeof input.option.startAt === "number" && Number.isFinite(input.option.startAt)
       ? input.option.startAt
-      : parseLocalDateTimeMillis(input.option.date, input.option.time);
+      : parseKarachiDateTimeMillis(input.option.date, input.option.time);
   const acceptedZoneId = offer.zoneId || request.zoneId;
   if (!acceptedZoneId) {
     throw new Error("Accepted counter-offer is missing its zone.");
@@ -1337,6 +1275,7 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
     createdAt: now,
     updatedAt: now,
   });
+  await syncMatchroomMembers(ctx, matchroomId, players.map((player) => player.uid));
 
   await patchBookingRequestWithLifecycleDueAt(ctx, request, {
     status: "accepted",
@@ -1512,7 +1451,7 @@ export const listBookingQueuePageForZone = query({
         if (filters.requestKind && String(request.requestKind || "direct_zone") !== String(filters.requestKind)) return false;
         if (filters.branchId && String(request.branchId || "") !== String(filters.branchId)) return false;
         if (filters.game && String(filters.game) !== "all" && normalizeGameKey(request.gameKey) !== normalizeGameKey(filters.game)) return false;
-        const requestTime = parseLocalDateTimeMillis(request.preferredDate, request.preferredTime) || Number(request.createdAt || 0);
+        const requestTime = parseKarachiDateTimeMillis(request.preferredDate, request.preferredTime) || Number(request.createdAt || 0);
         if (filters.dateFrom !== undefined && requestTime < filters.dateFrom) return false;
         if (filters.dateTo !== undefined && requestTime > filters.dateTo) return false;
         if (searchNeedle) {
@@ -1997,6 +1936,26 @@ export const acceptBookingRequest = mutation({
     if (new Set(args.resourceIds.map(String)).size !== args.resourceIds.length) {
       throw new Error("Each selected resource must be unique.");
     }
+    let allocationStartAt = getBookingRequestStartAtForConflict(bookingRequest);
+    let allocationDurationMinutes = getDurationMinutesFromRequest(bookingRequest);
+    if (bookingRequest.matchroomId) {
+      const linkedRoomForSlot: any = await ctx.db.get(bookingRequest.matchroomId);
+      if (!linkedRoomForSlot) {
+        throw new Error("The linked matchroom no longer exists.");
+      }
+      allocationStartAt = getLinkedRoomStartMillis(linkedRoomForSlot) || allocationStartAt;
+      const linkedDuration = Number(linkedRoomForSlot.durationMinutes || 0);
+      if (Number.isFinite(linkedDuration) && linkedDuration > 0) {
+        allocationDurationMinutes = linkedDuration;
+      }
+    }
+    await assertBranchOperatingHoursAvailable(ctx, {
+      zoneId: args.zoneId,
+      zone,
+      branchId: args.branchId,
+      scheduledStartAt: allocationStartAt,
+      durationMinutes: allocationDurationMinutes,
+    });
 
     const selectedResources = await Promise.all(
       args.resourceIds.map((resourceId) => ctx.db.get(resourceId)),
@@ -2012,24 +1971,11 @@ export const acceptBookingRequest = mutation({
       if (String(resource.branchId || "") !== String(args.branchId)) {
         throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
       }
-      if (!["available", "held"].includes(String(resource.lifecycleStatus || ""))) {
+      if (resource.isActive === false || String(resource.lifecycleStatus || "") === "maintenance") {
         throw new Error(`${resource.name || `Resource ${index + 1}`} is no longer available.`);
       }
     });
 
-    let allocationStartAt = getBookingRequestStartAtForConflict(bookingRequest);
-    let allocationDurationMinutes = getDurationMinutesFromRequest(bookingRequest);
-    if (bookingRequest.matchroomId) {
-      const linkedRoomForSlot: any = await ctx.db.get(bookingRequest.matchroomId);
-      if (!linkedRoomForSlot) {
-        throw new Error("The linked matchroom no longer exists.");
-      }
-      allocationStartAt = getLinkedRoomStartMillis(linkedRoomForSlot) || allocationStartAt;
-      const linkedDuration = Number(linkedRoomForSlot.durationMinutes || 0);
-      if (Number.isFinite(linkedDuration) && linkedDuration > 0) {
-        allocationDurationMinutes = linkedDuration;
-      }
-    }
     await assertSelectedResourcesAvailableForSlot(ctx, {
       zoneId: args.zoneId,
       branchId: args.branchId,
@@ -2113,6 +2059,8 @@ export const acceptBookingRequest = mutation({
         updatedAt: now,
       });
 
+      await extendBroadcastDeadlineThroughOffer(ctx, bookingRequest.matchroomId, offerExpiresAt);
+
       await notifyBroadcastOfferReceived(ctx, {
         room: { ...room, _id: bookingRequest.matchroomId },
         offerId,
@@ -2140,7 +2088,7 @@ export const acceptBookingRequest = mutation({
         });
       }
 
-      const existingMatchroom = await ctx.db.get(matchroomId);
+      const existingMatchroom: any = await ctx.db.get(matchroomId);
       if (!existingMatchroom) throw new Error("Matchroom not found.");
       await ctx.db.patch(matchroomId, withLifecycleDueAt(existingMatchroom as any, {
         status: "locked",
@@ -2152,6 +2100,7 @@ export const acceptBookingRequest = mutation({
         bookingSource: "zone_accepted",
         branchId: args.branchId,
         resourceIds: args.resourceIds,
+        durationMinutes: existingMatchroom.durationMinutes || getDurationMinutesFromRequest(bookingRequest),
         location: canonicalBranch.branchName || zoneName,
         updatedAt: now,
       }, now));
@@ -2247,6 +2196,7 @@ export const acceptBookingRequest = mutation({
         ...roomData,
         lifecycleDueAt: getLifecycleDueAt(roomData, now),
       });
+      await syncMatchroomMembers(ctx, matchroomId, roomData.playerUids);
 
       await patchBookingRequestWithLifecycleDueAt(ctx, bookingRequest, {
         status: "accepted",
@@ -2571,6 +2521,15 @@ export const sendCounterOffer = mutation({
     }
     const canonicalBranch = getCanonicalZoneBranch(zone, branchId);
     const primaryStartAt = primaryOption.startAt;
+    for (const option of scheduleOptions) {
+      await assertBranchOperatingHoursAvailable(ctx, {
+        zoneId: args.zoneId,
+        zone,
+        branchId,
+        scheduledStartAt: option.startAt,
+        durationMinutes: getDurationMinutesFromRequest(request),
+      });
+    }
     await assertSelectedResourcesAvailableForSlot(ctx, {
       zoneId: String(args.zoneId),
       branchId,
@@ -2619,6 +2578,10 @@ export const sendCounterOffer = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    if (isBroadcastRequest && request.matchroomId) {
+      await extendBroadcastDeadlineThroughOffer(ctx, request.matchroomId, expiresAt);
+    }
 
     // Update request status
     await patchBookingRequestWithLifecycleDueAt(ctx, request, {
@@ -2913,11 +2876,18 @@ export const respondToCounterOffer = mutation({
           closedReason: "counter_offer_rejected",
           now,
         });
-        await cancelMatchroomAndReturnPayments(ctx, {
-          matchroomId: request.matchroomId,
-          reason: "broadcast_counter_offer_rejected",
-          now,
-        });
+        const broadcastFailure = await finalizeBroadcastFailure(
+          ctx,
+          request.matchroomId,
+          "counter_offer_rejected",
+        );
+        if (broadcastFailure.changed) {
+          await cancelMatchroomAndReturnPayments(ctx, {
+            matchroomId: request.matchroomId,
+            reason: "broadcast_counter_offer_rejected",
+            now,
+          });
+        }
         await patchOfferNotifications(ctx, {
           offerId: String(args.offerId),
           recipientUids,
@@ -2981,7 +2951,13 @@ export const respondToCounterOffer = mutation({
         const broadcastAcceptedStartAt =
           typeof chosenOption?.startAt === "number" && Number.isFinite(chosenOption.startAt)
             ? chosenOption.startAt
-            : parseLocalDateTimeMillis(chosenOption?.date, chosenOption?.time);
+            : parseKarachiDateTimeMillis(chosenOption?.date, chosenOption?.time);
+        await assertBranchOperatingHoursAvailable(ctx, {
+          zoneId: String(offer.zoneId || request.zoneId || ""),
+          branchId: offer.branchId || request.allocatedBranchId || null,
+          scheduledStartAt: broadcastAcceptedStartAt,
+          durationMinutes: getDurationMinutesFromRequest(request),
+        });
         await assertSelectedResourcesAvailableForSlot(ctx, {
           zoneId: String(offer.zoneId || request.zoneId || ""),
           branchId: offer.branchId || request.allocatedBranchId || null,
@@ -3013,8 +2989,9 @@ export const respondToCounterOffer = mutation({
           status: "accepted",
           matchroomId,
           lifecycleStatus: "zone_confirmed",
-          preferredDate: chosenOption ? new Date(`${chosenOption.date}T00:00:00`).getTime() : request.preferredDate,
+          preferredDate: chosenOption ? getKarachiDayStartMillis(chosenOption.date) || request.preferredDate : request.preferredDate,
           preferredTime: chosenOption?.time || request.preferredTime,
+          scheduledStartAt: broadcastAcceptedStartAt || request.scheduledStartAt,
           updatedAt: now,
         }, now);
         // Apply the accepted slot to the broadcast matchroom so the lobby shows
@@ -3024,7 +3001,7 @@ export const respondToCounterOffer = mutation({
           const acceptedStartAt =
             typeof chosenOption.startAt === "number" && Number.isFinite(chosenOption.startAt)
               ? chosenOption.startAt
-              : parseLocalDateTimeMillis(chosenOption.date, chosenOption.time);
+              : parseKarachiDateTimeMillis(chosenOption.date, chosenOption.time);
           const existingMatchroom = await ctx.db.get(matchroomId);
           if (!existingMatchroom) throw new Error("Matchroom not found.");
           await ctx.db.patch(matchroomId, withLifecycleDueAt(existingMatchroom, {
@@ -3090,7 +3067,13 @@ export const respondToCounterOffer = mutation({
       const acceptedStartAt =
         typeof chosenOption?.startAt === "number" && Number.isFinite(chosenOption.startAt)
           ? chosenOption.startAt
-          : parseLocalDateTimeMillis(chosenOption?.date, chosenOption?.time);
+          : parseKarachiDateTimeMillis(chosenOption?.date, chosenOption?.time);
+      await assertBranchOperatingHoursAvailable(ctx, {
+        zoneId: String(offer.zoneId || request.zoneId || ""),
+        branchId: offer.branchId || request.allocatedBranchId || null,
+        scheduledStartAt: acceptedStartAt,
+        durationMinutes: getDurationMinutesFromRequest(request),
+      });
       await assertSelectedResourcesAvailableForSlot(ctx, {
         zoneId: String(offer.zoneId || request.zoneId || ""),
         branchId: offer.branchId || request.allocatedBranchId || null,
@@ -3303,11 +3286,19 @@ async function createWalkInMatchroomFromValidatedArgs(ctx: any, args: any, actor
       }
     }
 
-    const scheduledStartAt = parseLocalDateTimeMillis(args.scheduledDate, args.scheduledTime);
+    assertNewGameEntityCreationAllowed(args.gameKey);
+
+    const scheduledStartAt = parseKarachiDateTimeMillis(args.scheduledDate, args.scheduledTime);
     const scheduleValidation = validateWalkInScheduleWindow(scheduledStartAt, now);
     if (!scheduleValidation.ok) {
       throw new Error(scheduleValidation.message);
     }
+    await assertBranchOperatingHoursAvailable(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId || args.walkIn?.branchId || null,
+      scheduledStartAt,
+      durationMinutes: Math.max(30, Math.floor(args.durationMinutes)),
+    });
     await assertZoneResourceCapacityAvailable(ctx, {
       zoneId: args.zoneId,
       branchId: args.branchId || args.walkIn?.branchId || null,
@@ -3390,6 +3381,7 @@ async function createWalkInMatchroomFromValidatedArgs(ctx: any, args: any, actor
       createdAt: now,
       updatedAt: now,
     });
+    await syncMatchroomMembers(ctx, matchroomId, args.playerUids);
 
     if (
       paymentMode === "matchhai_pay" &&
@@ -3615,15 +3607,19 @@ export const bookWalkInSeat = mutation({
     walkIn.roster = roster;
     walkIn.updatedAt = now;
 
+    const uniquePlayerUids = Array.from(new Set(nextPlayerUids));
     await ctx.db.patch(room._id, withLifecycleDueAt(room, {
       slotsA: nextSlotsA,
       slotsB: nextSlotsB,
       players: nextPlayers,
-      playerUids: Array.from(new Set(nextPlayerUids)),
+      playerUids: uniquePlayerUids,
       currentPlayers: nextCurrentPlayers,
       walkIn,
       updatedAt: now,
     }, now));
+    if (mode === "book") {
+      await syncMatchroomMembers(ctx, room._id, uniquePlayerUids);
+    }
 
     await recordZoneAuditEvent(ctx, {
       zoneId: String(room.zoneId),

@@ -7,6 +7,14 @@ import { requireKycVerified } from "./kycGate";
 import { requireOwnedZone } from "./authz";
 import { withLifecycleDueAt } from "./matchroomLifecycle";
 import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
+import {
+  assertSelectedResourcesAvailableForSlot,
+  findActiveBranchAssignment,
+  getBookingRequestStartAtForConflict,
+  findActiveResourceAssignment,
+  reconcileResourceLegacyAssignment,
+} from "./bookingConflicts";
+import { refreshBranchResourceCapacitySnapshot } from "./resourceCapacity";
 
 // ============================================
 // QUERIES
@@ -162,11 +170,7 @@ async function validateBookableResources(
       throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
     }
 
-    const inAllowedState = ["available", "held"].includes(String(resource.lifecycleStatus || ""));
-    const belongsToSameRequest =
-      input.allowReuseForRequestId &&
-      String(resource.bookingRequestId || "") === String(input.allowReuseForRequestId);
-    if (!inAllowedState && !belongsToSameRequest) {
+    if (resource.isActive === false || String(resource.lifecycleStatus || "") === "maintenance") {
       throw new Error(`${resource.name || "Selected resource"} is no longer available.`);
     }
 
@@ -231,11 +235,32 @@ export const updateResourceLifecycleStatus = mutation({
     if (!resource) {
       throw new Error("Resource not found.");
     }
-    const { user: actor } = await requireOwnedZone(ctx, resource.zoneId);
+    const { user: actor, zone } = await requireOwnedZone(ctx, resource.zoneId);
+    const exactAssignment = ["available", "maintenance"].includes(args.lifecycleStatus)
+      ? await findActiveResourceAssignment(ctx, {
+        zoneId: String(resource.zoneId),
+        resourceId: resource._id,
+      })
+      : null;
+    const branchAssignment = args.lifecycleStatus === "maintenance"
+      ? await findActiveBranchAssignment(ctx, {
+        zoneId: String(resource.zoneId),
+        branchId: resource.branchId,
+        primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+      })
+      : null;
+    if (exactAssignment || branchAssignment) {
+      throw new Error("This resource status cannot be changed while it has an active booking or venue offer.");
+    }
 
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
       updatedAt: now,
+    });
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: resource.zoneId,
+      branchId: resource.branchId,
+      now,
     });
 
     await recordZoneAuditEvent(ctx, {
@@ -283,18 +308,21 @@ export const releaseStaleHeldResourcesForBranch = mutation({
         continue;
       }
 
-      await ctx.db.patch(resource._id, {
-        lifecycleStatus: "available",
-        bookingRequestId: undefined,
-        matchroomId: undefined,
-        bookedAt: undefined,
-        bookedByUid: undefined,
-        updatedAt: now,
+      await reconcileResourceLegacyAssignment(ctx, {
+        resourceId: resource._id,
+        excludeBookingRequestId: resource.bookingRequestId ? String(resource.bookingRequestId) : null,
+        excludeMatchroomId: resource.matchroomId ? String(resource.matchroomId) : null,
+        now,
       });
       released += 1;
     }
 
     if (released > 0) {
+      await refreshBranchResourceCapacitySnapshot(ctx, {
+        zoneId: args.zoneId,
+        branchId: args.branchId,
+        now,
+      });
       await recordZoneAuditEvent(ctx, {
         zoneId: String(args.zoneId),
         module: "resources",
@@ -324,7 +352,7 @@ export const syncBranchResourcesFromPricing = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
-    const { user: actor } = await requireOwnedZone(ctx, args.zoneId);
+    const { user: actor, zone } = await requireOwnedZone(ctx, args.zoneId);
     const now = Date.now();
     const resources = await ctx.db
       .query("zoneResources")
@@ -343,6 +371,22 @@ export const syncBranchResourcesFromPricing = mutation({
       { assetType: "console", tier: "ps5", count: toPositiveInt(args.pricing?.console?.ps5?.count) },
       { assetType: "console", tier: "xbox", count: toPositiveInt(args.pricing?.console?.xbox?.count) },
     ];
+
+    const reducingInventory = configs.some((config) => {
+      const currentCount = resources.filter((resource: any) =>
+        resource.isActive !== false
+        && String(resource.assetType || "").toLowerCase() === config.assetType
+        && String(resource.tier || "").toLowerCase() === config.tier
+      ).length;
+      return config.count < currentCount;
+    });
+    if (reducingInventory && await findActiveBranchAssignment(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+    })) {
+      throw new Error("Branch inventory cannot be reduced while it has active bookings, walk-ins, or venue offers.");
+    }
 
     const changed: any[] = [];
     for (const config of configs) {
@@ -373,13 +417,17 @@ export const syncBranchResourcesFromPricing = mutation({
         }
         changed.push({ ...config, added: delta, removed: 0 });
       } else if (delta < 0) {
-        const removable = current
-          .filter((resource: any) =>
-            resource.lifecycleStatus === "available" &&
-            !resource.bookingRequestId &&
-            !resource.matchroomId,
-          )
-          .sort((left: any, right: any) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+        const removable: any[] = [];
+        for (const resource of current
+          .sort((left: any, right: any) => Number(right.createdAt || 0) - Number(left.createdAt || 0))) {
+          if (resource.lifecycleStatus === "maintenance") continue;
+          const activeAssignment = await findActiveResourceAssignment(ctx, {
+            zoneId: String(args.zoneId),
+            resourceId: resource._id,
+          });
+          if (!activeAssignment) removable.push(resource);
+          if (removable.length >= Math.abs(delta)) break;
+        }
         const removeCount = Math.abs(delta);
         if (removable.length < removeCount) {
           throw new Error(`Cannot reduce ${prefix} to ${config.count}; ${removeCount - removable.length} resource(s) are booked, held, or under maintenance.`);
@@ -392,6 +440,11 @@ export const syncBranchResourcesFromPricing = mutation({
     }
 
     if (changed.length > 0) {
+      await refreshBranchResourceCapacitySnapshot(ctx, {
+        zoneId: args.zoneId,
+        branchId: args.branchId,
+        now,
+      });
       await recordZoneAuditEvent(ctx, {
         zoneId: String(args.zoneId),
         module: "resources",
@@ -431,10 +484,23 @@ export const allocateResourcesToRequest = mutation({
       throw new Error("Resources are already allocated. Use reassignment instead.");
     }
 
+    const matchroom = request.matchroomId ? await ctx.db.get(request.matchroomId) : null;
+    if (!matchroom) throw new Error("Matchroom not found.");
     await validateBookableResources(ctx, {
       zoneId: String(args.zoneId),
       branchId: args.branchId,
       resourceIds: args.resourceIds,
+    });
+    await assertSelectedResourcesAvailableForSlot(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      resourceIds: args.resourceIds,
+      scheduledStartAt: getBookingRequestStartAtForConflict(request) || matchroom.scheduledStartAt,
+      durationMinutes: request.durationHours
+        ? Math.round(request.durationHours * 60)
+        : matchroom.durationMinutes || 60,
+      excludeMatchroomId: String(matchroom._id),
+      excludeBookingRequestId: String(request._id),
     });
 
     // Update each resource to booked status
@@ -448,9 +514,6 @@ export const allocateResourcesToRequest = mutation({
         updatedAt: now,
       });
     }
-
-    const matchroom = await ctx.db.get(request.matchroomId);
-    if (!matchroom) throw new Error("Matchroom not found.");
 
     // Update booking request
     await ctx.db.patch(args.requestId, withBookingRequestLifecycleDueAt(request, matchroom, {
@@ -550,22 +613,32 @@ export const reassignResourcesForRequest = mutation({
       resourceIds: args.newResourceIds,
       allowReuseForRequestId: args.requestId,
     });
+    const matchroom = request.matchroomId ? await ctx.db.get(request.matchroomId) : null;
+    if (!matchroom) throw new Error("Matchroom not found.");
+    await assertSelectedResourcesAvailableForSlot(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      resourceIds: args.newResourceIds,
+      scheduledStartAt: getBookingRequestStartAtForConflict(request) || matchroom?.scheduledStartAt,
+      durationMinutes: request.durationHours
+        ? Math.round(request.durationHours * 60)
+        : matchroom?.durationMinutes || 60,
+      excludeMatchroomId: matchroom ? String(matchroom._id) : null,
+      excludeBookingRequestId: String(request._id),
+    });
 
-    const previousResources = await ctx.db
-      .query("zoneResources")
-      .withIndex("by_bookingRequestId", (q) => q.eq("bookingRequestId", args.requestId))
-      .collect();
+    const previousResources = (await Promise.all(
+      (request.allocatedResourceIds || []).map((resourceId) => ctx.db.get(resourceId)),
+    )).filter((resource): resource is Doc<"zoneResources"> => resource !== null);
     const nextResourceSet = new Set(args.newResourceIds.map((resourceId) => String(resourceId)));
 
     for (const resource of previousResources) {
       if (nextResourceSet.has(String(resource._id))) continue;
-      await ctx.db.patch(resource._id, {
-        lifecycleStatus: "available",
-        bookingRequestId: undefined,
-        matchroomId: undefined,
-        bookedAt: undefined,
-        bookedByUid: undefined,
-        updatedAt: now,
+      await reconcileResourceLegacyAssignment(ctx, {
+        resourceId: resource._id,
+        excludeBookingRequestId: String(args.requestId),
+        excludeMatchroomId: request.matchroomId ? String(request.matchroomId) : null,
+        now,
       });
     }
 
@@ -588,8 +661,6 @@ export const reassignResourcesForRequest = mutation({
       updatedAt: now,
     });
 
-    const matchroom = await ctx.db.get(request.matchroomId);
-    if (!matchroom) throw new Error("Matchroom not found.");
     await ctx.db.patch(request.matchroomId, withLifecycleDueAt(matchroom, {
       zoneId: String(args.zoneId),
       zoneOwnerUid: String(zone.ownerUid || actorUid),

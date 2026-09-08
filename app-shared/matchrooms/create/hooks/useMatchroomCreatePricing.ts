@@ -1,10 +1,14 @@
+import { useQuery } from "convex/react";
 import { useEffect, useState } from "react";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import {
   applyPricingRulesToRate,
   getEnabledPricingRulesForZone,
   type PricingRule,
 } from "../../../../src/services/pricingRuleService";
 import type { Zone } from "../../../../src/services/convex/zoneService";
+import { hasMinimumResourceCapacity } from "../utils/matchroomResourceCapacity";
 
 export type ZoneRateOption = {
   key: string;
@@ -110,6 +114,23 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
   const [zoneRateOptions, setZoneRateOptions] = useState<ZoneRateOption[]>([]);
   const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(
     null,
+  );
+  const [hasInsufficientCapacityOptions, setHasInsufficientCapacityOptions] = useState(false);
+  const selectedBranch =
+    selectedBranchId && Array.isArray(selectedZone?.branches)
+      ? (selectedZone.branches as any[]).find(
+          (branch) => String(branch?.id || "") === String(selectedBranchId),
+        )
+      : null;
+  const pricingBranch = selectedBranch || (selectedZone?.branches?.[0] as any) || null;
+  const resourceCapacity = useQuery(
+    api.zones.getPublicResourceCapacity,
+    selectedZoneId
+      ? {
+          zoneId: selectedZoneId as Id<"zones">,
+          branchId: pricingBranch?.id || selectedBranchId || undefined,
+        }
+      : "skip",
   );
 
   useEffect(() => {
@@ -236,19 +257,16 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       setZoneRateOptions([]);
       setSelectedZoneRateKey(null);
       setZoneRate(0);
+      setHasInsufficientCapacityOptions(false);
       return;
     }
 
-    const selectedBranch =
-      selectedBranchId && Array.isArray(selectedZone.branches)
-        ? (selectedZone.branches as any[]).find((branch) => String(branch?.id || "") === String(selectedBranchId))
-        : null;
-    const pricingBranch = selectedBranch || (selectedZone.branches?.[0] as any) || null;
     const pricingSources = [
       pricingBranch?.pricing,
       selectedZone.pricing,
     ].filter(Boolean);
     const options: ZoneRateOption[] = [];
+    let foundPricedOptionWithoutCapacity = false;
     const branchId = pricingBranch?.id || selectedBranchId || null;
     const pricingDate = resolvePricingDate(formData);
 
@@ -272,6 +290,10 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
     ) => {
       const price = toPositiveNumber(rawPrice);
       if (!price) return;
+      if (!hasMinimumResourceCapacity(resourceCapacity, selectedGame, context)) {
+        foundPricedOptionWithoutCapacity = true;
+        return;
+      }
 
       const resolved = applyPricingRulesToRate(price, zonePricingRules, {
         at: pricingDate,
@@ -417,6 +439,9 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       });
     }
 
+    setHasInsufficientCapacityOptions((prev) =>
+      prev === foundPricedOptionWithoutCapacity ? prev : foundPricedOptionWithoutCapacity,
+    );
     setZoneRateOptions((prev) => (zoneRateOptionsEqual(prev, options) ? prev : options));
     if (options.length === 0) {
       setSelectedZoneRateKey((prev) => (prev === null ? prev : null));
@@ -448,6 +473,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
     selectedZone,
     selectedBranchId,
     selectedZoneRateKey,
+    resourceCapacity,
     zonePricingRules,
   ]);
 
@@ -465,6 +491,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
     zonePricingRules,
     zoneRate,
     zoneRateOptions,
+    hasInsufficientCapacityOptions,
     selectedZoneRateKey,
     setZoneRate,
     setSelectedZoneRateKey,

@@ -25,6 +25,7 @@ export function clockMinutesFromString(value?: string | null): number | null {
   if (twelve) {
     let hour = Number(twelve[1]) || 0;
     const minute = Number(twelve[2]) || 0;
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
     const period = twelve[3].toUpperCase();
     if (period === "PM" && hour !== 12) hour += 12;
     if (period === "AM" && hour === 12) hour = 0;
@@ -32,8 +33,9 @@ export function clockMinutesFromString(value?: string | null): number | null {
   }
   const twentyFour = raw.match(/^(\d{1,2}):(\d{2})$/);
   if (!twentyFour) return null;
-  const hour = Math.max(0, Math.min(23, Number(twentyFour[1]) || 0));
-  const minute = Math.max(0, Math.min(59, Number(twentyFour[2]) || 0));
+  const hour = Number(twentyFour[1]);
+  const minute = Number(twentyFour[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
   return hour * 60 + minute;
 }
 
@@ -61,5 +63,22 @@ export function combineLocalDateTime(
   if (!year || !month || !day) return null;
   const built = new Date(year, month - 1, day, Math.floor(minutes / 60), minutes % 60, 0, 0);
   const ms = built.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// MatchHai venue schedules are defined in Asia/Karachi. Use this for persisted
+// date/time fallbacks so a device set to another timezone does not shift a slot.
+export function combineKarachiDateTime(
+  dateStr?: string | null,
+  timeStr?: string | null,
+): number | null {
+  const date = String(dateStr || "").trim();
+  const minutes = clockMinutesFromString(timeStr);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || minutes === null) return null;
+  const calendarDate = new Date(`${date}T00:00:00Z`);
+  if (!Number.isFinite(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== date) return null;
+  const time = minutesToTime24(minutes);
+  if (!time) return null;
+  const ms = new Date(`${date}T${time}:00+05:00`).getTime();
   return Number.isFinite(ms) ? ms : null;
 }

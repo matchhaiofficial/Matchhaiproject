@@ -2,6 +2,7 @@ import { api } from "./_generated/api";
 import { ActionCtx, MutationCtx } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
 import { authComponent } from "./auth";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
 
 export const KYC_VERIFICATION_REQUIRED_MESSAGE =
   "Please complete CNIC & face verification to unlock MatchHai features.";
@@ -45,12 +46,8 @@ export function assertKycAccessAllowed(
     throw new Error("User profile not found.");
   }
 
-  if (profile.accountStatus === "suspended") {
-    const suspendedUntil =
-      typeof profile.suspendedUntil === "number" ? profile.suspendedUntil : null;
-    if (!suspendedUntil || suspendedUntil > Date.now()) {
-      throw new Error("Your MatchHai account is suspended. Please contact support.");
-    }
+  if (isAccountSuspensionActive(profile)) {
+    throw new Error("Your MatchHai account is suspended. Please contact support.");
   }
 
   // Safe dev/demo bypass; never bypass suspension checks.

@@ -1,4 +1,5 @@
 import { getMatchroomLockAt } from "./timing";
+import { parseKarachiDateTimeMillis } from "./karachiDateTime";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
@@ -15,27 +16,6 @@ function positiveTimestamp(value: unknown): number | undefined {
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
 }
 
-function parseLocalDateTimeMillis(dateValue?: unknown, timeValue?: unknown): number | undefined {
-  let date = dateValue;
-  let time = String(timeValue || "").trim();
-  if (!date || !time) return undefined;
-  if (typeof date === "number" && Number.isFinite(date)) {
-    const parsedDate = new Date(date);
-    date = [parsedDate.getFullYear(), String(parsedDate.getMonth() + 1).padStart(2, "0"), String(parsedDate.getDate()).padStart(2, "0")].join("-");
-  }
-  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
-  if (twelveHour) {
-    let hour = Number(twelveHour[1]);
-    const minute = Number(twelveHour[2]);
-    const period = twelveHour[3].toUpperCase();
-    if (period === "PM" && hour !== 12) hour += 12;
-    if (period === "AM" && hour === 12) hour = 0;
-    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-  const parsed = new Date(`${String(date).trim()}T${time}`).getTime();
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 function earliestDue(candidates: Array<number | null | undefined>, now: number): number | undefined {
   const valid = candidates.filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
   if (!valid.length) return undefined;
@@ -44,7 +24,7 @@ function earliestDue(candidates: Array<number | null | undefined>, now: number):
 }
 
 function linkedRoomStartAt(room: any): number | undefined {
-  return positiveTimestamp(room?.scheduledStartAt) || positiveTimestamp(room?.startTime) || parseLocalDateTimeMillis(room?.scheduledDate, room?.scheduledTime);
+  return positiveTimestamp(room?.scheduledStartAt) || positiveTimestamp(room?.startTime) || parseKarachiDateTimeMillis(room?.scheduledDate, room?.scheduledTime) || undefined;
 }
 
 function linkedRoomIsFull(room: any): boolean {
@@ -64,7 +44,7 @@ function linkedRoomAwaitsZoneDecision(room: any): boolean {
 export function getBookingRequestLifecycleDueAt(request: any, linkedRoom: any, now = Date.now()) {
   const status = String(request?.status || "").toLowerCase();
   if (["expired", "cancelled"].includes(status)) return undefined;
-  const requestStartAt = parseLocalDateTimeMillis(request?.preferredDate, request?.preferredTime);
+  const requestStartAt = parseKarachiDateTimeMillis(request?.preferredDate, request?.preferredTime) || undefined;
   const candidates: Array<number | undefined | null> = [positiveTimestamp(request?.responseExpiresAt)];
   if (requestStartAt) {
     if (status !== "accepted") candidates.push(getMatchroomLockAt(requestStartAt));
@@ -95,11 +75,15 @@ export function getTeamChallengeLifecycleDueAt(challenge: any, now = Date.now())
   if (["admin_pending", "completed", "rejected", "expired"].includes(status) || challenge?.matchroomId) return undefined;
   if (!["pending", "accepted", "venue_proposed", "venue_confirmed"].includes(status)) return undefined;
   const scheduledAt = positiveTimestamp(challenge?.scheduledAt);
-  if (scheduledAt) return scheduledAt <= now ? now : scheduledAt;
   const createdAt = positiveTimestamp(challenge?.createdAt);
+  if (status === "pending") {
+    const acceptDeadline = createdAt ? createdAt + CHALLENGE_ACCEPT_TTL_MS : undefined;
+    return earliestDue([scheduledAt, acceptDeadline], now) ?? FUTURE_MAINTENANCE_DUE_AT;
+  }
+  if (scheduledAt) return scheduledAt <= now ? now : scheduledAt;
   if (!createdAt) return FUTURE_MAINTENANCE_DUE_AT;
-  const dueAt = createdAt + (status === "pending" ? CHALLENGE_ACCEPT_TTL_MS : CHALLENGE_ABANDON_TTL_MS);
-  return dueAt <= now ? now : dueAt;
+  const abandonDeadline = createdAt + CHALLENGE_ABANDON_TTL_MS;
+  return abandonDeadline <= now ? now : abandonDeadline;
 }
 
 export function withTeamChallengeLifecycleDueAt<T extends Record<string, unknown>>(challenge: any, patch: T, now = Date.now()): T & { lifecycleDueAt?: number } {

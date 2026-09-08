@@ -219,7 +219,7 @@ export function ZoneBookingsCounterOfferSheets({
             </View>
 
           <Text style={styles.emptyText}>
-            Captains will get this alternative in their inbox and have 2 hours to respond.
+            Captains will get this alternative in their inbox and have {request?.requestKind === "broadcast_fanout" ? "30 minutes" : "2 hours"} to respond.
           </Text>
           {validationMessage ? (
             <Text style={styles.validationText}>{validationMessage}</Text>

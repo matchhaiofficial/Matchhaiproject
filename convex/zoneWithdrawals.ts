@@ -69,7 +69,7 @@ export const requestZoneWithdrawal = action({
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
-    requestKey: v.string(),
+    requestKey: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ ok: true; reference: string }> => {
     const { profile } = await requireKycVerified(ctx, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);

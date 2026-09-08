@@ -1,5 +1,6 @@
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
 
 export async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
@@ -38,6 +39,7 @@ export async function getStrictAuthenticatedUserId(ctx: any): Promise<Id<"users"
   if (linkedAppUserId) {
     const directUser = await resolveUserByAnyId(ctx, linkedAppUserId);
     if (directUser) {
+      if (isAccountSuspensionActive(directUser)) throw new Error("Account suspended");
       console.info("[ChatAuth] Resolved authenticated user via linked app user id", {
         authRecordId,
         linkedAppUserId,
@@ -64,6 +66,7 @@ export async function getStrictAuthenticatedUserId(ctx: any): Promise<Id<"users"
     });
     throw new Error("User profile not found");
   }
+  if (isAccountSuspensionActive(user)) throw new Error("Account suspended");
 
   console.info("[ChatAuth] Resolved authenticated user profile", {
     authRecordId,

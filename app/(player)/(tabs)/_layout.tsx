@@ -189,11 +189,6 @@ export default function PlayerTabsLayout() {
             <Tabs.Screen name="matchrooms" options={{ href: null }} />
             <Tabs.Screen name="teams" options={{ href: null }} />
             <Tabs.Screen name="profile" options={{ title: "Profile" }} />
-            <Tabs.Screen name="_dashboard.styles" options={{ href: null }} />
-            <Tabs.Screen name="teams.styles" options={{ href: null }} />
-            <Tabs.Screen name="profile.styles" options={{ href: null }} />
-            <Tabs.Screen name="matchrooms.styles" options={{ href: null }} />
-            <Tabs.Screen name="discover.styles" options={{ href: null }} />
         </Tabs>
     );
 }

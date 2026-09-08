@@ -599,23 +599,25 @@ export const sendMessageToMatchroom = mutation({
   },
 });
 
+async function deleteMessageForCurrentParticipant(ctx: any, messageId: Id<"chatMessages">) {
+  const message = await ctx.db.get(messageId);
+  if (!message) throw new Error("Message not found");
+  const { userId } = await requireAuthorizedChatroomParticipant(ctx, message.chatroomId);
+
+  const deletedFor = message.deletedFor || [];
+  if (!deletedFor.includes(String(userId))) {
+    await ctx.db.patch(messageId, {
+      deletedFor: [...deletedFor, String(userId)],
+    });
+  }
+  return true;
+}
+
 export const deleteForMe = mutation({
   args: {
     messageId: v.id("chatMessages"),
   },
-  handler: async (ctx, args) => {
-    const message = await ctx.db.get(args.messageId);
-    if (!message) throw new Error("Message not found");
-    const { userId } = await requireAuthorizedChatroomParticipant(ctx, message.chatroomId);
-
-    const deletedFor = message.deletedFor || [];
-    if (!deletedFor.includes(String(userId))) {
-      await ctx.db.patch(args.messageId, {
-        deletedFor: [...deletedFor, String(userId)],
-      });
-    }
-    return true;
-  },
+  handler: async (ctx, args) => deleteMessageForCurrentParticipant(ctx, args.messageId),
 });
 
 export const markRead = mutation({
@@ -803,7 +805,8 @@ export const unpinMessage = mutation({
 
 export const deleteMessage = mutation({
   args: { messageId: v.id("chatMessages") },
-  handler: async () => {
-    throw new Error("Full message deletion is disabled.");
-  },
+  // Backwards-compatible alias: older clients asked for a destructive global
+  // delete. Preserve the endpoint while routing it through the authenticated,
+  // per-participant hide used by current clients.
+  handler: async (ctx, args) => deleteMessageForCurrentParticipant(ctx, args.messageId),
 });

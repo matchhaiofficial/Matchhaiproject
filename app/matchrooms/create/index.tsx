@@ -338,6 +338,7 @@ export default function CreateMatchroom() {
     zonePricingRules,
     zoneRate,
     zoneRateOptions,
+    hasInsufficientCapacityOptions,
     selectedZoneRateKey,
     setZoneRate,
     setSelectedZoneRateKey,
@@ -1852,6 +1853,14 @@ export default function CreateMatchroom() {
                   )}
                 </View>
               )}
+
+              {selectedZoneId && selectedGame && zoneRateOptions.length === 0 && hasInsufficientCapacityOptions ? (
+                <View style={styles.section}>
+                  <Text style={styles.helperText}>
+                    This branch does not have enough configured resources for this game. Choose another branch, venue, or game.
+                  </Text>
+                </View>
+              ) : null}
 
               {/* Series Type Selector (CS2 & FC & Tekken) */}
               {(isCsStyleGame(selectedGame) ||

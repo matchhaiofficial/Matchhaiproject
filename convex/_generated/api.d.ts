@@ -8,12 +8,15 @@
  * @module
  */
 
+import type * as accountDeletion from "../accountDeletion.js";
+import type * as accountStatusPolicy from "../accountStatusPolicy.js";
 import type * as admin from "../admin.js";
 import type * as adminPasswordRecovery from "../adminPasswordRecovery.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as bookingConflicts from "../bookingConflicts.js";
 import type * as bookings from "../bookings.js";
+import type * as branchOperatingHours from "../branchOperatingHours.js";
 import type * as chat from "../chat.js";
 import type * as chatAuth from "../chatAuth.js";
 import type * as chatIdentity from "../chatIdentity.js";
@@ -21,6 +24,7 @@ import type * as crons from "../crons.js";
 import type * as dashboard from "../dashboard.js";
 import type * as demoSeed from "../demoSeed.js";
 import type * as devCleanup from "../devCleanup.js";
+import type * as devQa from "../devQa.js";
 import type * as devReset from "../devReset.js";
 import type * as devTeamSeed from "../devTeamSeed.js";
 import type * as discover from "../discover.js";
@@ -30,13 +34,17 @@ import type * as easypaisaRest from "../easypaisaRest.js";
 import type * as externalApis from "../externalApis.js";
 import type * as friendChat from "../friendChat.js";
 import type * as fullDataReset from "../fullDataReset.js";
+import type * as gameAvailabilityPolicy from "../gameAvailabilityPolicy.js";
 import type * as http from "../http.js";
+import type * as karachiDateTime from "../karachiDateTime.js";
 import type * as kyc from "../kyc.js";
 import type * as kycGate from "../kycGate.js";
 import type * as kycNotifications from "../kycNotifications.js";
+import type * as legacyCompatibility from "../legacyCompatibility.js";
 import type * as maintenanceDue from "../maintenanceDue.js";
 import type * as matchroomBroadcast from "../matchroomBroadcast.js";
 import type * as matchroomLifecycle from "../matchroomLifecycle.js";
+import type * as matchroomMembers from "../matchroomMembers.js";
 import type * as matchroomPricing from "../matchroomPricing.js";
 import type * as matchrooms from "../matchrooms.js";
 import type * as migrations from "../migrations.js";
@@ -49,7 +57,9 @@ import type * as pushNotifications from "../pushNotifications.js";
 import type * as pushNotificationsActions from "../pushNotificationsActions.js";
 import type * as ratingEngine from "../ratingEngine.js";
 import type * as reports from "../reports.js";
+import type * as resourceCapacity from "../resourceCapacity.js";
 import type * as runtimeEnv from "../runtimeEnv.js";
+import type * as scheduleIndexMigration from "../scheduleIndexMigration.js";
 import type * as social from "../social.js";
 import type * as storage from "../storage.js";
 import type * as superAdminAccess from "../superAdminAccess.js";
@@ -81,12 +91,15 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accountDeletion: typeof accountDeletion;
+  accountStatusPolicy: typeof accountStatusPolicy;
   admin: typeof admin;
   adminPasswordRecovery: typeof adminPasswordRecovery;
   auth: typeof auth;
   authz: typeof authz;
   bookingConflicts: typeof bookingConflicts;
   bookings: typeof bookings;
+  branchOperatingHours: typeof branchOperatingHours;
   chat: typeof chat;
   chatAuth: typeof chatAuth;
   chatIdentity: typeof chatIdentity;
@@ -94,6 +107,7 @@ declare const fullApi: ApiFromModules<{
   dashboard: typeof dashboard;
   demoSeed: typeof demoSeed;
   devCleanup: typeof devCleanup;
+  devQa: typeof devQa;
   devReset: typeof devReset;
   devTeamSeed: typeof devTeamSeed;
   discover: typeof discover;
@@ -103,13 +117,17 @@ declare const fullApi: ApiFromModules<{
   externalApis: typeof externalApis;
   friendChat: typeof friendChat;
   fullDataReset: typeof fullDataReset;
+  gameAvailabilityPolicy: typeof gameAvailabilityPolicy;
   http: typeof http;
+  karachiDateTime: typeof karachiDateTime;
   kyc: typeof kyc;
   kycGate: typeof kycGate;
   kycNotifications: typeof kycNotifications;
+  legacyCompatibility: typeof legacyCompatibility;
   maintenanceDue: typeof maintenanceDue;
   matchroomBroadcast: typeof matchroomBroadcast;
   matchroomLifecycle: typeof matchroomLifecycle;
+  matchroomMembers: typeof matchroomMembers;
   matchroomPricing: typeof matchroomPricing;
   matchrooms: typeof matchrooms;
   migrations: typeof migrations;
@@ -122,7 +140,9 @@ declare const fullApi: ApiFromModules<{
   pushNotificationsActions: typeof pushNotificationsActions;
   ratingEngine: typeof ratingEngine;
   reports: typeof reports;
+  resourceCapacity: typeof resourceCapacity;
   runtimeEnv: typeof runtimeEnv;
+  scheduleIndexMigration: typeof scheduleIndexMigration;
   social: typeof social;
   storage: typeof storage;
   superAdminAccess: typeof superAdminAccess;

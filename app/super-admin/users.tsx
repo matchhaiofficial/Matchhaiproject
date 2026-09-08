@@ -97,6 +97,9 @@ const UserRow = React.memo(function UserRow({
 }) {
   const suspended = user.accountStatus === "suspended";
   const isDeleted = (user as any).suspensionReason === "account_deletion_processed";
+  const deletionStatus = user.accountDeletionStatus;
+  const deletionPending = deletionStatus === "queued" || deletionStatus === "running";
+  const deletionStopped = deletionStatus === "blocked" || deletionStatus === "failed";
   const isSuperAdmin = user.role === "super_admin" || user.role === "super-admin";
   // A non-primary Super Admin cannot suspend/reactivate/delete another Super Admin.
   // The backend enforces this too; this just hides actions that would be rejected.
@@ -105,12 +108,14 @@ const UserRow = React.memo(function UserRow({
     <AdminListCard
       title={user.fullName || user.username || "Unknown user"}
       subtitle={user.email}
-      statusLabel={isDeleted ? "Deleted" : suspended ? "Suspended" : "Active"}
-      statusTone={isDeleted || suspended ? "danger" : "success"}
+      statusLabel={isDeleted ? "Deleted" : deletionPending ? "Deletion Pending" : deletionStopped ? `Deletion ${formatLabel(deletionStatus!)}` : suspended ? "Suspended" : "Active"}
+      statusTone={isDeleted || suspended || deletionStopped ? "danger" : deletionPending ? "warning" : "success"}
       actions={
-        !canAct ? null : isDeleted ? (
+        !canAct || deletionPending ? null : isDeleted ? (
+          null
+        ) : deletionStopped ? (
           <AppButton size="sm" variant="danger" loading={busy} onPress={() => onDelete(user)}>
-            Re-run Cleanup
+            Retry Deletion
           </AppButton>
         ) : suspended ? (
           <AppButton size="sm" variant="success" loading={busy} onPress={() => onReactivate(user)}>
@@ -136,6 +141,9 @@ const UserRow = React.memo(function UserRow({
         <AdminInfoLine label="Role" value={user.role || "Standard"} />
         <AdminInfoLine label="Created" value={formatDate(user.createdAt)} />
         {suspended ? <AdminInfoLine label="Reason" value={(user as any).suspensionReason || "No reason recorded"} /> : null}
+        {deletionStatus ? <AdminInfoLine label="Deletion status" value={formatLabel(deletionStatus)} /> : null}
+        {user.accountDeletionStage ? <AdminInfoLine label="Deletion stage" value={formatLabel(user.accountDeletionStage)} /> : null}
+        {user.accountDeletionError ? <AdminInfoLine label="Deletion issue" value={user.accountDeletionError} /> : null}
       </View>
     </AdminListCard>
   );
@@ -285,7 +293,7 @@ export default function SuperAdminUsersScreen() {
             const result = await deleteUserAccount(user.id);
             setBusyUserId(null);
             if (result.ok) {
-              showToast({ type: "success", title: "Account deleted", message: "User data anonymized and sessions revoked." });
+              showToast({ type: "success", title: "Deletion scheduled", message: result.message || "The account will be anonymized after safety checks complete." });
               await load("refresh");
             } else {
               showToast({ type: "error", title: "Deletion failed", message: result.message });

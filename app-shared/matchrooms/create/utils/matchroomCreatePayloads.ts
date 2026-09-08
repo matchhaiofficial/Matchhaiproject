@@ -7,6 +7,49 @@ type TeamPaymentMode = "captain_pays_all" | "captain_pays_self";
 type LocationMode = "zone" | "broadcast";
 type WalkInPaymentMode = "venue_pay" | "guest_pay" | "matchhai_pay";
 
+export function getMatchroomDurationMinutes(input: {
+  gameKey: string;
+  seriesType?: string | null;
+  overs?: string | null;
+  walkIn?: boolean;
+  requestedDurationHours?: number | null;
+}) {
+  const { gameKey, seriesType, overs, walkIn = false } = input;
+  if (gameKey === "futsal") {
+    const hours = Number(input.requestedDurationHours || 1);
+    return Math.round(Math.min(6, Math.max(0.5, Number.isFinite(hours) ? hours : 1)) * 60);
+  }
+  if (gameKey === "indoor_cricket") return overs === "6" ? 150 : 120;
+  if (isCsStyleGame(gameKey)) {
+    if (seriesType === "BO1") return 60;
+    if (seriesType === "BO3") return 180;
+    if (seriesType === "BO5") return 300;
+    if (!walkIn && seriesType === "BO10") return 600;
+  }
+  if (gameKey === "fc26") {
+    if (seriesType === "BO1") return 30;
+    if (seriesType === "BO3") return 60;
+    if (seriesType === "BO5") return 120;
+    if (!walkIn && seriesType === "BO10") return 180;
+  }
+  if (gameKey === "tekken8") {
+    if (walkIn) {
+      if (seriesType === "BO1") return 60;
+      if (seriesType === "BO3") return 120;
+      if (seriesType === "BO5") return 180;
+    }
+    if (seriesType === "BO7") return 60;
+    if (seriesType === "BO20") return 120;
+    if (seriesType === "BO40") return 180;
+  }
+  if (gameKey === "padel" || gameKey === "pickleball") {
+    if (seriesType === "BO5") return 120;
+    if (seriesType === "BO10" || (walkIn && seriesType === "BO3")) return 180;
+    return 60;
+  }
+  return 60;
+}
+
 type WalkInSeatPlayerDraft = {
   character?: string;
   favouriteClub?: string;
@@ -64,6 +107,7 @@ export function buildZoneWalkInPayload(params: {
   adminName: string;
   adminUid: string;
   branch: { id: string; label: string } | null;
+  duration: number;
   formData: MatchroomCreateFormData;
   gameKey: string;
   pricePerPlayer: number;
@@ -136,32 +180,13 @@ export function buildZoneWalkInPayload(params: {
     zoneOwnerUid,
   } = params;
 
-  const durationMinutes = (() => {
-    if (isCsStyleGame(gameKey)) {
-      if (seriesType === "BO1") return 60;
-      if (seriesType === "BO3") return 180;
-      return 300;
-    }
-    if (gameKey === "fc26") {
-      if (seriesType === "BO1") return 30;
-      if (seriesType === "BO3") return 60;
-      return 120;
-    }
-    if (gameKey === "tekken8") {
-      if (seriesType === "BO1") return 60;
-      if (seriesType === "BO3") return 120;
-      return 180;
-    }
-    if (gameKey === "indoor_cricket") {
-      return formData.overs === "6" ? 150 : 120;
-    }
-    if (gameKey === "padel" || gameKey === "pickleball") {
-      if (seriesType === "BO1") return 60;
-      if (seriesType === "BO3") return 120;
-      return 180;
-    }
-    return 60;
-  })();
+  const durationMinutes = getMatchroomDurationMinutes({
+    gameKey,
+    seriesType,
+    overs: formData.overs,
+    walkIn: true,
+    requestedDurationHours: params.duration,
+  });
 
   const totalSeats = Math.max(1, Number(formData.maxPlayers || 0));
   const parsedSeatCount = Number.parseInt(seatCountInput, 10);
@@ -428,36 +453,12 @@ export function buildMatchroomPayload(params: {
     walkIn,
   } = params;
 
-  const durationMinutes = (() => {
-    if (gameKey === "futsal") return 60;
-    if (gameKey === "indoor_cricket") {
-      if (formData.overs === "6") return 150;
-      return 120;
-    }
-    if (isCsStyleGame(gameKey)) {
-      if (seriesType === "BO1") return 60;
-      if (seriesType === "BO3") return 180;
-      if (seriesType === "BO5") return 300;
-      if (seriesType === "BO10") return 600;
-    }
-    if (gameKey === "fc26") {
-      if (seriesType === "BO1") return 30;
-      if (seriesType === "BO3") return 60;
-      if (seriesType === "BO5") return 120;
-      if (seriesType === "BO10") return 180;
-    }
-    if (gameKey === "tekken8") {
-      if (seriesType === "BO7") return 60;
-      if (seriesType === "BO20") return 120;
-      if (seriesType === "BO40") return 180;
-    }
-    if (gameKey === "padel" || gameKey === "pickleball") {
-      if (formData.seriesType === "BO5") return 120;
-      if (formData.seriesType === "BO10") return 180;
-      return 60;
-    }
-    return 60;
-  })();
+  const durationMinutes = getMatchroomDurationMinutes({
+    gameKey,
+    seriesType,
+    overs: formData.overs,
+    requestedDurationHours: duration,
+  });
 
   return sanitizeData({
     assignedTeamMembers,

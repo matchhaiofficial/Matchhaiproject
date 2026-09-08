@@ -1,11 +1,14 @@
 import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
+import { assertNewGameEntityCreationAllowed } from "./gameAvailabilityPolicy";
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { requireCurrentUser, requireSuperAdmin, getCurrentUser, isSuperAdminProfile } from "./authz";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
+import { syncMatchroomMembers } from "./matchroomMembers";
 import { deductWalletFunds } from "./wallet";
 import { computeAuthoritativeMatchroomPricing } from "./matchroomPricing";
 import {
@@ -36,13 +39,39 @@ import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import {
   assertNoParticipantTimeConflict,
   assertZoneResourceCapacityAvailable,
+  reconcileResourceLegacyAssignment,
 } from "./bookingConflicts";
+import {
+  assertBranchOperatingHoursAvailable,
+  getBranchOperatingHoursAvailability,
+} from "./branchOperatingHours";
 import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
 import {
   withBookingRequestLifecycleDueAt,
   withTeamChallengeLifecycleDueAt,
 } from "./maintenanceDue";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
+import { getKarachiDayStartMillis, parseKarachiDateTimeMillis } from "./karachiDateTime";
+
+function getAuthoritativeMatchDurationMinutes(input: {
+  game: string;
+  seriesType?: string | null;
+  overs?: string | number | null;
+  durationHours?: number | null;
+}) {
+  const game = String(input.game || "").trim().toLowerCase();
+  const series = String(input.seriesType || "BO1").trim().toUpperCase();
+  if (["cs2", "cs16", "valorant"].includes(game)) return series === "BO10" ? 600 : series === "BO5" ? 300 : series === "BO3" ? 180 : 60;
+  if (["fc25", "fc26"].includes(game)) return series === "BO10" ? 180 : series === "BO5" ? 120 : series === "BO3" ? 60 : 30;
+  if (game === "tekken8") return series === "BO40" ? 180 : series === "BO20" ? 120 : 60;
+  if (game === "indoor_cricket") return String(input.overs || "") === "6" ? 150 : 120;
+  if (["padel", "pickleball"].includes(game)) return series === "BO10" ? 180 : series === "BO5" ? 120 : 60;
+  if (game === "futsal") {
+    const requestedHours = Number(input.durationHours || 1);
+    return Math.round(Math.min(6, Math.max(0.5, Number.isFinite(requestedHours) ? requestedHours : 1)) * 60);
+  }
+  return 60;
+}
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -195,8 +224,7 @@ function getScheduleRoomStartMs(room: any): number | null {
   const date = String(room?.scheduledDate || "").trim();
   const time = String(room?.scheduledTime || "").trim();
   if (!date || !time) return null;
-  const parsed = new Date(`${date}T${time}`).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseKarachiDateTimeMillis(date, time);
 }
 
 function shouldExpireForNotFull(room: any, now = Date.now()): boolean {
@@ -227,24 +255,6 @@ function shouldExpireInProgressRoom(room: any, now = Date.now()): boolean {
   const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
   if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
   return scheduledStartAt <= now && !isRosterFull(room);
-}
-
-async function findVenueGameTimeConflict(
-  ctx: any,
-  args: { zoneId?: string | null; game: string; scheduledStartAt: number },
-) {
-  if (!args.zoneId || typeof args.scheduledStartAt !== "number") return null;
-
-  const existing = await ctx.db
-    .query("matchrooms")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", args.zoneId))
-    .take(100);
-
-  return existing.find((room: any) => {
-    if (String(room.game || "") !== String(args.game || "")) return false;
-    if (room.scheduledStartAt !== args.scheduledStartAt) return false;
-    return !["cancelled", "completed", "expired"].includes(String(room.status || ""));
-  }) || null;
 }
 
 function canStartMatchroom(room: any, now = Date.now()) {
@@ -335,6 +345,7 @@ async function completeMatchroomForResultVerification(
     updatedAt: now,
   });
 
+  await releaseAllocatedResourcesForMatchroom(ctx, matchroomId, room);
   await captureHeldBookingIntentsForMatchroom(ctx, matchroomId);
   await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
     matchroomId,
@@ -967,19 +978,34 @@ async function finalizeMatchroomResult(
   });
   await notifyResultFinalized(ctx, { ...room, _id: matchroomId }, winner, source);
 
-  // Apply server-authoritative ELO after the result is finalized. Best-effort:
-  // a rating failure must never roll back the finalized result. Idempotent.
-  try {
-    await applyRatingsForFinalizedMatch(ctx, matchroomId, winner, source);
-  } catch (error) {
-    console.error("[matchrooms] applyRatingsForFinalizedMatch failed", {
-      matchroomId: String(matchroomId),
-      error: String(error),
-    });
-  }
+  // Keep result finalization, every player/team rating update, ledger writes,
+  // and the idempotency marker in one atomic transaction. If rating application
+  // fails, the whole result submission rolls back and can be retried safely.
+  await applyRatingsForFinalizedMatch(ctx, matchroomId, winner, source);
 
   return { ok: true, status: "resolved", winner, source };
 }
+
+// Compatibility target for the former client-calculated rating mutation.
+// Supplied ratings are never trusted; this only reapplies the already-finalized
+// server result and is idempotent through the rating history marker.
+export const reconcileFinalizedRatings = internalMutation({
+  args: { matchroomId: v.id("matchrooms") },
+  handler: async (ctx, args) => {
+    const room: any = await ctx.db.get(args.matchroomId);
+    const winner = room?.resultVerification?.finalWinner;
+    if (!room || room.status !== "completed" || !["team1", "team2"].includes(String(winner))) {
+      throw new Error("Match result must be finalized before ratings can be reconciled.");
+    }
+    await applyRatingsForFinalizedMatch(
+      ctx,
+      args.matchroomId,
+      winner as "team1" | "team2",
+      String(room.resultVerification?.resolutionSource || "legacy_reconciliation"),
+    );
+    return true;
+  },
+});
 
 export async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
@@ -1447,8 +1473,8 @@ function getDefaultResourceAssetType(game?: string | null) {
 
 function getZoneRequestPreferredDate(room: any) {
   if (room.scheduledDate) {
-    const timestamp = new Date(String(room.scheduledDate)).getTime();
-    if (Number.isFinite(timestamp)) return timestamp;
+    const timestamp = getKarachiDayStartMillis(room.scheduledDate);
+    if (timestamp) return timestamp;
   }
   return typeof room.scheduledStartAt === "number" ? room.scheduledStartAt : undefined;
 }
@@ -2068,6 +2094,29 @@ async function expirePendingMatchroomNotifications(ctx: any, matchroomId: Id<"ma
   return { expiredCount };
 }
 
+async function releaseAllocatedResourcesForMatchroom(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  roomInput?: any,
+) {
+  const room = roomInput || await ctx.db.get(matchroomId);
+  const resourceIds = Array.isArray(room?.resourceIds) ? room.resourceIds : [];
+  let releasedCount = 0;
+  const now = Date.now();
+  for (const resourceId of resourceIds) {
+    const resource = await ctx.db.get(resourceId).catch(() => null);
+    if (!resource || String(resource.matchroomId || "") !== String(matchroomId)) continue;
+    await reconcileResourceLegacyAssignment(ctx, {
+      resourceId: resource._id,
+      excludeBookingRequestId: resource.bookingRequestId ? String(resource.bookingRequestId) : null,
+      excludeMatchroomId: String(matchroomId),
+      now,
+    });
+    releasedCount += 1;
+  }
+  return releasedCount;
+}
+
 async function expireMatchroomForInvalidLifecycle(
   ctx: any,
   matchroomId: Id<"matchrooms">,
@@ -2097,6 +2146,7 @@ async function expireMatchroomForInvalidLifecycle(
     updatedAt: now,
     lifecycleDueAt: undefined,
   });
+  await releaseAllocatedResourcesForMatchroom(ctx, matchroomId, room);
   await expireBookingIntentsForMatchroom(ctx, matchroomId, reason);
   await expirePendingMatchroomNotifications(ctx, matchroomId, reason);
   await releaseHeldBookingIntentsForMatchroom(ctx, matchroomId, reason);
@@ -2243,6 +2293,7 @@ async function dispatchZoneAdminRequestForFullMatchroom(
     reservedSlots: room.reservedSlots,
     preferredDate: getZoneRequestPreferredDate(room),
     preferredTime: room.scheduledTime,
+    scheduledStartAt: room.scheduledStartAt || room.startTime,
     flexibilityWindow: "Exact time",
     locationMode: "zone",
     budgetPerPlayer: Number(room.pricing?.perPlayer || 0),
@@ -2897,9 +2948,9 @@ function matchesViewerIdentity(values: Set<string>, candidate: unknown) {
   return false;
 }
 
-async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
+async function resolveCheckInAccess(ctx: any, room: any, actorOverride?: any): Promise<boolean> {
   try {
-    const actor = await getCurrentUser(ctx);
+    const actor = actorOverride ?? await getCurrentUser(ctx);
     const viewer = actor.user;
     if (!viewer) return false;
     const viewerValues = getViewerIdentityValues(actor, viewer);
@@ -2947,9 +2998,10 @@ function isTerminalMatchroomStatus(status: any): boolean {
 async function viewerMayViewPrivateMatchroom(
   ctx: any,
   room: any,
+  actorOverride?: any,
 ): Promise<boolean> {
   try {
-    const actor = await getCurrentUser(ctx);
+    const actor = actorOverride ?? await getCurrentUser(ctx);
     const viewer = actor.user;
     if (!viewer) return false;
     const viewerValues = getViewerIdentityValues(actor, viewer);
@@ -3094,11 +3146,12 @@ function buildPublicMatchroomView(room: any): any {
 async function projectMatchroomForViewer(
   ctx: any,
   room: any,
+  actorOverride?: any,
 ): Promise<any | null> {
-  const authorized = await resolveCheckInAccess(ctx, room);
+  const authorized = await resolveCheckInAccess(ctx, room, actorOverride);
   if (!authorized) {
     if (room.isPrivate) {
-      const mayView = await viewerMayViewPrivateMatchroom(ctx, room);
+      const mayView = await viewerMayViewPrivateMatchroom(ctx, room, actorOverride);
       if (!mayView) return null;
     }
     return buildPublicMatchroomView(room);
@@ -3114,6 +3167,21 @@ async function projectMatchroomForViewer(
     result.matchCode = null;
   }
   return result;
+}
+
+async function requireRequestedMatchroomIdentity(ctx: any, requestedUid: string) {
+  const actor = await requireCurrentUser(ctx);
+  const viewerValues = getViewerIdentityValues(actor, actor.user);
+  if (!matchesViewerIdentity(viewerValues, requestedUid)) {
+    throw new Error("Not authorized to access another user's matchrooms.");
+  }
+  return String(requestedUid);
+}
+
+async function projectMatchroomListForViewer(ctx: any, rooms: any[]) {
+  const actor = await getCurrentUser(ctx);
+  const projected = await Promise.all(rooms.map((room) => projectMatchroomForViewer(ctx, room, actor)));
+  return projected.filter((room): room is any => room !== null);
 }
 
 export const getById = query({
@@ -3179,7 +3247,7 @@ export const list = query({
       filtered = filtered.filter((m) => m.game === args.game);
     }
 
-    return filtered.map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, filtered);
   },
 });
 
@@ -3202,7 +3270,7 @@ export const listOpen = query({
       filtered = filtered.filter((m) => m.game === args.game);
     }
 
-    return filtered.map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, filtered);
   },
 });
 
@@ -3216,9 +3284,7 @@ export const listByHost = query({
       .order("desc")
       .collect();
 
-    return matchrooms
-      .filter((m) => !isRoomExpired(m))
-      .map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, matchrooms.filter((m) => !isRoomExpired(m)));
   },
 });
 
@@ -3226,30 +3292,6 @@ export const listByHost = query({
 // Reconcile member rows to the room's current playerUids. Called after every
 // membership-changing write so user-scoped lists are correct & scalable instead
 // of scanning the global newest-200 rooms.
-async function syncMatchroomMembers(
-  ctx: any,
-  matchroomId: Id<"matchrooms">,
-  playerUids: string[],
-) {
-  const desired = new Set((playerUids || []).map((u) => String(u)).filter(Boolean));
-  const existing = await ctx.db
-    .query("matchroomMembers")
-    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
-    .collect();
-  const existingUids = new Set<string>();
-  for (const row of existing) {
-    existingUids.add(String(row.uid));
-    if (!desired.has(String(row.uid))) {
-      await ctx.db.delete(row._id);
-    }
-  }
-  for (const uid of desired) {
-    if (!existingUids.has(uid)) {
-      await ctx.db.insert("matchroomMembers", { matchroomId, uid, createdAt: Date.now() });
-    }
-  }
-}
-
 // Rooms a user is in, via the member index, defensively filtered against the
 // live playerUids so a stale member row can never surface a wrong room.
 async function getRoomsForUserViaMembers(ctx: any, uid: string) {
@@ -3413,6 +3455,7 @@ export const listForUserSchedule = query({
     })),
   },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
     const offset = Math.max(0, Number(args.cursor || 0) || 0);
     const now = Date.now();
@@ -3449,18 +3492,29 @@ export const listForUserSchedule = query({
   },
 });
 
-// One-time backfill of matchroomMembers from existing matchrooms.playerUids.
-// Run via `npx convex run matchrooms:backfillMatchroomMembers` after deploy.
-// NOTE: collects all matchrooms in a single transaction — fine for current
-// scale; convert to a paginated job if the table grows very large.
+// One-time/backward-compatible backfill of matchroomMembers from existing
+// matchrooms.playerUids. Each page schedules the next so this remains safe as
+// the table grows. Calling it with no args starts from the beginning.
 export const backfillMatchroomMembers = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const rooms = await ctx.db.query("matchrooms").collect();
-    for (const room of rooms) {
+  args: {
+    cursor: v.optional(v.string()),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("matchrooms").paginate({
+      cursor: args.cursor ?? null,
+      numItems: Math.min(50, Math.max(1, Number(args.batchSize || 25))),
+    });
+    for (const room of page.page) {
       await syncMatchroomMembers(ctx, room._id, (room.playerUids || []) as string[]);
     }
-    return { processed: rooms.length };
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.matchrooms.backfillMatchroomMembers, {
+        cursor: page.continueCursor,
+        batchSize: args.batchSize,
+      });
+    }
+    return { processed: page.page.length, isDone: page.isDone, continueCursor: page.continueCursor };
   },
 });
 
@@ -3468,6 +3522,7 @@ export const backfillMatchroomMembers = internalMutation({
 export const listByPlayer = query({
   args: { playerUid: v.string() },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.playerUid);
     const rooms = await getRoomsForUserViaMembers(ctx, args.playerUid);
     return rooms
       .filter((m) => !isRoomExpired(m))
@@ -3481,6 +3536,7 @@ export const listByPlayer = query({
 export const getUserMatchrooms = query({
   args: { uid: v.string() },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const hostedRooms = await ctx.db
       .query("matchrooms")
       .withIndex("by_hostUid", (q) => q.eq("hostUid", args.uid))
@@ -3517,6 +3573,7 @@ export const listUserMatchroomsPage = query({
     })),
   },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
     const offset = Math.max(0, Number(args.cursor || 0) || 0);
     const now = Date.now();
@@ -3588,9 +3645,7 @@ export const listByZone = query({
       .order("desc")
       .collect();
 
-    return matchrooms
-      .filter((m) => !isRoomExpired(m))
-      .map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, matchrooms.filter((m) => !isRoomExpired(m)));
   },
 });
 
@@ -3603,6 +3658,7 @@ export const checkTimeConflict = query({
     excludeRoomId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const targetStart = args.scheduledStartAt;
     const targetEnd = targetStart + args.durationMinutes * 60 * 1000;
 
@@ -3657,21 +3713,26 @@ export const checkCreateAvailability = query({
     }
 
     if (args.locationMode === "zone" && args.zoneId) {
-      const conflict = await findVenueGameTimeConflict(ctx, {
-        game: args.game,
+      const zone = await ctx.db.get(args.zoneId as Id<"zones">).catch(() => null);
+      if (!zone) {
+        return { available: false, message: "Venue not found.", reason: "venue_unavailable" };
+      }
+      if (String(zone.status || "") !== "active") {
+        return { available: false, message: "This venue is not currently accepting bookings.", reason: "venue_unavailable" };
+      }
+      const operatingHours = getBranchOperatingHoursAvailability({
+        zone,
+        branchId: args.branchId,
         scheduledStartAt: args.scheduledStartAt,
-        zoneId: args.zoneId,
+        durationMinutes: args.durationMinutes || 60,
       });
-
-      if (conflict) {
+      if (!operatingHours.available) {
         return {
           available: false,
-          conflictId: String(conflict._id),
-          message: MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE,
-          reason: "venue_time_conflict",
+          message: operatingHours.message,
+          reason: operatingHours.reason,
         };
       }
-
       try {
         await assertZoneResourceCapacityAvailable(ctx, {
           zoneId: args.zoneId,
@@ -3796,7 +3857,11 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   verifiedActor?: any;
   walletPrecheckHostUser?: any;
   sourcePaymentOrderRefNum?: string | null;
+  allowDisabledGameForSeed?: boolean;
 }) {
+  if (!options?.allowDisabledGameForSeed) {
+    assertNewGameEntityCreationAllowed(args.game);
+  }
   const actor = options?.verifiedActor
     ? options.verifiedActor
     : options?.trustedHostUid
@@ -3811,6 +3876,24 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
 
   if (actorUid !== args.hostUid) {
     throw new Error("You can only create a matchroom as yourself");
+  }
+
+  // Never trust independent client timing fields. The displayed Karachi date
+  // and time determine the persisted epoch, and game rules determine duration.
+  if (args.scheduledDate || args.scheduledTime) {
+    const canonicalStartAt = parseKarachiDateTimeMillis(args.scheduledDate, args.scheduledTime);
+    if (!canonicalStartAt) throw new Error("Enter a valid scheduled date and time.");
+    args.scheduledStartAt = canonicalStartAt;
+    args.lockAt = getMatchroomLockAt(canonicalStartAt) || undefined;
+  }
+  args.durationMinutes = getAuthoritativeMatchDurationMinutes({
+    game: args.game,
+    seriesType: args.seriesType,
+    overs: args.overs,
+    durationHours: args.durationHours,
+  });
+  if (args.locationMode === "zone" && args.zoneId && !args.requestedResourceAssetType) {
+    args.requestedResourceAssetType = getDefaultResourceAssetType(args.game);
   }
 
   const sourcePaymentOrderRefNum = String(options?.sourcePaymentOrderRefNum || args.sourcePaymentOrderRefNum || "").trim();
@@ -3862,7 +3945,6 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   if (
     args.locationMode === "zone"
     && args.zoneId
-    && args.requestedResourceAssetType
   ) {
     const clientPerPlayer = Number(args?.pricing?.perPlayer || 0);
     const paidSlots = Math.max(1, Number(args.paymentReservedSlots || 1));
@@ -3930,14 +4012,16 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     && args.zoneId
     && typeof args.scheduledStartAt === "number"
   ) {
-    const conflict = await findVenueGameTimeConflict(ctx, {
-      game: args.game,
-      scheduledStartAt: args.scheduledStartAt,
-      zoneId: args.zoneId,
-    });
-    if (conflict) {
-      throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
+    const zone = await ctx.db.get(args.zoneId as Id<"zones">);
+    if (!zone || String(zone.status || "") !== "active") {
+      throw new Error("This venue is not currently accepting bookings.");
     }
+    await assertBranchOperatingHoursAvailable(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      scheduledStartAt: args.scheduledStartAt,
+      durationMinutes: args.durationMinutes || 60,
+    });
     await assertZoneResourceCapacityAvailable(ctx, {
       zoneId: args.zoneId,
       branchId: args.branchId,
@@ -4146,6 +4230,7 @@ export const createSeededDemo = internalMutation({
     }
     const result = await createMatchroomFromValidatedArgs(ctx, args, {
       trustedHostUid: true,
+      allowDisabledGameForSeed: true,
     });
     if (isMatchroomCreateFailureResult(result)) {
       throw new Error(result.message || "Could not create seeded matchroom.");
@@ -4271,6 +4356,10 @@ export const createTeamChallengeMatchroom = internalMutation({
     const captainA = teamAPlayers.find((player) => player.uid === String(challenge.captainAUid))!;
     const captainB = teamBPlayers.find((player) => player.uid === String(challenge.captainBUid))!;
     const lockAt = getMatchroomLockAt(scheduledStartAt) || undefined;
+    const durationMinutes = getAuthoritativeMatchDurationMinutes({
+      game,
+      seriesType: challenge.seriesType,
+    });
 
     const matchroomId = await ctx.db.insert("matchrooms", {
       hostUid: captainA.uid,
@@ -4289,6 +4378,7 @@ export const createTeamChallengeMatchroom = internalMutation({
       scheduledDate: challenge.scheduledDate,
       scheduledTime: challenge.scheduledTime,
       scheduledStartAt,
+      durationMinutes,
       lockAt,
       lifecycleDueAt: getLifecycleDueAt({
         status: "open",
@@ -4298,6 +4388,7 @@ export const createTeamChallengeMatchroom = internalMutation({
         slotsA,
         slotsB,
         scheduledStartAt,
+        durationMinutes,
         lockAt,
         locationMode: "zone",
         zoneId: String(venue.zoneId),
@@ -4643,6 +4734,7 @@ export const updateStatus = mutation({
 
     await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, updateData));
     if (args.status === "cancelled" || args.status === "expired") {
+      await releaseAllocatedResourcesForMatchroom(ctx, args.matchroomId, room);
       await expireBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
       await expirePendingMatchroomNotifications(ctx, args.matchroomId, `matchroom_${args.status}`);
       await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
@@ -4980,6 +5072,7 @@ export async function performAdminCancel(
   if (!room) throw new Error("Matchroom not found");
 
   if (room.status === "cancelled") {
+    await releaseAllocatedResourcesForMatchroom(ctx, args.matchroomId, room);
     return { ok: true, message: "Matchroom is already cancelled.", alreadyCancelled: true };
   }
 
@@ -4995,6 +5088,7 @@ export async function performAdminCancel(
     lifecycleDueAt: undefined,
     updatedAt: cancelledAt,
   });
+  await releaseAllocatedResourcesForMatchroom(ctx, args.matchroomId, room);
   await expireBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
   await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
   await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
@@ -6870,7 +6964,7 @@ export const notifyAreaPlayersOfNewMatchroomBatch = internalMutation({
     for (const user of page.page) {
       if (!user || joinedUids.has(String(user._id))) continue;
       if (isUserHiddenFromPublic(user)) continue;
-      if (user.accountStatus === "suspended") continue;
+      if (isAccountSuspensionActive(user)) continue;
       if (user.onboardingCompleted !== true) continue;
       if (!isGameEnabledForUser(user, room.game)) continue;
       if (targetCityKey) {

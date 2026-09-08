@@ -35,6 +35,7 @@ import {
   buildAssignedTeamMembers,
   buildMatchroomPayload,
   buildZoneWalkInPayload,
+  getMatchroomDurationMinutes,
 } from "../utils/matchroomCreatePayloads";
 
 type TeamMode = "solo" | "team";
@@ -574,7 +575,13 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             scheduledTime: formData.time,
             zoneId: adminZone.id,
             branchId: branch?.id || selectedBranchId || null,
-            durationMinutes: duration,
+            durationMinutes: getMatchroomDurationMinutes({
+              gameKey: selectedGame || "unknown",
+              seriesType: walkInSeries,
+              overs: formData.overs,
+              walkIn: true,
+              requestedDurationHours: duration,
+            }),
             requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || null,
             requestedResourceSurface: selectedZoneRateResourceContext?.surface || null,
             requestedResourceTier: selectedZoneRateResourceContext?.tier || null,
@@ -600,6 +607,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           adminName: user.fullName || adminZone.ownerFullName || "Zone Admin",
           adminUid: user._id,
           branch,
+          duration,
           formData,
           gameKey: selectedGame || "unknown",
           pricePerPlayer,
@@ -796,7 +804,12 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             scheduledTime: formData.time,
             zoneId: selectedZoneId,
             branchId: selectedBranchId,
-            durationMinutes: duration,
+            durationMinutes: getMatchroomDurationMinutes({
+              gameKey: selectedGame!,
+              seriesType,
+              overs: formData.overs,
+              requestedDurationHours: duration,
+            }),
             requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || null,
             requestedResourceSurface: selectedZoneRateResourceContext?.surface || null,
             requestedResourceTier: selectedZoneRateResourceContext?.tier || null,

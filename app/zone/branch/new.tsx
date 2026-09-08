@@ -35,6 +35,11 @@ import BranchInventoryPricingForm, {
     validateBranchInventory,
 } from "../../../app-shared/zone/branch/components/BranchInventoryPricingForm";
 import styles from "../../../app-shared/zone/branch/branch.styles";
+import BranchOperatingHoursEditor from "../../../app-shared/zone/branch/components/BranchOperatingHoursEditor";
+import {
+    type BranchOperatingHours,
+    validateBranchOperatingHours,
+} from "../../../constants/branchOperatingHours";
 
 type LocationSearchResult = {
     display_name: string;
@@ -78,6 +83,7 @@ export default function AddBranch() {
     const [addressLine1, setAddressLine1] = useState("");
     const [googleMapsUrl, setGoogleMapsUrl] = useState("");
     const [contactPhone, setContactPhone] = useState("");
+    const [operatingHours, setOperatingHours] = useState<BranchOperatingHours | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -209,6 +215,11 @@ export default function AddBranch() {
             });
             return;
         }
+        const operatingHoursError = operatingHours ? validateBranchOperatingHours(operatingHours) : null;
+        if (operatingHoursError) {
+            showToast({ type: "error", title: "Check operating hours", message: operatingHoursError });
+            return;
+        }
 
         let finalPhone: string | undefined;
         if (contactPhone.trim()) {
@@ -241,6 +252,7 @@ export default function AddBranch() {
                 capacity: {},
                 ...sanitizedInventory,
                 pricing: sanitizedInventory.pricing || {},
+                ...(operatingHours ? { operatingHours } : {}),
             };
 
             const result = await addBranch(zone.id, branchPayload);
@@ -432,6 +444,8 @@ export default function AddBranch() {
                             </View>
                         </View>
                     ) : null}
+
+                    <BranchOperatingHoursEditor value={operatingHours} onChange={setOperatingHours} />
 
                     <BranchInventoryPricingForm
                         value={inventory}

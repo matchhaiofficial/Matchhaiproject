@@ -3,6 +3,7 @@
 
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
+import { parseKarachiDateTimeMillis } from "../../../convex/karachiDateTime";
 import { Id } from "../../../convex/_generated/dataModel";
 import { currentUser, requireKycAccess } from "./authService";
 import { normalizeGameKey } from "../../features/discover/utils/gameKeys";
@@ -386,8 +387,7 @@ function parseScheduledStartAt(scheduledDate?: string, scheduledTime?: string): 
   const date = String(scheduledDate || "").trim();
   const time = String(scheduledTime || "").trim();
   if (!date || !time) return null;
-  const dt = new Date(`${date}T${time}`);
-  return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+  return parseKarachiDateTimeMillis(date, time);
 }
 
 // Helper to generate slots

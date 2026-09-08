@@ -500,12 +500,21 @@ function buildPaymentStatusForReturn(status: PaymentStatus) {
   return "failed";
 }
 
-function getPlayerPaymentOutcomeCopy(kind: PaymentKind, decision: "paid" | "failed" | "expired" | "wallet_credit_only") {
+function getPlayerPaymentOutcomeCopy(
+  kind: PaymentKind,
+  decision: "paid" | "failed" | "expired" | "wallet_credit_only",
+  payment?: any,
+) {
   if (decision === "wallet_credit_only") {
+    const checkoutContext = payment?.providerPayload?.checkoutContext || {};
+    const isTeamChallenge = Boolean(checkoutContext.teamChallengeHold);
+    const isWalkIn = Boolean(checkoutContext.zoneWalkInCreateArgs);
     return {
       title: "Payment added to wallet",
-      body: kind === "wallet_topup"
+      body: isTeamChallenge
         ? "Your Easypaisa payment was received, but the team challenge hold could not be placed. Funds remain available in your MatchHai wallet."
+        : isWalkIn
+          ? "Your Easypaisa payment was received, but the walk-in booking could not be created. Funds remain available in your MatchHai wallet."
         : "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
     };
   }
@@ -558,7 +567,7 @@ async function notifyPlayerPaymentOutcome(ctx: any, input: {
 }) {
   const kind = input.payment.kind as PaymentKind;
   const route = getPlayerPaymentRoute(kind, input.decision);
-  const copy = getPlayerPaymentOutcomeCopy(kind, input.decision);
+  const copy = getPlayerPaymentOutcomeCopy(kind, input.decision, input.payment);
   await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
     type: kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
     toUid: input.payment.userId,
@@ -2920,7 +2929,7 @@ export const applyProviderUpdate = internalMutation({
             teamChallengeHold: {
               status: "wallet_credit_only",
               completionFailedAt: now,
-              completionError: String(holdResult?.message || "Challenge hold could not be placed.").slice(0, 240),
+              completionError: String(holdResult?.reason || "Challenge hold could not be placed.").slice(0, 240),
               challengeId: String(walletTopupTeamChallengeHold.challengeId),
               side: walletTopupTeamChallengeHold.side,
             },

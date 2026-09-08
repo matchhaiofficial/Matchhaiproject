@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
 
 import { api, internal } from "./_generated/api";
 import { mutation, query, internalMutation } from "./_generated/server";
@@ -13,6 +14,8 @@ import {
 } from "./maintenanceDue";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
 import { requireCurrentUser } from "./authz";
+import { assertNewGameEntityCreationAllowed } from "./gameAvailabilityPolicy";
+import { interruptAccountDeletionForIncomingFunds } from "./wallet";
 
 const venueChoiceValidator = v.object({
   zoneId: v.string(),
@@ -85,7 +88,7 @@ function validateTeamChallengeScheduledAt(scheduledAt: unknown, nowMs = Date.now
   }
 }
 
-function getChallengeSeriesHours(gameKey: string, seriesType?: string | null) {
+export function getChallengeSeriesHours(gameKey: string, seriesType?: string | null) {
   const game = String(gameKey || "").toLowerCase();
   const series = String(seriesType || "BO1").toUpperCase();
   if (["cs2", "cs16", "valorant"].includes(game)) return series === "BO3" ? 3 : series === "BO5" ? 5 : 1;
@@ -184,9 +187,7 @@ async function validateTeamLineup(
   for (const uid of lineup) {
     const member = members.find((entry: any) => String(entry.odxerId) === uid);
     const user = member ? await ctx.db.get(member.odxerId) : null;
-    const suspensionIsActive =
-      user?.accountStatus === "suspended"
-      && (!user.suspendedUntil || Number(user.suspendedUntil) > Date.now());
+    const suspensionIsActive = isAccountSuspensionActive(user);
     if (!user || user.deletedAt || user.accountStatus === "deleted" || suspensionIsActive) {
       throw new Error(`${label} contains an inactive player.`);
     }
@@ -314,8 +315,14 @@ async function refundChallengerPaymentForRejectedChallenge(ctx: any, challengeId
   }
 
   const now = Date.now();
+  const deletionPatch = await interruptAccountDeletionForIncomingFunds(
+    ctx,
+    captainA,
+    "a team challenge refund arrived",
+  );
   await ctx.db.patch(captainAUid, {
     walletBalance: Number(captainA.walletBalance || 0) + amount,
+    ...deletionPatch,
     updatedAt: now,
   });
 
@@ -351,7 +358,12 @@ export const getById = query({
     if (!isCaptain(challenge, userId)) {
       return null;
     }
-    return challenge;
+    let confirmedVenueIsActive: boolean | null = null;
+    if (challenge.confirmedVenue?.zoneId) {
+      const zone = await ctx.db.get(challenge.confirmedVenue.zoneId as Id<"zones">);
+      confirmedVenueIsActive = Boolean(zone && zone.status === "active");
+    }
+    return { ...challenge, confirmedVenueIsActive };
   },
 });
 
@@ -557,9 +569,8 @@ export const respond = mutation({
       chatId,
       lineupB: args.accept ? acceptedLineupB : challenge.lineupB,
       teamAPaymentStatus: !args.accept && refundResult.refunded ? "unpaid" : challenge.teamAPaymentStatus,
-      // Team Challenge paid flow is disabled for launch: never trust a
-      // client-asserted "paid" status and never persist a payment amount.
-      // (Previously this defaulted to "paid" even when the arg was omitted.)
+      // Payment state is server-owned: never trust a client-asserted "paid"
+      // status or amount during acceptance.
       teamBPaymentStatus: args.accept ? "unpaid" : challenge.teamBPaymentStatus,
       teamBPaymentAmount: args.accept ? undefined : challenge.teamBPaymentAmount,
       updatedAt: Date.now(),
@@ -648,7 +659,12 @@ export const proposeVenue = mutation({
   },
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
-    if (!["accepted", "venue_proposed"].includes(challenge.status)) {
+    let recoveringUnavailableVenue = false;
+    if (challenge.status === "venue_confirmed" && !challenge.matchroomId && challenge.confirmedVenue?.zoneId) {
+      const currentZone = await ctx.db.get(challenge.confirmedVenue.zoneId as Id<"zones">);
+      recoveringUnavailableVenue = !currentZone || currentZone.status !== "active";
+    }
+    if (!["accepted", "venue_proposed"].includes(challenge.status) && !recoveringUnavailableVenue) {
       throw new Error("Challenge is not in venue proposal state");
     }
 
@@ -754,7 +770,12 @@ export const suggestAlternativeVenue = mutation({
   },
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
-    if (!["accepted", "venue_proposed"].includes(challenge.status)) {
+    let recoveringUnavailableVenue = false;
+    if (challenge.status === "venue_confirmed" && !challenge.matchroomId && challenge.confirmedVenue?.zoneId) {
+      const currentZone = await ctx.db.get(challenge.confirmedVenue.zoneId as Id<"zones">);
+      recoveringUnavailableVenue = !currentZone || currentZone.status !== "active";
+    }
+    if (!["accepted", "venue_proposed"].includes(challenge.status) && !recoveringUnavailableVenue) {
       throw new Error("Accept the challenge before suggesting an alternative venue");
     }
     if (String(challenge.captainBUid || "") !== String(userId)) {
@@ -788,6 +809,9 @@ export const suggestAlternativeVenue = mutation({
       status: "venue_proposed",
       message: `Alternative venue proposed: ${venue.venueName}`,
       alternativeVenueByCaptainB: venue,
+      confirmedVenue: undefined,
+      zoneId: undefined,
+      zoneName: undefined,
       captainVenueChoices: buildCaptainChoices(challenge, {
         [String(userId)]: venue,
       }),
@@ -842,8 +866,27 @@ export const complete = mutation({
     score: v.optional(v.string()),
     actorUid: v.optional(v.id("users")),
   },
-  handler: async () => {
-    throw new Error("Deprecated Team Challenge lifecycle endpoint is disabled.");
+  handler: async (ctx, args) => {
+    const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
+    if (!challenge.matchroomId) {
+      throw new Error("This challenge has no matchroom result workflow.");
+    }
+    const winner = String(args.winnerId) === String(challenge.challengerTeamId)
+      ? "team1" as const
+      : String(args.winnerId) === String(challenge.opponentTeamId)
+        ? "team2" as const
+        : null;
+    if (!winner) throw new Error("Winner must be one of the challenged teams.");
+
+    // Compatibility adapter: the old endpoint used to finalize immediately.
+    // It now submits this captain's report to the same consensus workflow used
+    // by current clients; the second captain/vote/admin path remains authoritative.
+    await ctx.runMutation(api.matchrooms.submitCaptainReport, {
+      matchroomId: challenge.matchroomId,
+      captainUid: String(userId),
+      winner,
+    });
+    return true;
   },
 });
 
@@ -851,13 +894,24 @@ export const cancel = mutation({
   args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
-    if (challenge.captainAUid !== userId) {
+    if (String(challenge.captainAUid) !== String(userId)) {
       throw new Error("Only the challenging captain can cancel");
     }
-    // Return any held captain funds to their wallets BEFORE removing the row, so
-    // escrowed money is never stranded by the delete.
+    if (challenge.matchroomId || challenge.status === "admin_pending") {
+      throw new Error("This challenge is already linked to a booking and cannot be cancelled here.");
+    }
+    if (!["pending", "accepted", "venue_proposed", "venue_confirmed"].includes(String(challenge.status))) {
+      throw new Error("This challenge is no longer cancellable.");
+    }
+    // Return holds and retain the terminal record for audit/reconciliation.
     await releaseChallengeHolds(ctx, args.challengeId, "challenge_cancelled");
-    await ctx.db.delete(args.challengeId);
+    const fresh = await ctx.db.get(args.challengeId);
+    if (!fresh) throw new Error("Challenge not found after releasing payment holds.");
+    await patchTeamChallengeWithLifecycleDueAt(ctx, fresh, {
+      status: "rejected",
+      message: "Cancelled by the challenging captain",
+      updatedAt: Date.now(),
+    });
     return true;
   },
 });
@@ -905,6 +959,9 @@ export const createFull = mutation({
     if (!challenger || !opponent) {
       throw new Error("Team not found");
     }
+    // Existing challenges must still be finalizable so paid holds are never
+    // stranded, but no new challenge may bypass the current game catalogue.
+    assertNewGameEntityCreationAllowed(challenger.game);
 
     const actorId = await getAuthenticatedUserId(ctx, args.captainAUid);
 
@@ -956,11 +1013,8 @@ export const createFull = mutation({
       throw new Error("The selected venue does not have valid pricing for this challenge");
     }
 
-    // Team Challenge paid flow is disabled for launch. The server NEVER trusts a
-    // client-asserted payment status and NEVER persists payment amounts, so a
-    // crafted client cannot create a "paid" challenge or imply money was
-    // collected. Challenges are stored free/social-only until the safe
-    // hold/escrow model is rebuilt (see TEMP_MATCHHAI_PAYMENT_HOLD_WALLET_CREDIT_POLICY.md).
+    // Never trust client-asserted payment state. The canonical wallet/provider
+    // flow records captain holds after challenge creation.
     const safeTeamAPaymentStatus = "unpaid" as const;
     const safeTeamBPaymentStatus = "unpaid" as const;
 
@@ -1106,8 +1160,53 @@ export const update = mutation({
       "chatId",
       "matchroomId",
     ];
-    if (privilegedKeys.some((key) => (updates as any)[key] !== undefined)) {
-      throw new Error("Use the dedicated challenge action for lifecycle, venue, and matchroom changes");
+    const suppliedPrivilegedKeys = privilegedKeys.filter((key) => (updates as any)[key] !== undefined);
+    if (suppliedPrivilegedKeys.length) {
+      const isLegacyFreeMatchroomLink =
+        suppliedPrivilegedKeys.every((key) => ["status", "confirmedVenue", "matchroomId"].includes(key))
+        && updates.status === "venue_confirmed"
+        && !!updates.confirmedVenue
+        && !!updates.matchroomId;
+      if (!isLegacyFreeMatchroomLink) {
+        throw new Error("Use the dedicated challenge action for lifecycle, venue, and matchroom changes");
+      }
+      if (challenge.matchroomId || challenge.status !== "venue_confirmed" || !challenge.confirmedVenue) {
+        throw new Error("This challenge cannot be linked through the legacy free-match path.");
+      }
+      if (
+        String(updates.confirmedVenue!.zoneId) !== String(challenge.confirmedVenue.zoneId)
+        || String(updates.confirmedVenue!.venueName) !== String(challenge.confirmedVenue.venueName)
+      ) {
+        throw new Error("The linked venue must match the captains' confirmed venue.");
+      }
+      const hasPaidState =
+        Number(challenge.pricePerPlayer || 0) > 0
+        || Number(challenge.teamAPaymentAmount || 0) > 0
+        || Number(challenge.teamBPaymentAmount || 0) > 0
+        || challenge.teamAPaymentStatus === "paid"
+        || challenge.teamBPaymentStatus === "paid";
+      if (hasPaidState) {
+        throw new Error("Paid challenges are linked only by the canonical booking workflow.");
+      }
+      const room = await ctx.db.get(updates.matchroomId!);
+      if (
+        !room
+        || room.bookingSource !== "challenge"
+        || room.teamMode !== "team"
+        || String(room.zoneId || "") !== String(challenge.confirmedVenue.zoneId)
+        || String(room.captainUidA || "") !== String(challenge.captainAUid)
+        || String(room.captainUidB || "") !== String(challenge.captainBUid)
+        || String(room.teamId || "") !== String(challenge.challengerTeamId)
+        || Number(room.pricing?.perPlayer || 0) > 0
+        || room.paymentStatus === "paid"
+      ) {
+        throw new Error("The legacy matchroom does not match this free challenge.");
+      }
+      await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+        matchroomId: updates.matchroomId,
+        updatedAt: Date.now(),
+      });
+      return true;
     }
     if (updates.message === undefined) return true;
     await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
@@ -1497,7 +1596,35 @@ async function maybeFinalizeChallengeBooking(ctx: any, challenge: any) {
     return;
   }
   const zone = await ctx.db.get(challenge.confirmedVenue.zoneId as Id<"zones">);
-  if (!zone || zone.status !== "active") return;
+  if (!zone || zone.status !== "active") {
+    const now = Date.now();
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+      status: "venue_proposed",
+      zoneId: undefined,
+      zoneName: undefined,
+      confirmedVenue: undefined,
+      proposedVenueByCaptainA: undefined,
+      alternativeVenueByCaptainB: undefined,
+      captainVenueChoices: {},
+      updatedAt: now,
+    }, now);
+    for (const captainUid of [challenge.captainAUid, challenge.captainBUid]) {
+      if (!captainUid) continue;
+      await createChallengeNotification(ctx, {
+        type: "team.challenge_updated",
+        toUid: captainUid,
+        fromUid: captainUid,
+        fromUsername: "MatchHai",
+        challengeId: challenge._id,
+        dedupeKey: `team.challenge_venue_unavailable:${String(challenge._id)}:${String(captainUid)}:${String(challenge.confirmedVenue.zoneId)}`,
+        dedupePolicy: "versioned_new",
+        title: "Choose another venue",
+        body: "The agreed venue is no longer available. Your payment remains held while both captains choose another venue.",
+        updateKind: "venue_unavailable",
+      });
+    }
+    return;
+  }
   await ctx.runMutation(internal.matchrooms.createTeamChallengeMatchroom, {
     challengeId: challenge._id,
   });

@@ -6,14 +6,86 @@ import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
 import { requireOwnedZone, requireSelf, requireSuperAdmin } from "./authz";
+import { validateBranchOperatingHours } from "../constants/branchOperatingHours";
+import { refreshBranchResourceCapacitySnapshot } from "./resourceCapacity";
+import { findActiveBranchAssignment, findActiveResourceAssignment } from "./bookingConflicts";
 
 const ZONE_LIVE_NEARBY_NOTIFICATION_TYPE = "zone.live_nearby";
+
+function assertValidBranchOperatingHours(branches: any[]) {
+  for (const branch of branches) {
+    if (!branch?.operatingHours) continue;
+    const error = validateBranchOperatingHours(branch.operatingHours);
+    if (error) {
+      const label = String(branch?.branchDisplayName || branch?.name || "Branch");
+      throw new Error(`${label}: ${error}`);
+    }
+  }
+}
 const ZONE_LIVE_NEARBY_NOTIFICATION_BATCH_SIZE = 75;
 
 function toPositiveNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getNewBranchResourceConfigs(pricing: any) {
+  const count = (value: unknown) => {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    if (parsed > 200) throw new Error("A single resource category cannot exceed 200 units.");
+    return parsed;
+  };
+  return [
+    { assetType: "pc", tier: "regular", count: count(pricing?.pc?.regular?.count) },
+    { assetType: "pc", tier: "premium", count: count(pricing?.pc?.premium?.count) },
+    { assetType: "pc", tier: "elite", count: count(pricing?.pc?.elite?.count) },
+    { assetType: "console", tier: "regular", count: count(pricing?.console?.regular?.count) },
+    { assetType: "console", tier: "premium", count: count(pricing?.console?.premium?.count) },
+    { assetType: "console", tier: "elite", count: count(pricing?.console?.elite?.count) },
+    { assetType: "console", tier: "ps5", count: count(pricing?.console?.ps5?.count) },
+    { assetType: "console", tier: "xbox", count: count(pricing?.console?.xbox?.count) },
+  ];
+}
+
+async function createResourcesForNewBranch(ctx: any, input: {
+  zoneId: Id<"zones">;
+  branchId: string;
+  pricing: any;
+  now: number;
+}) {
+  const configs = getNewBranchResourceConfigs(input.pricing);
+  const total = configs.reduce((sum, config) => sum + config.count, 0);
+  if (total > 500) throw new Error("A branch cannot contain more than 500 managed resources.");
+  for (const config of configs) {
+    const tierLabel = config.tier === "ps5" ? "PS5" : config.tier === "xbox"
+      ? "Xbox"
+      : `${config.tier.charAt(0).toUpperCase()}${config.tier.slice(1)} ${config.assetType === "pc" ? "PC" : "Console"}`;
+    for (let index = 1; index <= config.count; index += 1) {
+      await ctx.db.insert("zoneResources", {
+        zoneId: input.zoneId,
+        branchId: input.branchId,
+        kind: "seat",
+        name: `${tierLabel} ${index}`,
+        assetType: config.assetType,
+        tier: config.tier,
+        roomLabel: config.assetType === "pc"
+          ? `${tierLabel}s Room ${Math.floor((index - 1) / 5) + 1}`
+          : `${tierLabel} Bay ${Math.floor((index - 1) / 2) + 1}`,
+        lifecycleStatus: "available",
+        isActive: true,
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+    }
+  }
+  await refreshBranchResourceCapacitySnapshot(ctx, {
+    zoneId: input.zoneId,
+    branchId: input.branchId,
+    now: input.now,
+  });
 }
 
 async function requireKycOwnedZone(
@@ -123,7 +195,7 @@ function shouldNotifyUserForLiveZone(user: any, input: {
 }) {
   if (!user) return false;
   if (isUserHiddenFromPublic(user)) return false;
-  if (String(user.accountStatus || "").toLowerCase() === "suspended") return false;
+  if (isAccountSuspensionActive(user)) return false;
   if (user.onboardingCompleted !== true) return false;
 
   const userCityKey = normalizeAudienceToken(user.city);
@@ -243,6 +315,53 @@ export const getPublicVenueByIdString = query({
     } catch {
       return null;
     }
+  },
+});
+
+// Aggregate public inventory only; resource identifiers, names, booking links,
+// and maintenance details remain private. The client uses this snapshot to
+// avoid offering a priced category that cannot satisfy a game's minimum team
+// size. Slot-specific contention is still checked by matchrooms before create.
+export const getPublicResourceCapacity = query({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.optional(v.string()),
+  },
+  returns: v.union(
+    v.null(),
+    v.object({
+      capacityByKey: v.record(v.string(), v.number()),
+      complete: v.boolean(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone || String(zone.status || "") !== "active") return null;
+
+    if (args.branchId) {
+      const snapshot = await ctx.db.query("zoneResourceCapacitySnapshots")
+        .withIndex("by_zoneId_and_branchId", (q) =>
+          q.eq("zoneId", args.zoneId).eq("branchId", args.branchId!),
+        )
+        .unique();
+      return snapshot
+        ? { capacityByKey: snapshot.capacityByKey, complete: snapshot.complete }
+        : { capacityByKey: {}, complete: false };
+    }
+
+    const snapshots = await ctx.db.query("zoneResourceCapacitySnapshots")
+      .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
+      .take(101);
+    const capacityByKey: Record<string, number> = {};
+    for (const snapshot of snapshots.slice(0, 100)) {
+      for (const [key, count] of Object.entries(snapshot.capacityByKey)) {
+        capacityByKey[key] = (capacityByKey[key] || 0) + count;
+      }
+    }
+    return {
+      capacityByKey,
+      complete: snapshots.length <= 100 && snapshots.every((snapshot) => snapshot.complete),
+    };
   },
 });
 
@@ -393,6 +512,7 @@ export const create = mutation({
       throw new Error("You can only register a zone for your own account");
     }
     const now = Date.now();
+    assertValidBranchOperatingHours(args.branches);
     const primaryBranch = buildPrimaryBranch(args.branches[0], args.city);
     const capacity = buildAggregateCapacity(args.branches);
     const firstBranchPricing = args.branches[0]?.pricing;
@@ -507,6 +627,7 @@ export const update = mutation({
     if (updates.phone !== undefined) updateData.phone = updates.phone;
     if (updates.games !== undefined) updateData.games = updates.games;
     if (updates.branches !== undefined) {
+      assertValidBranchOperatingHours(updates.branches);
       updateData.branches = updates.branches;
       if (updates.primaryBranch === undefined) {
         updateData.primaryBranch = buildPrimaryBranch(updates.branches[0], updates.city);
@@ -548,7 +669,15 @@ export const addBranch = mutation({
       id: args.branch?.id || Math.random().toString(36).slice(2, 10),
     };
     const branches = [...(zone.branches || []), branch];
+    assertValidBranchOperatingHours(branches);
 
+    const now = Date.now();
+    await createResourcesForNewBranch(ctx, {
+      zoneId: args.zoneId,
+      branchId: branch.id,
+      pricing: branch.pricing || {},
+      now,
+    });
     await ctx.db.patch(args.zoneId, {
       branches,
       primaryBranch: zone.primaryBranch || {
@@ -560,7 +689,7 @@ export const addBranch = mutation({
       },
       capacity: buildAggregateCapacity(branches),
       pricing: (branches[0] as any)?.pricing,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
     return branch.id;
@@ -579,6 +708,7 @@ export const updateBranch = mutation({
     const branches = (zone.branches || []).map((branch: any) =>
       branch.id === args.branchId ? { ...branch, ...args.updates, id: branch.id } : branch
     );
+    assertValidBranchOperatingHours(branches);
 
     const primary = branches[0];
 
@@ -610,8 +740,45 @@ export const deleteBranch = mutation({
   handler: async (ctx, args) => {
     const { zone } = await requireKycOwnedZone(ctx, args.zoneId);
 
+    if (!(zone.branches || []).some((branch: any) => String(branch.id || "") === args.branchId)) {
+      throw new Error("Branch not found.");
+    }
+    if (await findActiveBranchAssignment(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+    })) {
+      throw new Error("This branch cannot be deleted while it has active bookings, walk-ins, or venue offers.");
+    }
+    const resources = await ctx.db.query("zoneResources")
+      .withIndex("by_zoneId_and_branchId", (q) =>
+        q.eq("zoneId", args.zoneId).eq("branchId", args.branchId),
+      )
+      .take(501);
+    if (resources.length > 500) {
+      throw new Error("This branch has too many resources to delete safely.");
+    }
+    for (const resource of resources) {
+      if (await findActiveResourceAssignment(ctx, {
+        zoneId: String(args.zoneId),
+        resourceId: resource._id,
+      })) {
+        throw new Error("This branch cannot be deleted while it has active bookings or venue offers.");
+      }
+    }
+
     const branches = (zone.branches || []).filter((branch: any) => branch.id !== args.branchId);
     const primary = branches[0];
+
+    const now = Date.now();
+    for (const resource of resources) {
+      await ctx.db.patch(resource._id, { isActive: false, updatedAt: now });
+    }
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      now,
+    });
 
     await ctx.db.patch(args.zoneId, {
       branches,
@@ -626,7 +793,7 @@ export const deleteBranch = mutation({
         : undefined,
       capacity: buildAggregateCapacity(branches),
       pricing: (branches[0] as any)?.pricing,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
     return true;
@@ -645,6 +812,11 @@ export const approve = mutation({
       approvedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    if (Number(zone.scheduleIndexVersion || 0) < 1) {
+      await ctx.scheduler.runAfter(0, (internal as any).scheduleIndexMigration.prepareZoneScheduleIndex, {
+        zoneId: args.zoneId,
+      });
+    }
     if (["pending-review", "approved_pending_migration"].includes(String(zone.status || ""))) {
       await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
     }
@@ -907,7 +1079,10 @@ export const createResource = mutation({
     hourlyRate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireKycOwnedZone(ctx, args.zoneId);
+    const { zone } = await requireKycOwnedZone(ctx, args.zoneId);
+    if (!(zone.branches || []).some((branch: any) => String(branch.id || "") === args.branchId)) {
+      throw new Error("Branch not found.");
+    }
     const now = Date.now();
 
     const resourceId = await ctx.db.insert("zoneResources", {
@@ -916,6 +1091,11 @@ export const createResource = mutation({
       isActive: true,
       createdAt: now,
       updatedAt: now,
+    });
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      now,
     });
 
     return resourceId;
@@ -936,10 +1116,30 @@ export const updateResourceStatus = mutation({
   handler: async (ctx, args) => {
     const resource = await ctx.db.get(args.resourceId);
     if (!resource) throw new Error("Resource not found");
-    await requireKycOwnedZone(ctx, resource.zoneId);
+    const { zone } = await requireKycOwnedZone(ctx, resource.zoneId);
+    const exactAssignment = ["available", "maintenance"].includes(args.lifecycleStatus)
+      ? await findActiveResourceAssignment(ctx, {
+        zoneId: String(resource.zoneId),
+        resourceId: resource._id,
+      })
+      : null;
+    const branchAssignment = args.lifecycleStatus === "maintenance"
+      ? await findActiveBranchAssignment(ctx, {
+        zoneId: String(resource.zoneId),
+        branchId: resource.branchId,
+        primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+      })
+      : null;
+    if (exactAssignment || branchAssignment) {
+      throw new Error("This resource status cannot be changed while it has an active booking or venue offer.");
+    }
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
       updatedAt: Date.now(),
+    });
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: resource.zoneId,
+      branchId: resource.branchId,
     });
     return true;
   },
@@ -951,8 +1151,24 @@ export const deleteResource = mutation({
   handler: async (ctx, args) => {
     const resource = await ctx.db.get(args.resourceId);
     if (!resource) throw new Error("Resource not found");
-    await requireKycOwnedZone(ctx, resource.zoneId);
+    const { zone } = await requireKycOwnedZone(ctx, resource.zoneId);
+    const exactAssignment = await findActiveResourceAssignment(ctx, {
+      zoneId: String(resource.zoneId),
+      resourceId: resource._id,
+    });
+    const branchAssignment = await findActiveBranchAssignment(ctx, {
+      zoneId: String(resource.zoneId),
+      branchId: resource.branchId,
+      primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+    });
+    if (exactAssignment || branchAssignment) {
+      throw new Error("This resource cannot be deleted while it has an active booking or venue offer.");
+    }
     await ctx.db.delete(args.resourceId);
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: resource.zoneId,
+      branchId: resource.branchId,
+    });
     return true;
   },
 });

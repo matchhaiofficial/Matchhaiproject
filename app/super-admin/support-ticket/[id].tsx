@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
@@ -13,6 +13,7 @@ import {
   processAccountDeletion,
   replyToSupportTicketUser,
   resolveSupportTicket,
+  subscribeSupportTicketById,
   type SuperAdminSupportTicket,
   type SuperAdminSupportTicketStatus,
   updateSupportTicketStatus,
@@ -59,7 +60,14 @@ export default function SuperAdminSupportTicketDetail() {
   const params = useLocalSearchParams<{ id?: string }>();
   const ticketId = String(params.id || "");
   const { showToast } = useToast();
-  const [ticket, setTicket] = useState<SuperAdminSupportTicket | null>(null);
+  const [ticketState, setTicketState] = useState<{
+    ticketId: string;
+    value: SuperAdminSupportTicket | null;
+  }>({ ticketId, value: null });
+  const ticketStateRef = useRef(ticketState);
+  const activeTicketIdRef = useRef(ticketId);
+  activeTicketIdRef.current = ticketId;
+  const ticket = ticketState.ticketId === ticketId ? ticketState.value : null;
   const [loading, setLoading] = useState(true);
   const [busyStatus, setBusyStatus] = useState<SuperAdminSupportTicketStatus | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -67,27 +75,81 @@ export default function SuperAdminSupportTicketDetail() {
   const [noteText, setNoteText] = useState("");
   const [resolutionText, setResolutionText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [liveUpdateWarning, setLiveUpdateWarning] = useState<string | null>(null);
+
+  const setTicketForId = (requestedTicketId: string, value: SuperAdminSupportTicket | null) => {
+    if (activeTicketIdRef.current !== requestedTicketId) return;
+    const nextState = { ticketId: requestedTicketId, value };
+    ticketStateRef.current = nextState;
+    setTicketState(nextState);
+  };
 
   const loadTicket = async () => {
-    if (!ticketId) {
+    const requestedTicketId = ticketId;
+    if (!requestedTicketId) {
       setError("Support ticket not found.");
       setLoading(false);
       return;
     }
 
-    setLoading(true);
-    const result = await getSupportTicketById(ticketId);
-    if (result.ok) {
-      setTicket(result.data);
-      setError(result.data ? null : "Support ticket not found.");
-    } else {
-      setError(result.message);
+    const hadCachedTicket = ticketStateRef.current.ticketId === requestedTicketId
+      && Boolean(ticketStateRef.current.value);
+    if (!hadCachedTicket) setLoading(true);
+
+    try {
+      const result = await getSupportTicketById(requestedTicketId);
+      if (activeTicketIdRef.current !== requestedTicketId) return;
+
+      if (result.ok) {
+        setTicketForId(requestedTicketId, result.data);
+        setError(result.data ? null : "Support ticket not found.");
+        if (result.data) setLiveUpdateWarning(null);
+      } else if (
+        ticketStateRef.current.ticketId === requestedTicketId
+        && ticketStateRef.current.value
+      ) {
+        setLiveUpdateWarning(`${result.message} Saved ticket data remains visible.`);
+      } else {
+        setError(result.message);
+      }
+    } catch {
+      if (activeTicketIdRef.current !== requestedTicketId) return;
+      const message = "Support ticket could not be refreshed.";
+      if (
+        ticketStateRef.current.ticketId === requestedTicketId
+        && ticketStateRef.current.value
+      ) {
+        setLiveUpdateWarning(`${message} Saved ticket data remains visible.`);
+      } else {
+        setError(message);
+      }
+    } finally {
+      if (activeTicketIdRef.current === requestedTicketId && !hadCachedTicket) {
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   useEffect(() => {
     void loadTicket();
+  }, [ticketId]);
+
+  useEffect(() => {
+    if (!ticketId) return;
+    return subscribeSupportTicketById(
+      ticketId,
+      (nextTicket) => {
+        if (activeTicketIdRef.current !== ticketId) return;
+        setTicketForId(ticketId, nextTicket);
+        setError(nextTicket ? null : "Support ticket not found.");
+        setLiveUpdateWarning(null);
+        setLoading(false);
+      },
+      () => {
+        if (activeTicketIdRef.current !== ticketId) return;
+        setLiveUpdateWarning("Live updates are temporarily unavailable. Saved ticket data remains visible.");
+      },
+    );
   }, [ticketId]);
 
   const updateStatus = async (status: SuperAdminSupportTicketStatus) => {
@@ -173,7 +235,7 @@ export default function SuperAdminSupportTicketDetail() {
             const result = await processAccountDeletion(ticket.id);
             setBusyAction(null);
             if (result.ok) {
-              showToast({ type: "success", title: "Account deleted", message: "User data anonymized and account suspended." });
+              showToast({ type: "success", title: "Deletion scheduled", message: result.message || "The ticket will resolve after anonymization completes." });
               await loadTicket();
             } else {
               showToast({ type: "error", title: "Deletion failed", message: result.message });
@@ -193,7 +255,7 @@ export default function SuperAdminSupportTicketDetail() {
     <Screen style={styles.screen} scroll={false} keyboardAvoiding>
       <AppHeader title="Support Ticket" onBack={() => router.back()} inlineTitle />
 
-      {loading ? (
+      {loading || ticketState.ticketId !== ticketId ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : error || !ticket ? (
         <View style={styles.emptyWrap}>
@@ -201,6 +263,18 @@ export default function SuperAdminSupportTicketDetail() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {liveUpdateWarning ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Refresh support ticket"
+              onPress={() => {
+                setLiveUpdateWarning(null);
+                void loadTicket();
+              }}
+            >
+              <Text style={styles.liveUpdateWarning}>{liveUpdateWarning} Tap to refresh.</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.card}>
             <View style={styles.rowBetween}>
               <View style={styles.titleWrap}>
@@ -224,6 +298,9 @@ export default function SuperAdminSupportTicketDetail() {
             {ticket.lastAdminResponseAt ? <AdminInfoLine label="Last admin reply" value={formatDate(ticket.lastAdminResponseAt)} /> : null}
             {ticket.lastUserResponseAt ? <AdminInfoLine label="Last user response" value={formatDate(ticket.lastUserResponseAt)} /> : null}
             {ticket.resolutionSummary ? <AdminInfoLine label="Resolution" value={ticket.resolutionSummary} /> : null}
+            {ticket.accountDeletionJob ? <AdminInfoLine label="Deletion status" value={formatValue(ticket.accountDeletionJob.status)} /> : null}
+            {ticket.accountDeletionJob ? <AdminInfoLine label="Deletion stage" value={formatValue(ticket.accountDeletionJob.stage)} /> : null}
+            {ticket.accountDeletionJob?.error ? <AdminInfoLine label="Deletion issue" value={ticket.accountDeletionJob.error} /> : null}
             <AdminInfoLine label="Created" value={formatDate(ticket.createdAt)} />
             <AdminInfoLine label="Updated" value={formatDate(ticket.updatedAt)} />
           </View>
@@ -361,14 +438,14 @@ export default function SuperAdminSupportTicketDetail() {
               <View style={styles.inputGroup}>
                 <Text style={[styles.contextLabel, { color: COLORS.error }]}>Account Deletion</Text>
                 <Text style={styles.helperText}>
-                  Permanently anonymizes the user's name, photo, and phone number, and suspends their account. Wallet, payment, and KYC records are retained for legal compliance. This cannot be undone.
+                  Anonymizes the user's profile and linked identity fields, removes active access, and revokes sessions. Financial, KYC, and historical message content are retained. Safety blockers are shown here and can be retried after resolution.
                 </Text>
                 <Pressable
                   style={[styles.dangerButton, (busyAction !== null || busyStatus !== null) && styles.disabledButton]}
                   onPress={processDeletion}
                   disabled={busyAction !== null || busyStatus !== null}
                 >
-                  {busyAction === "delete" ? <ActivityIndicator color="#fff" /> : <Text style={styles.dangerButtonText}>Process Account Deletion</Text>}
+                  {busyAction === "delete" ? <ActivityIndicator color="#fff" /> : <Text style={styles.dangerButtonText}>{ticket.accountDeletionJob?.status === "blocked" || ticket.accountDeletionJob?.status === "failed" ? "Retry Account Deletion" : "Process Account Deletion"}</Text>}
                 </Pressable>
               </View>
             ) : null}
@@ -413,6 +490,7 @@ const styles = StyleSheet.create({
   statusText: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 11 },
   sectionTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
   helperText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, lineHeight: 20 },
+  liveUpdateWarning: { color: COLORS.warning, fontFamily: FONTS.interMedium, fontSize: 12, lineHeight: 18 },
   messageRow: { gap: 4, paddingVertical: SPACING.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.cardBorder },
   messageRole: { color: COLORS.accent, fontFamily: FONTS.interSemiBold, fontSize: 12 },
   messageText: { color: COLORS.text, fontFamily: FONTS.martelRegular, fontSize: 14, lineHeight: 22 },

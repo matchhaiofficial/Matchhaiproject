@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireCurrentUser } from "./authz";
+import { parseKarachiDateTimeMillis } from "./karachiDateTime";
 
 function normalizeGameKey(value?: string | null) {
   const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
@@ -73,9 +74,7 @@ function getRoomStartAt(room: any) {
   const date = String(room?.scheduledDate || "").trim();
   const time = String(room?.scheduledTime || "").trim();
   if (!date) return null;
-  const parsed = new Date(`${date}T${time || "00:00"}`);
-  const timeMs = parsed.getTime();
-  return Number.isNaN(timeMs) ? null : timeMs;
+  return parseKarachiDateTimeMillis(date, time || "00:00");
 }
 
 function isRoomExpired(room: any) {
