@@ -16,11 +16,16 @@ import { isMaintenanceJobEnabled } from "./runtimeEnv";
 import { requireCurrentUser } from "./authz";
 import { assertNewGameEntityCreationAllowed } from "./gameAvailabilityPolicy";
 import { interruptAccountDeletionForIncomingFunds } from "./wallet";
+import { assertBranchOperatingHoursAvailable } from "./branchOperatingHours";
+import { assertZoneResourceCapacityAvailable } from "./bookingConflicts";
+import { assertUsersCanShareMatchroom } from "./userBlockPolicy";
 
 const venueChoiceValidator = v.object({
   zoneId: v.string(),
   venueName: v.string(),
   areaLabel: v.optional(v.union(v.string(), v.null())),
+  branchId: v.optional(v.string()),
+  branchName: v.optional(v.string()),
 });
 
 const challengeStatuses = new Set([
@@ -99,6 +104,56 @@ export function getChallengeSeriesHours(gameKey: string, seriesType?: string | n
   return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;
 }
 
+function getChallengeDurationMinutes(gameKey: string, seriesType?: string | null) {
+  const game = String(gameKey || "").toLowerCase();
+  const series = String(seriesType || "BO1").toUpperCase();
+  if (["cs2", "cs16", "valorant"].includes(game)) return series === "BO5" ? 300 : series === "BO3" ? 180 : 60;
+  if (["fc25", "fc26"].includes(game)) return series === "BO10" ? 180 : series === "BO5" ? 120 : series === "BO3" ? 60 : 30;
+  if (game === "tekken8") return series === "BO40" ? 180 : series === "BO20" ? 120 : 60;
+  if (game === "indoor_cricket") return 120;
+  return series === "BO10" ? 180 : series === "BO5" ? 120 : 60;
+}
+
+function getChallengeResourceContext(rateKey?: string | null) {
+  const [rawAssetType, tierOrSurface] = String(rateKey || "").toLowerCase().split(":");
+  const assetType = rawAssetType === "cricket" ? "indoor_cricket" : rawAssetType;
+  const tier = ["pc", "console"].includes(assetType) ? tierOrSurface : undefined;
+  const surface = !["pc", "console"].includes(assetType) ? tierOrSurface : undefined;
+  return { assetType, tier, surface };
+}
+
+async function assertChallengeVenueAvailable(ctx: any, input: {
+  zone: any;
+  branchId?: string | null;
+  game: string;
+  rateKey?: string | null;
+  scheduledAt?: number | null;
+  seriesType?: string | null;
+}) {
+  const scheduledAt = Number(input.scheduledAt || 0);
+  if (!Number.isFinite(scheduledAt) || scheduledAt <= 0) throw new Error("Invalid challenge date/time.");
+  const durationMinutes = getChallengeDurationMinutes(input.game, input.seriesType);
+  await assertBranchOperatingHoursAvailable(ctx, {
+    zoneId: input.zone._id,
+    zone: input.zone,
+    branchId: input.branchId,
+    scheduledStartAt: scheduledAt,
+    durationMinutes,
+  });
+  const resource = getChallengeResourceContext(input.rateKey);
+  await assertZoneResourceCapacityAvailable(ctx, {
+    zoneId: String(input.zone._id),
+    branchId: input.branchId,
+    game: input.game,
+    selectedZoneRateKey: input.rateKey,
+    requestedResourceAssetType: resource.assetType,
+    requestedResourceTier: resource.tier,
+    requestedResourceSurface: resource.surface,
+    scheduledStartAt: scheduledAt,
+    durationMinutes,
+  });
+}
+
 function positivePrice(value: unknown) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
@@ -112,12 +167,24 @@ function preferredConsolePrice(tier: any, maxPlayers: number) {
     || positivePrice(tier?.price);
 }
 
-function getAuthoritativeZoneRates(zone: any, gameKey: string, maxPlayers: number) {
+function resolveZoneBranch(zone: any, branchId?: string | null) {
+  const branches = [
+    ...(Array.isArray(zone?.branches) ? zone.branches : []),
+    ...(zone?.primaryBranch ? [zone.primaryBranch] : []),
+  ];
+  const requested = String(branchId || "").trim();
+  return requested
+    ? branches.find((branch: any, index: number) => String(branch?.id || branch?.branchId || `branch_${index + 1}`) === requested)
+    : branches[0];
+}
+
+function getAuthoritativeZoneRates(zone: any, gameKey: string, maxPlayers: number, branchId?: string | null) {
   const game = String(gameKey || "").toLowerCase();
-  const sources = [
-    ...(Array.isArray(zone?.branches) ? zone.branches.map((branch: any) => branch?.pricing) : []),
-    zone?.pricing,
-  ].filter(Boolean);
+  const branches = Array.isArray(zone?.branches) ? zone.branches : [];
+  const selectedBranch = branchId
+    ? branches.find((branch: any, index: number) => String(branch?.id || branch?.branchId || `branch_${index + 1}`) === String(branchId))
+    : (branches[0] || zone?.primaryBranch);
+  const sources = [selectedBranch?.pricing, zone?.pricing].filter(Boolean);
   const rates = new Map<string, { label: string; price: number }>();
   const add = (key: string, label: string, value: unknown) => {
     const price = positivePrice(value);
@@ -193,6 +260,33 @@ async function validateTeamLineup(
     }
   }
   return lineup;
+}
+
+async function getTeamParticipantIds(ctx: any, team: any): Promise<Id<"users">[]> {
+  const members = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_teamId", (q: any) => q.eq("teamId", team._id))
+    .take(100);
+  const ids = [team.captainUid, ...members.map((member: any) => member.odxerId)]
+    .filter(Boolean)
+    .map((id: any) => String(id));
+  return Array.from(new Set(ids)).map((id) => id as Id<"users">);
+}
+
+async function assertTeamParticipantsCanShareMatchroom(ctx: any, ...teams: any[]) {
+  const rosters = await Promise.all(teams.map((team) => getTeamParticipantIds(ctx, team)));
+  for (let left = 0; left < rosters.length; left += 1) {
+    const leftIds = new Set(rosters[left].map(String));
+    for (let right = left + 1; right < rosters.length; right += 1) {
+      if (rosters[right].some((id) => leftIds.has(String(id)))) {
+        throw new Error("Opposing teams cannot share the same player.");
+      }
+    }
+  }
+  const participantIds = Array.from(new Set(rosters.flat().map(String))).map((id) => id as Id<"users">);
+  for (let index = 0; index < participantIds.length; index += 1) {
+    await assertUsersCanShareMatchroom(ctx, participantIds[index], participantIds.slice(index + 1));
+  }
 }
 
 async function requireChallenge(ctx: any, challengeId: Id<"teamChallenges">) {
@@ -500,8 +594,95 @@ export const create = mutation({
     game: v.string(),
     message: v.optional(v.string()),
   },
-  handler: async () => {
-    throw new Error("Deprecated Team Challenge lifecycle endpoint is disabled.");
+  handler: async (ctx, args) => {
+    const challenger = await ctx.db.get(args.challengerTeamId);
+    const opponent = await ctx.db.get(args.opponentTeamId);
+    if (!challenger || challenger.deletedAt || challenger.status === "deleted") {
+      throw new Error("Challenging team not found");
+    }
+    if (!opponent || opponent.deletedAt || opponent.status === "deleted") {
+      throw new Error("Opponent team not found");
+    }
+    if (String(challenger._id) === String(opponent._id)) {
+      throw new Error("Choose another team to challenge");
+    }
+
+    const actorId = await getAuthenticatedUserId(ctx, challenger.captainUid);
+    if (String(challenger.captainUid) !== String(actorId)) {
+      throw new Error("Only the challenging captain can create this challenge");
+    }
+    assertNewGameEntityCreationAllowed(challenger.game);
+    if (
+      String(challenger.game || "").toLowerCase() !== String(opponent.game || "").toLowerCase()
+      || String(args.game || "").toLowerCase() !== String(challenger.game || "").toLowerCase()
+    ) {
+      throw new Error("Both teams and the challenge must use the same game");
+    }
+    await assertTeamParticipantsCanShareMatchroom(ctx, challenger, opponent);
+
+    const existing = await ctx.db
+      .query("teamChallenges")
+      .withIndex("by_challengerTeamId", (q) => q.eq("challengerTeamId", args.challengerTeamId))
+      .order("desc")
+      .take(50);
+    if (existing.some((row: any) =>
+      String(row.opponentTeamId) === String(args.opponentTeamId)
+      && ["pending", "accepted", "venue_proposed", "venue_confirmed", "admin_pending"].includes(String(row.status))
+    )) {
+      throw new Error("An active challenge already exists between these teams");
+    }
+
+    // Backwards-compatible free/social challenge. The legacy argument contract
+    // has no schedule, venue, rate, or lineup, so it must never enter the paid
+    // booking flow. Current clients use createFull for scheduled bookings.
+    const now = Date.now();
+    const challengeDocument = {
+      challengerTeamId: challenger._id,
+      challengerTeamName: challenger.name,
+      opponentTeamId: opponent._id,
+      opponentTeamName: opponent.name,
+      game: challenger.game,
+      gameKey: challenger.game,
+      status: "pending" as const,
+      captainAUid: challenger.captainUid,
+      captainAName: challenger.captainUsername || "Captain",
+      captainBUid: opponent.captainUid,
+      captainBName: opponent.captainUsername || "Captain",
+      message: args.message?.trim() || undefined,
+      maxPlayers: 0,
+      pricePerPlayer: 0,
+      paymentMode: "free" as const,
+      teamAPaymentStatus: "unpaid" as const,
+      teamBPaymentStatus: "unpaid" as const,
+      commonAreas: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const challengeId = await ctx.db.insert(
+      "teamChallenges",
+      withTeamChallengeLifecycleDueAt(null, challengeDocument, now),
+    );
+    const inserted = await ctx.db.get(challengeId);
+    if (inserted) await scheduleNextTeamChallengeLifecycle(ctx, inserted);
+
+    await createChallengeNotification(ctx, {
+      type: "team.challenge_received",
+      toUid: opponent.captainUid,
+      fromUid: challenger.captainUid,
+      fromUsername: challenger.captainUsername || "Captain",
+      challengeId,
+      dedupeKey: `team.challenge_received:${String(challengeId)}:${String(opponent.captainUid)}`,
+      dedupePolicy: "upsert_active",
+      title: "New team challenge",
+      body: `${challenger.name} challenged ${opponent.name}`,
+      extraData: {
+        challengerTeamId: String(challenger._id),
+        opponentTeamId: String(opponent._id),
+        gameKey: challenger.game,
+        legacyFreeChallenge: true,
+      },
+    });
+    return challengeId;
   },
 });
 
@@ -536,21 +717,36 @@ export const respond = mutation({
       throw new Error("Only the challenged captain can accept at this stage");
     }
 
+    const isLegacyFreeChallenge =
+      challenge.paymentMode === "free"
+      && !challenge.scheduledAt
+      && !challenge.zoneRateKey
+      && Number(challenge.pricePerPlayer || 0) === 0;
     let acceptedLineupB = challenge.lineupB;
     if (args.accept) {
       const opponent: any = await ctx.db.get(challenge.opponentTeamId);
       if (!opponent) throw new Error("Opponent team not found");
-      const expectedSize = Number(opponent.mainRosterSize || 0);
-      if (!Number.isInteger(expectedSize) || expectedSize <= 0) {
-        throw new Error("Opponent team active-lineup size is invalid");
+      if (isLegacyFreeChallenge) {
+        const challenger = await ctx.db.get(challenge.challengerTeamId);
+        if (!challenger) throw new Error("Challenging team not found");
+        await assertTeamParticipantsCanShareMatchroom(ctx, challenger, opponent);
+      } else {
+        const expectedSize = Number(opponent.mainRosterSize || 0);
+        if (!Number.isInteger(expectedSize) || expectedSize <= 0) {
+          throw new Error("Opponent team active-lineup size is invalid");
+        }
+        acceptedLineupB = await validateTeamLineup(
+          ctx,
+          opponent,
+          args.lineupB,
+          expectedSize,
+          "Team B lineup",
+        );
+        const fullLineup = [...(challenge.lineupA || []), ...acceptedLineupB].map((uid) => uid as Id<"users">);
+        for (let index = 0; index < fullLineup.length; index += 1) {
+          await assertUsersCanShareMatchroom(ctx, fullLineup[index], fullLineup.slice(index + 1));
+        }
       }
-      acceptedLineupB = await validateTeamLineup(
-        ctx,
-        opponent,
-        args.lineupB,
-        expectedSize,
-        "Team B lineup",
-      );
     }
 
     const nextStatus = args.accept ? "accepted" : "rejected";
@@ -605,7 +801,7 @@ export const respond = mutation({
       });
     }
 
-    if (args.accept) {
+    if (args.accept && !isLegacyFreeChallenge) {
       const freshChallenge = await ctx.db.get(args.challengeId);
       await notifyChallengePaymentRequired(ctx, freshChallenge || challenge, "teamB", "challenge_accepted");
     }
@@ -655,6 +851,8 @@ export const proposeVenue = mutation({
     zoneId: v.id("zones"),
     zoneName: v.optional(v.string()),
     areaLabel: v.optional(v.union(v.string(), v.null())),
+    branchId: v.optional(v.string()),
+    branchName: v.optional(v.string()),
     actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
@@ -672,10 +870,12 @@ export const proposeVenue = mutation({
     if (!zone || zone.status !== "active") {
       throw new Error("The selected venue is unavailable");
     }
+    const selectedBranch = resolveZoneBranch(zone, args.branchId);
     const rates = getAuthoritativeZoneRates(
       zone,
       challenge.gameKey || challenge.game,
       Number(challenge.maxPlayers || 0),
+      args.branchId,
     );
     const selectedRate = challenge.zoneRateKey ? rates.get(challenge.zoneRateKey) : null;
     if (!selectedRate) {
@@ -684,6 +884,14 @@ export const proposeVenue = mutation({
     const authoritativePricePerPlayer = Math.ceil(
       selectedRate.price * getChallengeSeriesHours(challenge.gameKey || challenge.game, challenge.seriesType),
     );
+    await assertChallengeVenueAvailable(ctx, {
+      zone,
+      branchId: args.branchId,
+      game: challenge.gameKey || challenge.game,
+      rateKey: challenge.zoneRateKey,
+      scheduledAt: challenge.scheduledAt,
+      seriesType: challenge.seriesType,
+    });
     if (
       Number(challenge.pricePerPlayer || 0) > 0
       && authoritativePricePerPlayer !== Number(challenge.pricePerPlayer)
@@ -693,7 +901,9 @@ export const proposeVenue = mutation({
     const venue = {
       zoneId: String(args.zoneId),
       venueName: zone.venueBrandName || zone.name,
-      areaLabel: zone.primaryBranch?.areaLabel || null,
+      areaLabel: selectedBranch?.areaLabel || null,
+      branchId: args.branchId,
+      branchName: selectedBranch?.branchDisplayName || selectedBranch?.name || args.branchName,
     };
 
     const isCaptainAActor = challenge.captainAUid === userId;
@@ -705,7 +915,8 @@ export const proposeVenue = mutation({
     const bothConfirmed =
       captainAChoice &&
       captainBChoice &&
-      captainAChoice.zoneId === captainBChoice.zoneId;
+      captainAChoice.zoneId === captainBChoice.zoneId &&
+      String(captainAChoice.branchId || "") === String(captainBChoice.branchId || "");
 
     await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
       status: bothConfirmed ? "venue_confirmed" : "venue_proposed",
@@ -766,6 +977,8 @@ export const suggestAlternativeVenue = mutation({
   args: {
     challengeId: v.id("teamChallenges"),
     zoneId: v.id("zones"),
+    branchId: v.optional(v.string()),
+    branchName: v.optional(v.string()),
     actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
@@ -785,10 +998,12 @@ export const suggestAlternativeVenue = mutation({
     if (!zone || zone.status !== "active") {
       throw new Error("The selected venue is unavailable");
     }
+    const selectedBranch = resolveZoneBranch(zone, args.branchId);
     const rates = getAuthoritativeZoneRates(
       zone,
       challenge.gameKey || challenge.game,
       Number(challenge.maxPlayers || 0),
+      args.branchId,
     );
     const selectedRate = challenge.zoneRateKey ? rates.get(challenge.zoneRateKey) : null;
     if (!selectedRate) {
@@ -800,10 +1015,20 @@ export const suggestAlternativeVenue = mutation({
     if (authoritativePricePerPlayer !== Number(challenge.pricePerPlayer || 0)) {
       throw new Error("This venue's price differs from the agreed challenge price. Create a new challenge for this venue.");
     }
+    await assertChallengeVenueAvailable(ctx, {
+      zone,
+      branchId: args.branchId,
+      game: challenge.gameKey || challenge.game,
+      rateKey: challenge.zoneRateKey,
+      scheduledAt: challenge.scheduledAt,
+      seriesType: challenge.seriesType,
+    });
     const venue = {
       zoneId: String(zone._id),
       venueName: zone.venueBrandName || zone.name,
-      areaLabel: zone.primaryBranch?.areaLabel || null,
+      areaLabel: selectedBranch?.areaLabel || null,
+      branchId: args.branchId,
+      branchName: selectedBranch?.branchDisplayName || selectedBranch?.name || args.branchName,
     };
     await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
       status: "venue_proposed",
@@ -838,6 +1063,8 @@ export const confirmVenue = mutation({
       !captainAChoice?.zoneId
       || captainAChoice.zoneId !== captainBChoice?.zoneId
       || captainAChoice.zoneId !== challenge.confirmedVenue.zoneId
+      || String(captainAChoice.branchId || "") !== String(captainBChoice?.branchId || "")
+      || String(captainAChoice.branchId || "") !== String(challenge.confirmedVenue.branchId || "")
     ) {
       throw new Error("The captains' venue choices no longer match");
     }
@@ -845,6 +1072,14 @@ export const confirmVenue = mutation({
     if (!zone || zone.status !== "active") {
       throw new Error("The confirmed venue is no longer available");
     }
+    await assertChallengeVenueAvailable(ctx, {
+      zone,
+      branchId: challenge.confirmedVenue.branchId,
+      game: challenge.gameKey || challenge.game,
+      rateKey: challenge.zoneRateKey,
+      scheduledAt: challenge.scheduledAt,
+      seriesType: challenge.seriesType,
+    });
 
     await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
       status: "venue_confirmed",
@@ -1001,7 +1236,11 @@ export const createFull = mutation({
     if (!zone || zone.status !== "active") {
       throw new Error("The selected venue is unavailable");
     }
-    const rates = getAuthoritativeZoneRates(zone, args.gameKey, authoritativeMaxPlayers);
+    const scheduledAt = typeof args.scheduledAt === "number" ? args.scheduledAt : undefined;
+    validateTeamChallengeScheduledAt(scheduledAt, Date.now());
+    const branchId = args.proposedVenueByCaptainA.branchId;
+    const selectedBranch = resolveZoneBranch(zone, branchId);
+    const rates = getAuthoritativeZoneRates(zone, args.gameKey, authoritativeMaxPlayers, branchId);
     const selectedRate = args.zoneRateKey ? rates.get(args.zoneRateKey) : null;
     if (!selectedRate) {
       throw new Error("The selected venue rate is unavailable");
@@ -1012,6 +1251,14 @@ export const createFull = mutation({
     if (!Number.isFinite(authoritativePricePerPlayer) || authoritativePricePerPlayer <= 0) {
       throw new Error("The selected venue does not have valid pricing for this challenge");
     }
+    await assertChallengeVenueAvailable(ctx, {
+      zone,
+      branchId,
+      game: args.gameKey,
+      rateKey: args.zoneRateKey,
+      scheduledAt,
+      seriesType: args.seriesType,
+    });
 
     // Never trust client-asserted payment state. The canonical wallet/provider
     // flow records captain holds after challenge creation.
@@ -1019,8 +1266,6 @@ export const createFull = mutation({
     const safeTeamBPaymentStatus = "unpaid" as const;
 
     const now = Date.now();
-    const scheduledAt = typeof args.scheduledAt === "number" ? args.scheduledAt : undefined;
-    validateTeamChallengeScheduledAt(scheduledAt, now);
 
     // Prevent spamming the same opponent team with duplicate pending challenges until the proposed time passes.
     if (args.status === "pending" && scheduledAt && scheduledAt > now) {
@@ -1044,7 +1289,9 @@ export const createFull = mutation({
     const canonicalCaptainAVenue = {
       zoneId: String(zone._id),
       venueName: zone.venueBrandName || zone.name,
-      areaLabel: zone.primaryBranch?.areaLabel || null,
+      areaLabel: selectedBranch?.areaLabel || null,
+      branchId,
+      branchName: selectedBranch?.branchDisplayName || selectedBranch?.name || args.proposedVenueByCaptainA.branchName,
     };
     const challengeDocument = {
       challengerTeamId: args.challengerTeamId,
@@ -1625,9 +1872,39 @@ async function maybeFinalizeChallengeBooking(ctx: any, challenge: any) {
     }
     return;
   }
-  await ctx.runMutation(internal.matchrooms.createTeamChallengeMatchroom, {
+  const result: any = await ctx.runMutation(internal.matchrooms.createTeamChallengeMatchroom, {
     challengeId: challenge._id,
   });
+  if (result?.ok !== false || !["zone_unavailable", "venue_time_unavailable"].includes(String(result?.reason))) {
+    return;
+  }
+
+  const now = Date.now();
+  await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+    status: "venue_proposed",
+    zoneId: undefined,
+    zoneName: undefined,
+    confirmedVenue: undefined,
+    proposedVenueByCaptainA: undefined,
+    alternativeVenueByCaptainB: undefined,
+    captainVenueChoices: {},
+    updatedAt: now,
+  }, now);
+  for (const captainUid of [challenge.captainAUid, challenge.captainBUid]) {
+    if (!captainUid) continue;
+    await createChallengeNotification(ctx, {
+      type: "team.challenge_updated",
+      toUid: captainUid,
+      fromUid: captainUid,
+      fromUsername: "MatchHai",
+      challengeId: challenge._id,
+      dedupeKey: `team.challenge_slot_unavailable:${String(challenge._id)}:${String(captainUid)}:${String(challenge.confirmedVenue.zoneId)}`,
+      dedupePolicy: "versioned_new",
+      title: "Choose another venue or time",
+      body: result?.message || "The agreed venue can no longer host this time slot. Your payment remains held while both captains choose again.",
+      updateKind: "venue_unavailable",
+    });
+  }
 }
 
 // Public: captain pays their team's full amount from MatchHai wallet (escrow hold).

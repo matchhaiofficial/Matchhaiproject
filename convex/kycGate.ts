@@ -14,8 +14,7 @@ export function isKycVerificationBypassEnabled(): boolean {
   const environment = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
   const isExplicitDevelopment = ["development", "dev", "local", "test"].includes(environment);
   return isExplicitDevelopment && (
-    String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1" ||
-    String(process.env.SKIP_PHONE_OTP || "").trim() === "1"
+    String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1"
   );
 }
 
@@ -26,12 +25,7 @@ export function isPhoneOtpBypassEnabled(): boolean {
 }
 
 export function isKycAccessAllowed(status?: string | null): boolean {
-  return (
-    status === "verified" ||
-    status === "pending" ||
-    status === "in_progress" ||
-    status === "in_review"
-  );
+  return status === "verified";
 }
 
 export function assertKycAccessAllowed(

@@ -26,6 +26,8 @@ export interface TeamChallengeVenueChoice {
     zoneId: string;
     venueName: string;
     areaLabel?: string | null;
+    branchId?: string;
+    branchName?: string;
 }
 
 export interface TeamMatchChallenge {
@@ -679,6 +681,8 @@ export const proposeTeamChallengeVenue = async (input: {
     zoneId: string;
     venueName: string;
     areaLabel?: string | null;
+    branchId?: string;
+    branchName?: string;
 }): Promise<ServerResponse> => {
     try {
         const me = await getCurrentUserInfo();
@@ -701,6 +705,8 @@ export const proposeTeamChallengeVenue = async (input: {
             zoneId: input.zoneId as Id<"zones">,
             zoneName: input.venueName,
             areaLabel: input.areaLabel || null,
+            branchId: input.branchId,
+            branchName: input.branchName,
             actorUid: me.convexId,
         });
 
@@ -769,6 +775,7 @@ export const proposeTeamChallengeVenue = async (input: {
                 playerUids: activePlayerUids,
                 locationMode: "zone",
                 zoneId: result.confirmedVenue.zoneId,
+                branchId: result.confirmedVenue.branchId,
                 location: result.confirmedVenue.venueName,
                 scheduledDate: latest.scheduledDate,
                 scheduledTime: latest.scheduledTime,

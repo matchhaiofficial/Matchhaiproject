@@ -28,11 +28,14 @@ describe("notification P0 regression guards", () => {
     expect(source).toContain('withIndex("by_email"');
   });
 
-  it("legacy Team Challenge create and complete endpoints fail closed", () => {
+  it("keeps legacy Team Challenge endpoints behind canonical security and result workflows", () => {
     const source = read("convex/teamChallenges.ts");
 
-    expect(source).toContain("Deprecated Team Challenge lifecycle endpoint is disabled.");
-    expect(source).not.toContain('ctx.db.insert("teamChallenges", {\n      challengerTeamId: args.challengerTeamId');
+    expect(source).toContain("Backwards-compatible free/social challenge");
+    expect(source).toContain("const actorId = await getAuthenticatedUserId(ctx, challenger.captainUid)");
+    expect(source).toContain("await assertTeamParticipantsCanShareMatchroom(ctx, challenger, opponent)");
+    expect(source).toContain('paymentMode: "free" as const');
+    expect(source).toContain("await ctx.runMutation(api.matchrooms.submitCaptainReport");
     expect(source).not.toContain('status: "completed",\n      result: {\n        winnerId: args.winnerId');
   });
 });

@@ -52,6 +52,7 @@ export default function AdminRegisterStep4() {
       !step1.ownerFullName.trim() ||
       !step1.venueBrandName.trim() ||
       !step1.contactEmail.trim() ||
+      !step1.phoneVerified ||
       !step1.password
     ) {
       router.replace("/auth/zone-register");
@@ -129,13 +130,14 @@ export default function AdminRegisterStep4() {
       !step1.ownerFullName.trim() ||
       !step1.venueBrandName.trim() ||
       !step1.contactEmail.trim() ||
+      !step1.phoneVerified ||
       !step1.password ||
       branches.length === 0
     ) {
       showToast({
         type: "error",
         title: "Missing details",
-        message: "Some required zone details are missing. Please complete the previous steps.",
+        message: "Some required details or phone verification are missing. Please complete the previous steps.",
       });
       router.replace("/auth/zone-register");
       return;
@@ -199,7 +201,7 @@ export default function AdminRegisterStep4() {
           type: "success",
           title: "Zone account created",
           message:
-            "Your dashboard is ready. The venue stays in review until a super admin approves it.",
+            "Your zone was submitted. Complete Didit identity verification; zone tools remain locked until identity and venue reviews are approved.",
         });
         router.replace(APP_ROUTES.zoneHome as any);
       }, 650);

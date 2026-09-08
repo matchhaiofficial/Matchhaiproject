@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys } from "./chatIdentity";
 import { markUserPresent } from "./presence";
+import { assertKycAccessAllowed } from "./kycGate";
 
 type UserIdString = string;
 
@@ -39,7 +40,10 @@ type MatchroomAccessState =
   | { status: "unauthenticated" };
 
 async function getMatchroomActorUserId(ctx: any): Promise<Id<"users">> {
-  return await getStrictAuthenticatedUserId(ctx);
+  const userId = await getStrictAuthenticatedUserId(ctx);
+  const user = await ctx.db.get(userId);
+  assertKycAccessAllowed(user);
+  return userId;
 }
 
 async function getSenderProfile(ctx: any, userId: Id<"users">) {
@@ -285,6 +289,29 @@ export const getMatchroomAccess = query({
       participantUids: state.participantUids,
       userId: state.userId,
     };
+  },
+});
+
+export const getUnreadCountForMatchroom = query({
+  args: { matchroomId: v.id("matchrooms") },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const state = await getMatchroomAccessState(ctx, args.matchroomId);
+    if (state.status !== "ok") return 0;
+
+    const chatroom = await ctx.db
+      .query("chatrooms")
+      .withIndex("by_matchroomId", (q) => q.eq("matchroomId", args.matchroomId))
+      .unique();
+    if (!chatroom) return 0;
+
+    const membership = await ctx.db
+      .query("chatroomMembers")
+      .withIndex("by_chatroomId_and_userId", (q) =>
+        q.eq("chatroomId", chatroom._id).eq("userId", String(state.userId)),
+      )
+      .unique();
+    return Math.max(0, Number(membership?.unreadCount || 0));
   },
 });
 

@@ -315,6 +315,13 @@ async function ensureDemoPlayersForGame(ctx: any, args: {
 
     const existing = await findUserByEmail(ctx, email);
     if (existing) {
+      const currentWallet = Number(existing.walletBalance || 0);
+      if (currentWallet < 5000) {
+        await ctx.db.patch(existing._id, {
+          walletBalance: 5000,
+          updatedAt: Date.now(),
+        });
+      }
       created.push({ userId: existing._id, username: existing.username, email: existing.email });
       continue;
     }
@@ -348,7 +355,7 @@ async function ensureDemoPlayersForGame(ctx: any, args: {
       accountType: "player",
       isOnline: false,
       isVerified: true,
-      walletBalance: 0,
+      walletBalance: 5000,
       ...doesUserPlayGamePatch(game),
       createdAt: now,
       updatedAt: now,
@@ -609,5 +616,69 @@ export const seedExtraFc26CaptainTeam = mutation({
       team: { teamId: String(teamId), name: teamName, game, memberCount: fill.memberCount, maxMembers: fill.maxMembers },
       passwordHint: "Uses DEFAULT_DEMO_PASSWORD in convex/devTeamSeed.ts (do not share passwords in chat).",
     };
+  },
+});
+
+export const ensureDemoPlayerWalletMinimums = mutation({
+  args: { seedKey: v.string(), minimumBalance: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const minimumBalance = Math.max(0, Math.min(50_000, Math.floor(args.minimumBalance ?? 5000)));
+    const players = await ctx.db
+      .query("users")
+      .withIndex("by_accountType", (q) => q.eq("accountType", "player"))
+      .take(500);
+    let updated = 0;
+    for (const player of players) {
+      const isDemoPlayer = player.isDemo === true || String(player.email || "").endsWith(DEMO_DOMAIN);
+      if (!isDemoPlayer || Number(player.walletBalance || 0) >= minimumBalance) continue;
+      await ctx.db.patch(player._id, {
+        walletBalance: minimumBalance,
+        updatedAt: Date.now(),
+      });
+      updated += 1;
+    }
+    return { ok: true, scanned: players.length, updated, minimumBalance };
+  },
+});
+
+export const setDemoKycStatesForQa = mutation({
+  args: {
+    seedKey: v.string(),
+    accounts: v.array(v.object({
+      email: v.string(),
+      status: v.union(
+        v.literal("not_started"),
+        v.literal("pending"),
+        v.literal("in_progress"),
+        v.literal("in_review"),
+        v.literal("verified"),
+        v.literal("rejected"),
+        v.literal("expired"),
+      ),
+    })),
+  },
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const now = Date.now();
+    const results: Array<{ email: string; status: string; updated: boolean }> = [];
+    for (const requested of args.accounts.slice(0, 50)) {
+      const email = String(requested.email || "").trim().toLowerCase();
+      if (!email.endsWith(DEMO_DOMAIN)) {
+        throw new Error("Only @matchhai.demo accounts can be changed by this QA seed.");
+      }
+      const user = await findUserByEmail(ctx, email);
+      if (!user) {
+        results.push({ email, status: requested.status, updated: false });
+        continue;
+      }
+      await ctx.db.patch(user._id, {
+        kycVerificationStatus: requested.status,
+        kycVerifiedAt: requested.status === "verified" ? now : undefined,
+        updatedAt: now,
+      });
+      results.push({ email, status: requested.status, updated: true });
+    }
+    return { ok: true, results };
   },
 });

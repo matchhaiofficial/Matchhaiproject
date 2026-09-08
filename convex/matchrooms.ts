@@ -39,6 +39,7 @@ import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import {
   assertNoParticipantTimeConflict,
   assertZoneResourceCapacityAvailable,
+  getZoneRateOptionsAvailability,
   reconcileResourceLegacyAssignment,
 } from "./bookingConflicts";
 import {
@@ -52,6 +53,7 @@ import {
 } from "./maintenanceDue";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
 import { getKarachiDayStartMillis, parseKarachiDateTimeMillis } from "./karachiDateTime";
+import { assertUsersCanShareMatchroom } from "./userBlockPolicy";
 
 function getAuthoritativeMatchDurationMinutes(input: {
   game: string;
@@ -1025,6 +1027,29 @@ export async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .unique();
 }
 
+async function assertUserCanJoinRoom(ctx: any, userId: Id<"users">, room: any) {
+  const participants: Id<"users">[] = [];
+  for (const rawUid of getMatchroomPlayerUids(room)) {
+    const participant = await resolveUserByAnyId(ctx, rawUid);
+    if (participant && String(participant._id) !== String(userId)) {
+      participants.push(participant._id);
+    }
+  }
+  await assertUsersCanShareMatchroom(ctx, userId, participants);
+}
+
+async function assertRosterHasNoBlockedPair(ctx: any, rawUserIds: string[]) {
+  const users = (await Promise.all(rawUserIds.map((uid) => resolveUserByAnyId(ctx, uid))))
+    .filter(Boolean);
+  for (let index = 0; index < users.length; index += 1) {
+    await assertUsersCanShareMatchroom(
+      ctx,
+      users[index]._id,
+      users.slice(index + 1).map((user: any) => user._id),
+    );
+  }
+}
+
 async function requireVerifiedActor(ctx: any, expectedUid?: string) {
   const actor = await requireCurrentUser(ctx);
   const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
@@ -1038,6 +1063,9 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
 
   assertKycAccessAllowed(actor.user, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
+  if (expectedUid && !expectedUser) {
+    throw new Error("The requested account could not be verified");
+  }
   if (expectedUser && expectedUser._id !== actor.user._id) {
     throw new Error("You can only perform this action for your own account");
   }
@@ -2549,6 +2577,9 @@ export async function buildMatchroomRosterPatch(
   targetTeam?: string | null,
   requestedSlotId?: string | null,
 ) {
+  const requester = await resolveUserByAnyId(ctx, requesterUid);
+  if (!requester) throw new Error("Player profile not found.");
+  await assertUserCanJoinRoom(ctx, requester._id, room);
   const requesterSkill = await requireUserGameSkill(ctx, requesterUid, room.game);
   const now = Date.now();
   const playerRecord = {
@@ -3762,6 +3793,67 @@ export const checkCreateAvailability = query({
   },
 });
 
+const rateOptionAvailabilityValidator = v.object({
+  key: v.string(),
+  available: v.boolean(),
+  availableCount: v.number(),
+  requiredCount: v.number(),
+  message: v.string(),
+});
+
+export const checkRateOptionsAvailability = query({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.optional(v.string()),
+    game: v.string(),
+    scheduledDate: v.string(),
+    scheduledTime: v.string(),
+    durationMinutes: v.number(),
+    options: v.array(v.object({
+      key: v.string(),
+      assetType: v.string(),
+      tier: v.optional(v.string()),
+      surface: v.optional(v.string()),
+    })),
+  },
+  returns: v.array(rateOptionAvailabilityValidator),
+  handler: async (ctx, args) => {
+    await requireVerifiedActor(ctx);
+    const startAt = parseKarachiDateTimeMillis(args.scheduledDate, args.scheduledTime);
+    const invalid = (message: string) => args.options.map((option) => ({
+      key: option.key,
+      available: false,
+      availableCount: 0,
+      requiredCount: 0,
+      message,
+    }));
+    if (!startAt) return invalid("Choose a valid date and time.");
+    const scheduleValidation = validateMatchroomScheduleWindow(startAt, Date.now());
+    if (!scheduleValidation.ok) return invalid(scheduleValidation.message || "Choose a valid future date and time.");
+
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone || String(zone.status || "") !== "active") {
+      return invalid("This venue is not currently accepting bookings.");
+    }
+    const operatingHours = getBranchOperatingHoursAvailability({
+      zone,
+      branchId: args.branchId,
+      scheduledStartAt: startAt,
+      durationMinutes: args.durationMinutes,
+    });
+    if (!operatingHours.available) return invalid(operatingHours.message || "The selected branch is closed at that time.");
+
+    return await getZoneRateOptionsAvailability(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      scheduledStartAt: startAt,
+      durationMinutes: args.durationMinutes,
+      game: args.game,
+      options: args.options,
+    });
+  },
+});
+
 // ============================================
 // MUTATIONS
 // ============================================
@@ -4048,6 +4140,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     ),
   );
   const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
+  await assertRosterHasNoBlockedPair(ctx, normalizedPlayerUids);
   await assertNoParticipantTimeConflict(ctx, {
     userIds: normalizedPlayerUids.length ? normalizedPlayerUids : [actorUid],
     scheduledStartAt: args.scheduledStartAt,
@@ -4294,6 +4387,8 @@ export const createTeamChallengeMatchroom = internalMutation({
       || !captainAChoice?.zoneId
       || captainAChoice.zoneId !== captainBChoice?.zoneId
       || captainAChoice.zoneId !== venue.zoneId
+      || String(captainAChoice.branchId || "") !== String(captainBChoice?.branchId || "")
+      || String(captainAChoice.branchId || "") !== String(venue.branchId || "")
     ) {
       return { ok: false, reason: "venue_agreement_changed" };
     }
@@ -4341,6 +4436,7 @@ export const createTeamChallengeMatchroom = internalMutation({
     }
     const players = [...teamAPlayers, ...teamBPlayers];
     const playerUids = Array.from(new Set(players.map((p) => p.uid)));
+    await assertRosterHasNoBlockedPair(ctx, playerUids);
 
     const buildSlots = (teamLetter: "A" | "B", lineupPlayers: any[]) => lineupPlayers.map((player, index) => ({
       slotId: `${teamLetter}${index + 1}`,
@@ -4360,6 +4456,25 @@ export const createTeamChallengeMatchroom = internalMutation({
       game,
       seriesType: challenge.seriesType,
     });
+    try {
+      await assertBranchOperatingHoursAvailable(ctx, {
+        zoneId: venue.zoneId,
+        zone,
+        branchId: venue.branchId,
+        scheduledStartAt,
+        durationMinutes,
+      });
+      await assertZoneResourceCapacityAvailable(ctx, {
+        zoneId: venue.zoneId,
+        branchId: venue.branchId,
+        game,
+        selectedZoneRateKey: challenge.zoneRateKey,
+        scheduledStartAt,
+        durationMinutes,
+      });
+    } catch (error: any) {
+      return { ok: false, reason: "venue_time_unavailable", message: String(error?.message || MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE) };
+    }
 
     const matchroomId = await ctx.db.insert("matchrooms", {
       hostUid: captainA.uid,
@@ -4374,6 +4489,7 @@ export const createTeamChallengeMatchroom = internalMutation({
       location: venue.venueName || zone.name || "Zone",
       locationMode: "zone" as any,
       zoneId: String(venue.zoneId),
+      branchId: venue.branchId,
       zoneOwnerUid,
       scheduledDate: challenge.scheduledDate,
       scheduledTime: challenge.scheduledTime,
@@ -4492,6 +4608,7 @@ export const join = mutation({
     if (room.playerUids.includes(actorUid)) {
       throw new Error("You are already in this matchroom.");
     }
+    await assertUserCanJoinRoom(ctx, actor.convexUser._id, room);
 
     const nextPlayer = await createPlayerRecord(
       ctx,
@@ -5254,6 +5371,7 @@ export const inviteToMatchroom = mutation({
     if (!invitee || isUserHiddenFromPublic(invitee)) {
       throw new Error("This user is not available.");
     }
+    await assertUserCanJoinRoom(ctx, invitee._id, room);
 
     const entityKey = `match.seat_invite:${args.matchroomId}:${args.toUid}:${args.slotId}`;
     const now = Date.now();
@@ -5501,6 +5619,7 @@ export const requestToJoinMatchroom = mutation({
     if ((room.playerUids || []).includes(actorUid)) {
       return matchroomJoinFailure("You are already in this matchroom.", "ALREADY_JOINED");
     }
+    await assertUserCanJoinRoom(ctx, actor.convexUser._id, room);
     const now = Date.now();
     const role = args.role || "Player";
     const targetTeam = args.targetTeam || "Any";
@@ -5719,6 +5838,7 @@ export const respondToMatchroomInvite = mutation({
     accept: v.boolean(),
   },
   handler: async (ctx, args) => {
+    await requireVerifiedActor(ctx, String(args.userId));
     const notif = await ctx.db.get(args.notificationId);
     if (!notif) throw new Error("Notification not found");
     if (notif.toUid !== args.userId) throw new Error("Not authorized");
@@ -5857,6 +5977,7 @@ export const respondToMatchroomJoinRequest = mutation({
     accept: v.boolean(),
   },
   handler: async (ctx, args) => {
+    const verifiedActor = await requireVerifiedActor(ctx, args.hostUid);
     const notif = await ctx.db.get(args.notificationId);
     if (!notif) throw new Error("Request not found");
     if (!isMatchJoinRequestNotification(notif)) {
@@ -5871,8 +5992,7 @@ export const respondToMatchroomJoinRequest = mutation({
 
     const room = await ctx.db.get(matchroomId as Id<"matchrooms">);
     if (!room) throw new Error("Matchroom not found");
-    const actor = await resolveUserByAnyId(ctx, args.hostUid);
-    if (!actor) throw new Error("Only captains can respond to join requests");
+    const actor = verifiedActor.convexUser;
 
     const approvalRequired = data?.approvalRequired === true;
     const availableCaptainUids = getAvailableCaptainUids(room);

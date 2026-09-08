@@ -1,5 +1,6 @@
-import React from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import React, { useState } from "react";
+import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   BRANCH_WEEKDAYS,
@@ -15,8 +16,26 @@ type Props = {
   onChange: (value: BranchOperatingHours) => void;
 };
 
-const normalizeClockInput = (value: string) =>
-  value.replace(/[^0-9:]/g, "").slice(0, 5);
+type ActivePicker =
+  | { kind: "time"; dayOfWeek: number; field: "openTime" | "closeTime" }
+  | { kind: "date"; exceptionIndex: number }
+  | null;
+
+const dateForClock = (clock: string) => {
+  const [hours, minutes] = String(clock || "09:00").split(":").map(Number);
+  const date = new Date();
+  date.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+  return date;
+};
+
+const formatClock = (date: Date) =>
+  `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+
+const displayClock = (clock: string) => dateForClock(clock).toLocaleTimeString([], {
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
 
 function getNextKarachiDate(existingDates: Set<string>) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -35,6 +54,8 @@ function getNextKarachiDate(existingDates: Set<string>) {
 }
 
 export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
+  const [activePicker, setActivePicker] = useState<ActivePicker>(null);
+  const [pickerValue, setPickerValue] = useState(new Date());
   if (!value) {
     return (
       <View style={styles.card}>
@@ -66,6 +87,24 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
       ),
     });
   };
+  const openTimePicker = (dayOfWeek: number, field: "openTime" | "closeTime", clock: string) => {
+    setPickerValue(dateForClock(clock));
+    setActivePicker({ kind: "time", dayOfWeek, field });
+  };
+  const openDatePicker = (exceptionIndex: number, date: string) => {
+    const parsed = new Date(`${date}T12:00:00`);
+    setPickerValue(Number.isNaN(parsed.getTime()) ? new Date() : parsed);
+    setActivePicker({ kind: "date", exceptionIndex });
+  };
+  const commitPicker = (selected: Date) => {
+    if (!activePicker) return;
+    if (activePicker.kind === "time") {
+      updateDay(activePicker.dayOfWeek, { [activePicker.field]: formatClock(selected) });
+    } else {
+      updateException(activePicker.exceptionIndex, { date: selected.toISOString().slice(0, 10) });
+    }
+    setActivePicker(null);
+  };
 
   return (
     <View style={styles.card}>
@@ -86,27 +125,19 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
           </Pressable>
           {!day.isClosed ? (
             <>
-              <TextInput
+              <Pressable
                 accessibilityLabel={`${BRANCH_WEEKDAYS[day.dayOfWeek]} opening time`}
                 style={styles.timeInput}
-                value={day.openTime}
-                onChangeText={(openTime) => updateDay(day.dayOfWeek, { openTime: normalizeClockInput(openTime) })}
-                placeholder="09:00"
-                placeholderTextColor={COLORS.muted}
-                keyboardType="numbers-and-punctuation"
-                maxLength={5}
-              />
+                accessibilityRole="button"
+                onPress={() => openTimePicker(day.dayOfWeek, "openTime", day.openTime)}
+              ><Text style={styles.timeText}>{displayClock(day.openTime)}</Text></Pressable>
               <Text style={styles.toLabel}>to</Text>
-              <TextInput
+              <Pressable
                 accessibilityLabel={`${BRANCH_WEEKDAYS[day.dayOfWeek]} closing time`}
                 style={styles.timeInput}
-                value={day.closeTime}
-                onChangeText={(closeTime) => updateDay(day.dayOfWeek, { closeTime: normalizeClockInput(closeTime) })}
-                placeholder="23:00"
-                placeholderTextColor={COLORS.muted}
-                keyboardType="numbers-and-punctuation"
-                maxLength={5}
-              />
+                accessibilityRole="button"
+                onPress={() => openTimePicker(day.dayOfWeek, "closeTime", day.closeTime)}
+              ><Text style={styles.timeText}>{displayClock(day.closeTime)}</Text></Pressable>
             </>
           ) : null}
         </View>
@@ -142,15 +173,12 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
 
       {(value.exceptions || []).map((exception, index) => (
         <View key={`${exception.date}-${index}`} style={styles.exceptionRow}>
-          <TextInput
+          <Pressable
             accessibilityLabel="Closure date"
             style={[styles.timeInput, styles.dateInput]}
-            value={exception.date}
-            onChangeText={(date) => updateException(index, { date: date.slice(0, 10) })}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={COLORS.muted}
-            maxLength={10}
-          />
+            accessibilityRole="button"
+            onPress={() => openDatePicker(index, exception.date)}
+          ><Text style={styles.timeText}>{exception.date}</Text></Pressable>
           <TextInput
             accessibilityLabel="Closure reason"
             style={[styles.timeInput, styles.flex1]}
@@ -175,6 +203,34 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
       ))}
 
       {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
+
+      <Modal visible={Boolean(activePicker)} transparent animationType="fade" onRequestClose={() => setActivePicker(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setActivePicker(null)}>
+          <Pressable style={styles.pickerCard} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.subtitle}>{activePicker?.kind === "date" ? "Select closure date" : "Select time"}</Text>
+            <DateTimePicker
+              value={pickerValue}
+              mode={activePicker?.kind === "date" ? "date" : "time"}
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              minimumDate={activePicker?.kind === "date" ? new Date() : undefined}
+              onChange={(_event, selected) => {
+                if (!selected) {
+                  if (Platform.OS === "android") setActivePicker(null);
+                  return;
+                }
+                setPickerValue(selected);
+                if (Platform.OS === "android") commitPicker(selected);
+              }}
+            />
+            {Platform.OS === "ios" ? (
+              <View style={styles.pickerActions}>
+                <AppButton variant="secondary" onPress={() => setActivePicker(null)}>Cancel</AppButton>
+                <AppButton onPress={() => commitPicker(pickerValue)}>Done</AppButton>
+              </View>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -198,6 +254,7 @@ const styles = StyleSheet.create({
   closedChip: { backgroundColor: COLORS.inputBackground },
   statusText: { color: COLORS.text, fontFamily: FONTS.body, fontSize: 12, textAlign: "center" },
   timeInput: { backgroundColor: COLORS.inputBackground, borderColor: COLORS.inputBorder, borderRadius: RADII.md, borderWidth: 1, color: COLORS.text, minHeight: 38, paddingHorizontal: 9 },
+  timeText: { color: COLORS.text, fontFamily: FONTS.body, fontSize: 12, lineHeight: 36, textAlign: "center" },
   toLabel: { color: COLORS.muted, fontSize: 12 },
   exceptionHeader: { alignItems: "center", flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md },
   exceptionRow: { alignItems: "center", flexDirection: "row", gap: 8 },
@@ -208,4 +265,7 @@ const styles = StyleSheet.create({
   dateInput: { width: 108 },
   flex1: { flex: 1 },
   errorText: { color: COLORS.error, fontFamily: FONTS.body, fontSize: 12 },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: SPACING.lg },
+  pickerCard: { backgroundColor: COLORS.cardDark, borderColor: COLORS.cardBorder, borderRadius: RADII.lg, borderWidth: 1, padding: SPACING.lg },
+  pickerActions: { flexDirection: "row", justifyContent: "flex-end", gap: SPACING.sm, marginTop: SPACING.md },
 });

@@ -3176,6 +3176,7 @@ async function ensureKarachiRealisticUser(ctx: any, input: {
       emailVerifiedAt: now,
       phone: input.phone,
       fullName: input.fullName || existing.fullName,
+      ...(input.accountType === "player" ? { walletBalance: 5000 } : {}),
       updatedAt: now,
     } as any);
 
@@ -3239,6 +3240,7 @@ async function ensureKarachiRealisticUser(ctx: any, input: {
   };
 
   if (input.accountType === "player") {
+    base.walletBalance = 5000;
     const game = input.playerGameKey || null;
     base.playsCs2 = game === "cs2";
     base.playsCs16 = game === "cs16";

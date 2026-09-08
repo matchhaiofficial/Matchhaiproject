@@ -532,6 +532,8 @@ export default defineSchema({
     resendCount: v.number(),
     provider: v.literal("veevotech"),
     providerMessageId: v.optional(v.string()),
+    receiverNetwork: v.optional(v.string()),
+    providerStatus: v.optional(v.string()),
     expiresAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1234,6 +1236,8 @@ export default defineSchema({
         zoneId: v.string(),
         venueName: v.string(),
         areaLabel: v.optional(v.union(v.string(), v.null())),
+        branchId: v.optional(v.string()),
+        branchName: v.optional(v.string()),
       })
     ),
     alternativeVenueByCaptainB: v.optional(
@@ -1241,6 +1245,8 @@ export default defineSchema({
         zoneId: v.string(),
         venueName: v.string(),
         areaLabel: v.optional(v.union(v.string(), v.null())),
+        branchId: v.optional(v.string()),
+        branchName: v.optional(v.string()),
       })
     ),
     captainVenueChoices: v.optional(v.any()),
@@ -1249,6 +1255,8 @@ export default defineSchema({
         zoneId: v.string(),
         venueName: v.string(),
         areaLabel: v.optional(v.union(v.string(), v.null())),
+        branchId: v.optional(v.string()),
+        branchName: v.optional(v.string()),
       })
     ),
     chatId: v.optional(v.string()),

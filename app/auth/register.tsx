@@ -528,7 +528,7 @@ export default function Register() {
       />
 
       <Text style={styles.heading}>Account details</Text>
-      <Text style={styles.sub}>Use your real login/contact details. Didit identity verification comes after signup.</Text>
+      <Text style={styles.sub}>Use your real login/contact details. You must verify the 6-digit phone OTP before continuing. Didit identity verification comes after signup and gameplay stays locked until it is approved.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Full Name" required />

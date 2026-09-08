@@ -301,6 +301,25 @@ export default StyleSheet.create({
     headerActionButton: {
         padding: 2,
     },
+    headerActionBadge: {
+        position: "absolute",
+        top: -5,
+        right: -7,
+        minWidth: 18,
+        height: 18,
+        paddingHorizontal: 4,
+        borderRadius: 9,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: COLORS.error,
+        borderWidth: 1,
+        borderColor: COLORS.backgroundDark,
+    },
+    headerActionBadgeText: {
+        color: "#fff",
+        fontFamily: FONTS.heading,
+        fontSize: 9,
+    },
     headerActionPressed: {
         opacity: 0.72,
     },
@@ -873,4 +892,3 @@ export default StyleSheet.create({
         elevation: 4,
     },
 });
-

@@ -20,59 +20,33 @@ export async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .unique();
 }
 
-function getAuthUserKeys(authUser: any) {
-  if (!authUser || typeof authUser !== "object") return [];
-  return Object.keys(authUser).sort();
-}
-
 export async function getStrictAuthenticatedUserId(ctx: any): Promise<Id<"users">> {
-  const authUser = await authComponent.getAuthUser(ctx);
+  let authUser: any = null;
+  try {
+    authUser = await authComponent.getAuthUser(ctx);
+  } catch {
+    authUser = null;
+  }
+  const identity = await ctx.auth.getUserIdentity();
   const authRecordId = typeof authUser?._id === "string" ? authUser._id : null;
   const linkedAppUserId = typeof authUser?.userId === "string" ? authUser.userId : null;
-  console.info("[ChatAuth] getAuthUser result", {
-    hasAuthUser: Boolean(authUser),
-    authRecordId,
+  const candidates = [
     linkedAppUserId,
-    keys: getAuthUserKeys(authUser),
-  });
+    authRecordId,
+    identity?.subject,
+    identity?.tokenIdentifier,
+    identity?.tokenIdentifier?.includes("|") ? identity.tokenIdentifier.split("|").pop() : null,
+  ];
 
-  if (linkedAppUserId) {
-    const directUser = await resolveUserByAnyId(ctx, linkedAppUserId);
-    if (directUser) {
-      if (isAccountSuspensionActive(directUser)) throw new Error("Account suspended");
-      console.info("[ChatAuth] Resolved authenticated user via linked app user id", {
-        authRecordId,
-        linkedAppUserId,
-        userId: directUser._id,
-      });
-      return directUser._id;
-    }
+  for (const candidate of Array.from(new Set(candidates.filter(Boolean).map(String)))) {
+    const user = await resolveUserByAnyId(ctx, candidate);
+    if (!user) continue;
+    if (isAccountSuspensionActive(user)) throw new Error("Account suspended");
+    return user._id;
   }
 
-  if (!authRecordId) {
-    console.warn("[ChatAuth] Missing authenticated user in Convex context");
+  if (!authUser && !identity) {
     throw new Error("Unauthenticated");
   }
-
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_authId", (q: any) => q.eq("authId", authRecordId))
-    .unique();
-
-  if (!user) {
-    console.warn("[ChatAuth] Auth user has no matching profile", {
-      authRecordId,
-      linkedAppUserId,
-    });
-    throw new Error("User profile not found");
-  }
-  if (isAccountSuspensionActive(user)) throw new Error("Account suspended");
-
-  console.info("[ChatAuth] Resolved authenticated user profile", {
-    authRecordId,
-    linkedAppUserId,
-    userId: user._id,
-  });
-
-  return user._id;
+  throw new Error("User profile not found");
 }

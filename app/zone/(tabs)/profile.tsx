@@ -138,6 +138,7 @@ export default function ZoneProfile() {
         currentKyc,
         status: effectiveKycStatus,
         accessAllowed: kycVerified,
+        reviewActive: kycReviewActive,
     } = useEffectiveKycStatus();
     const kycStartActionLabel =
         effectiveKycStatus === "rejected"
@@ -426,10 +427,14 @@ export default function ZoneProfile() {
                             label={kycVerified ? "Verified" : String(effectiveKycStatus || "Not started").replace(/_/g, " ")}
                         />
                     </View>
-                    {!kycVerified ? (
+                    {!kycVerified && !kycReviewActive ? (
                         <AppButton style={styles.logoutButton} onPress={handleStartVerification}>
                             {kycStartActionLabel}
                         </AppButton>
+                    ) : kycReviewActive ? (
+                        <Text style={styles.profileMetaText}>
+                            Identity review is in progress. Zone tools unlock after approval; profile settings and help remain available.
+                        </Text>
                     ) : user?.kycVerifiedAt ? (
                         <Text style={styles.profileMetaText}>
                             Verified {new Date(user.kycVerifiedAt).toLocaleDateString()}

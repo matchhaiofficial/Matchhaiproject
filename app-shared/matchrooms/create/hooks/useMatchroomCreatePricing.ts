@@ -1,5 +1,5 @@
-import { useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useConvexAuth, useQuery } from "convex/react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import {
@@ -20,6 +20,10 @@ export type ZoneRateOption = {
     tier?: string;
     surface?: string;
   };
+  available?: boolean;
+  availabilityMessage?: string;
+  availableCount?: number;
+  requiredCount?: number;
 };
 
 type FormDataShape = {
@@ -109,6 +113,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
   isZoneWalkInAdmin,
   setFormData,
 }: Params<T>) {
+  const { isAuthenticated } = useConvexAuth();
   const [zonePricingRules, setZonePricingRules] = useState<PricingRule[]>([]);
   const [zoneRate, setZoneRate] = useState<number>(0);
   const [zoneRateOptions, setZoneRateOptions] = useState<ZoneRateOption[]>([]);
@@ -132,6 +137,66 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
         }
       : "skip",
   );
+  const authoritativeDurationMinutes = useMemo(() => {
+    const series = String(seriesType || formData.seriesType || "BO1").toUpperCase();
+    if (isCsStyleGame(selectedGame)) return series === "BO10" ? 600 : series === "BO5" ? 300 : series === "BO3" ? 180 : 60;
+    if (selectedGame === "fc26") return series === "BO10" ? 180 : series === "BO5" ? 120 : series === "BO3" ? 60 : 30;
+    if (selectedGame === "tekken8") return series === "BO40" ? 180 : series === "BO20" ? 120 : 60;
+    if (selectedGame === "indoor_cricket") return String(formData.overs || "") === "6" ? 150 : 120;
+    if (["padel", "pickleball"].includes(String(selectedGame))) return series === "BO10" ? 180 : series === "BO5" ? 120 : 60;
+    if (selectedGame === "futsal") return Math.round(Math.min(6, Math.max(0.5, duration || 1)) * 60);
+    return 60;
+  }, [duration, formData.overs, formData.seriesType, selectedGame, seriesType]);
+  const rateAvailability = useQuery(
+    api.matchrooms.checkRateOptionsAvailability,
+    isAuthenticated
+      && selectedZoneId
+      && selectedGame
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(formData.date || ""))
+      && Boolean(String(formData.time || "").trim())
+      && zoneRateOptions.length > 0
+      ? {
+          zoneId: selectedZoneId as Id<"zones">,
+          branchId: pricingBranch?.id || selectedBranchId || undefined,
+          game: selectedGame,
+          scheduledDate: String(formData.date),
+          scheduledTime: String(formData.time),
+          durationMinutes: authoritativeDurationMinutes,
+          options: zoneRateOptions.map((option) => ({
+            key: option.key,
+            assetType: option.resourceContext.assetType,
+            tier: option.resourceContext.tier,
+            surface: option.resourceContext.surface,
+          })),
+        }
+      : "skip",
+  );
+  const availabilityByKey = useMemo(
+    () => new Map((rateAvailability || []).map((entry) => [entry.key, entry])),
+    [rateAvailability],
+  );
+  const displayedZoneRateOptions = useMemo(
+    () => zoneRateOptions.map((option) => {
+      const availability = availabilityByKey.get(option.key);
+      return availability ? {
+        ...option,
+        available: availability.available,
+        availabilityMessage: availability.message,
+        availableCount: availability.availableCount,
+        requiredCount: availability.requiredCount,
+      } : option;
+    }),
+    [availabilityByKey, zoneRateOptions],
+  );
+
+  useEffect(() => {
+    if (!selectedZoneRateKey) return;
+    const selectedAvailability = availabilityByKey.get(selectedZoneRateKey);
+    if (selectedAvailability?.available === false) {
+      setSelectedZoneRateKey(null);
+      setZoneRate(0);
+    }
+  }, [availabilityByKey, selectedZoneRateKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -490,7 +555,8 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
   return {
     zonePricingRules,
     zoneRate,
-    zoneRateOptions,
+    zoneRateOptions: displayedZoneRateOptions,
+    checkingRateAvailability: Boolean(zoneRateOptions.length > 0 && rateAvailability === undefined),
     hasInsufficientCapacityOptions,
     selectedZoneRateKey,
     setZoneRate,

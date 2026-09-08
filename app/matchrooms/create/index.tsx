@@ -1522,14 +1522,21 @@ export default function CreateMatchroom() {
                 <View style={styles.chipRow}>
                   {zoneRateOptions.map((opt) => {
                     const active = selectedZoneRateKey === opt.key;
+                    const unavailable = opt.available === false;
                     return (
                       <Pressable
                         key={opt.key}
+                        accessibilityState={{ disabled: unavailable, selected: active }}
                         style={[
                           styles.optionChip,
                           active && styles.optionChipActive,
+                          unavailable && { opacity: 0.45 },
                         ]}
                         onPress={() => {
+                          if (unavailable) {
+                            showToast({ type: "info", title: "PCs not available", message: opt.availabilityMessage || "This category is unavailable at the selected time." });
+                            return;
+                          }
                           selectZoneRateOption(opt.key, opt.price);
                         }}
                       >
@@ -1541,6 +1548,7 @@ export default function CreateMatchroom() {
                         >
                           {opt.label}
                         </Text>
+                        {unavailable ? <AppIcon name="info-outline" size={14} color={COLORS.warning} /> : null}
                       </Pressable>
                     );
                   })}
@@ -1814,15 +1822,22 @@ export default function CreateMatchroom() {
                   <View style={styles.chipRow}>
                     {zoneRateOptions.map((opt) => {
                       const isActive = selectedZoneRateKey === opt.key;
+                      const unavailable = opt.available === false;
                       return (
                         <Pressable
                           key={opt.key}
+                          accessibilityState={{ disabled: unavailable, selected: isActive }}
                           style={({ pressed }) => [
                             styles.optionChip,
                             isActive && styles.optionChipActive,
+                            unavailable && { opacity: 0.45 },
                             pressed && { opacity: 0.9 },
                           ]}
                           onPress={() => {
+                            if (unavailable) {
+                              showToast({ type: "info", title: "Resources not available", message: opt.availabilityMessage || "This category is unavailable at the selected time." });
+                              return;
+                            }
                             selectZoneRateOption(opt.key, opt.price);
                           }}
                         >
@@ -1834,6 +1849,7 @@ export default function CreateMatchroom() {
                           >
                             {opt.label}
                           </Text>
+                          {unavailable ? <AppIcon name="info-outline" size={14} color={COLORS.warning} /> : null}
                         </Pressable>
                       );
                     })}

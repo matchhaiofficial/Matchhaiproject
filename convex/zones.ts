@@ -1117,12 +1117,13 @@ export const updateResourceStatus = mutation({
     const resource = await ctx.db.get(args.resourceId);
     if (!resource) throw new Error("Resource not found");
     const { zone } = await requireKycOwnedZone(ctx, resource.zoneId);
-    const exactAssignment = ["available", "maintenance"].includes(args.lifecycleStatus)
-      ? await findActiveResourceAssignment(ctx, {
+    if (["held", "booked"].includes(args.lifecycleStatus)) {
+      throw new Error("Held and booked statuses are managed through dated booking or walk-in allocation.");
+    }
+    const exactAssignment = await findActiveResourceAssignment(ctx, {
         zoneId: String(resource.zoneId),
         resourceId: resource._id,
-      })
-      : null;
+      });
     const branchAssignment = args.lifecycleStatus === "maintenance"
       ? await findActiveBranchAssignment(ctx, {
         zoneId: String(resource.zoneId),

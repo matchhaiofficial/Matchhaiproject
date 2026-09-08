@@ -470,7 +470,7 @@ export const validateRegistrationIdentity = action({
     let phoneOtpVerifiedAt: number | undefined;
     let phoneNumberMasked: string | undefined;
     let phoneNumberHash: string | undefined;
-    if (args.accountType === "player") {
+    if (["player", "zone"].includes(args.accountType)) {
       const phoneHash = await sha256(phone);
       const skipOtp = isPhoneOtpBypassEnabled();
 
@@ -736,7 +736,7 @@ export const create = mutation({
 
     let verifiedPhoneHash: string | undefined;
     let verifiedPhone: { phoneMasked: string; updatedAt: number } | null = null;
-    if (normalizedPhone && args.accountType === "player") {
+    if (normalizedPhone && ["player", "zone"].includes(args.accountType)) {
       verifiedPhoneHash = await sha256(normalizedPhone);
       if (isPhoneOtpBypassEnabled()) {
         verifiedPhone = { phoneMasked: normalizedPhone, updatedAt: now };

@@ -208,7 +208,7 @@ export default function ZoneEditProfile() {
         return emailRegex.test(trimmedNew) && trimmedNew !== email;
     }, [newEmail, email]);
 
-    const isEmailVerified = user?.kycVerificationStatus === "verified" && !pendingEmail;
+    const isEmailVerified = Boolean(user?.emailVerifiedAt) && !pendingEmail;
 
     const getSessionToken = async () => {
         const sessionResult = await authClient.getSession();

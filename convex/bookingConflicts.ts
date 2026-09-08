@@ -640,6 +640,127 @@ export async function assertZoneResourceCapacityAvailable(ctx: any, input: {
   }
 }
 
+export async function getZoneRateOptionsAvailability(ctx: any, input: {
+  zoneId: string;
+  branchId?: string | null;
+  scheduledStartAt: number;
+  durationMinutes: number;
+  game: string;
+  options: Array<{
+    key: string;
+    assetType: string;
+    tier?: string | null;
+    surface?: string | null;
+  }>;
+}) {
+  const zoneId = String(input.zoneId || "").trim();
+  const targetStart = Number(input.scheduledStartAt || 0);
+  const targetDuration = Math.max(1, Math.floor(Number(input.durationMinutes || 60)));
+  if (!zoneId || !Number.isFinite(targetStart) || targetStart <= 0) {
+    return input.options.map((option) => ({
+      key: option.key,
+      available: false,
+      availableCount: 0,
+      requiredCount: 0,
+      message: "Choose a valid date and time.",
+    }));
+  }
+
+  const resourceQuery = input.branchId
+    ? ctx.db.query("zoneResources").withIndex("by_zoneId_and_branchId", (q: any) =>
+        q.eq("zoneId", zoneId as any).eq("branchId", input.branchId!),
+      )
+    : ctx.db.query("zoneResources").withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId as any));
+  const resourcePage = await resourceQuery.take(501);
+  if (resourcePage.length > 500) {
+    throw new Error("This venue has too many resources to verify safely. Please contact support.");
+  }
+  const resources = resourcePage.slice(0, 500);
+  const rooms = await getZoneRowsNearSlot(ctx, {
+    table: "matchrooms",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
+  const requests = await getZoneRowsNearSlot(ctx, {
+    table: "bookingRequests",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
+  const pendingOffers = await getPendingZoneOffers(ctx, zoneId);
+  const activeRequests: any[] = [];
+  for (const request of requests) {
+    if (!BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+    if (await requestHasTerminalOrMissingLinkedRoom(ctx, request)) continue;
+    activeRequests.push(request);
+  }
+  const offerRequestById = new Map<string, any>();
+  for (const offer of pendingOffers) {
+    const requestId = String(offer.requestId);
+    if (offerRequestById.has(requestId)) continue;
+    offerRequestById.set(requestId, await ctx.db.get(offer.requestId));
+  }
+
+  return await Promise.all(input.options.map(async (option) => {
+    const profile = getRequiredResourceProfile({
+      game: input.game,
+      requestedResourceAssetType: option.assetType,
+      requestedResourceTier: option.tier,
+      requestedResourceSurface: option.surface,
+      selectedZoneRateKey: option.key,
+    });
+    const totalCount = resources.filter((resource: any) =>
+      sameBranchOrConservative(input.branchId, resource.branchId)
+      && resourceMatchesProfile(resource, profile)
+      && normalizeToken(resource.lifecycleStatus) !== "maintenance"
+    ).length;
+    let overlappingDemand = 0;
+    const countedRoomIds = new Set<string>();
+    for (const room of rooms) {
+      if (!RESOURCE_BUSY_MATCHROOM_STATUSES.has(String(room.status || ""))) continue;
+      const roomStart = getRoomStartAt(room);
+      if (!roomStart || !timesOverlap(targetStart, targetDuration, roomStart, getDurationMinutes(room))) continue;
+      if (!sameBranchOrConservative(input.branchId, room.branchId || room.confirmedBranchId)) continue;
+      const roomProfile = getRequiredResourceProfile(room);
+      if (!profileSharesPool(profile, roomProfile)) continue;
+      countedRoomIds.add(String(room._id));
+      overlappingDemand += roomProfile.requiredResourceIds;
+    }
+    const countedRequestIds = new Set<string>();
+    for (const request of activeRequests) {
+      if (request.matchroomId && countedRoomIds.has(String(request.matchroomId))) continue;
+      const requestStart = getRequestStartAt(request);
+      if (!requestStart || !timesOverlap(targetStart, targetDuration, requestStart, getDurationMinutes(request))) continue;
+      if (!sameBranchOrConservative(input.branchId, request.allocatedBranchId)) continue;
+      const requestProfile = getRequiredResourceProfile(request);
+      if (!profileSharesPool(profile, requestProfile)) continue;
+      countedRequestIds.add(String(request._id));
+      overlappingDemand += requestProfile.requiredResourceIds;
+    }
+    for (const offer of pendingOffers) {
+      if (countedRequestIds.has(String(offer.requestId))) continue;
+      if (!sameBranchOrConservative(input.branchId, offer.branchId)) continue;
+      const request = offerRequestById.get(String(offer.requestId));
+      if (!request || !BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+      if (!getOfferStarts(offer).some((start) => timesOverlap(targetStart, targetDuration, start, getDurationMinutes(request)))) continue;
+      const requestProfile = getRequiredResourceProfile(request);
+      if (profileSharesPool(profile, requestProfile)) overlappingDemand += requestProfile.requiredResourceIds;
+    }
+    const availableCount = Math.max(0, totalCount - overlappingDemand);
+    const available = availableCount >= profile.requiredResourceIds;
+    return {
+      key: option.key,
+      available,
+      availableCount,
+      requiredCount: profile.requiredResourceIds,
+      message: available
+        ? "Available"
+        : `Only ${availableCount} of ${profile.requiredResourceIds} required resources are available at this time.`,
+    };
+  }));
+}
+
 export async function assertSelectedResourcesAvailableForSlot(ctx: any, input: {
   zoneId: string;
   branchId?: string | null;

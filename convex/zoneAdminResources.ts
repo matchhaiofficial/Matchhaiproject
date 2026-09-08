@@ -236,12 +236,13 @@ export const updateResourceLifecycleStatus = mutation({
       throw new Error("Resource not found.");
     }
     const { user: actor, zone } = await requireOwnedZone(ctx, resource.zoneId);
-    const exactAssignment = ["available", "maintenance"].includes(args.lifecycleStatus)
-      ? await findActiveResourceAssignment(ctx, {
+    if (["held", "booked"].includes(args.lifecycleStatus)) {
+      throw new Error("Held and booked statuses are managed through dated booking or walk-in allocation.");
+    }
+    const exactAssignment = await findActiveResourceAssignment(ctx, {
         zoneId: String(resource.zoneId),
         resourceId: resource._id,
-      })
-      : null;
+      });
     const branchAssignment = args.lifecycleStatus === "maintenance"
       ? await findActiveBranchAssignment(ctx, {
         zoneId: String(resource.zoneId),

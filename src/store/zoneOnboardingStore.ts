@@ -9,6 +9,9 @@ export type ZoneStep1Data = {
   venueBrandName: string;
   contactEmail: string;
   contactPhone: string;
+  phoneVerified: boolean;
+  phoneVerifiedAt: number | null;
+  phoneVerifiedE164: string;
   password: string;
   type: 'gaming' | 'sports' | 'hybrid';
 };
@@ -133,6 +136,9 @@ const initialState: Omit<
     venueBrandName: "",
     contactEmail: "",
     contactPhone: "",
+    phoneVerified: false,
+    phoneVerifiedAt: null,
+    phoneVerifiedE164: "",
     password: "",
     type: "gaming",
   },
