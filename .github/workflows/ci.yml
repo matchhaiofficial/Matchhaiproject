@@ -26,4 +26,5 @@ jobs:
       - run: npm ci --legacy-peer-deps
       - run: npm run typecheck
       - run: npm test -- --runInBand
+      - run: npm run test:convex
       - run: npm audit --omit=dev --audit-level=critical
