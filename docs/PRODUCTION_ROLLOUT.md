@@ -36,6 +36,7 @@ Never print or share `.env.local` secret values. Install and run the automated g
 npm ci --legacy-peer-deps
 npm run typecheck
 npm test -- --runInBand
+npm run test:convex
 npx expo-doctor
 npx expo export --platform android --output-dir /tmp/matchhai-android-export
 ```
@@ -67,7 +68,7 @@ Do not merge or deploy until all of these are recorded in the PR:
 - Manual QA matrix with device/OS, account role, result, and evidence.
 - EasyPaisa, OTP/MNP, Didit KYC, push notification, and email integrations verified.
 - No unresolved P0/P1 defects; lower-severity deferrals have an owner and written acceptance.
-- Convex Database I/O baseline captured on development, with no runaway scheduled jobs.
+- Convex Database I/O baseline captured on development, with no runaway scheduled jobs. The in-memory scheduler regression test must pass and a development canary must show bounded calls before any production scheduling migration.
 - Production backup owner, deployment operator, app-store operator, monitoring owner, and rollback lead identified.
 
 Only then merge PR #71 into `product-ready`. Record the merge commit and use that same commit for Convex and EAS release artifacts.
@@ -119,20 +120,24 @@ Review the dry run for schema/index changes and unexpected function removal. The
 npx convex deploy --message 'production readiness rollout'
 ```
 
-Run migrations one at a time, observe completion/errors in the Convex dashboard, and record results:
+Run non-scheduling backfills one at a time, observe completion/errors in the Convex dashboard, and record results:
 
 ```bash
 npx convex run migrations:runBackfillMatchroomLifecycleDueAt '{}' --prod
 npx convex run migrations:runBackfillBookingRequestLifecycleDueAt '{}' --prod
 npx convex run migrations:runBackfillTeamChallengeLifecycleDueAt '{}' --prod
 npx convex run migrations:runBackfillPaymentNextReconcileAt '{}' --prod
-npx convex run migrations:runScheduleExistingMatchroomLifecycles '{}' --prod
-npx convex run migrations:runScheduleExistingTeamChallengeLifecycles '{}' --prod
-npx convex run migrations:runReschedulePendingTeamChallengeAcceptDeadlines '{}' --prod
-npx convex run migrations:runScheduleExistingZoneOfferExpiries '{}' --prod
 ```
 
-These runners are batched, but scheduling migrations create scheduled work. Watch failure rate and Database I/O after every command instead of launching them together.
+Do **not** run `runScheduleExistingMatchroomLifecycles`,
+`runScheduleExistingTeamChallengeLifecycles`,
+`runReschedulePendingTeamChallengeAcceptDeadlines`, or
+`runScheduleExistingZoneOfferExpiries` as blanket production migrations. They
+create scheduled work. First prove the exact revision on development with a
+one-record canary and usage observation; then use a reviewed, rate-limited
+production canary procedure with an explicit stop condition. Existing records
+remain covered by the individually enabled, bounded recovery jobs during a
+controlled rollout.
 
 Next, obtain the real active production zone and branch IDs with read-only queries. For each existing zone, run `scheduleIndexMigration:prepareZoneScheduleIndex` once; for each branch, run `resourceCapacity:refreshBranchSnapshot`. Both are internal operations helpers and require deployment-admin access. Use the Convex dashboard or CLI only after confirming the exact IDs—never invent or reuse development IDs. New/edited zones schedule these updates automatically.
 

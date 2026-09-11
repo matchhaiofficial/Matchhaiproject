@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
+import { getSafeScheduleAt } from "./schedulingSafety";
 
 async function endPilotIfDue(ctx: any, zone: any, expectedEndsAt: number, now = Date.now()) {
   if (
@@ -70,12 +71,15 @@ export const scheduleActivePilotExpiries = internalMutation({
     for (const zone of page.page) {
       if (typeof zone.pilotEndsAt !== "number") continue;
       await ctx.scheduler.runAt(
-        Math.max(Date.now(), zone.pilotEndsAt),
+        getSafeScheduleAt(zone.pilotEndsAt)!,
         internal.zonePilot.processScheduledPilotExpiry,
         { zoneId: zone._id, expectedEndsAt: zone.pilotEndsAt },
       );
     }
     if (!page.isDone) {
+      if (!page.continueCursor || page.continueCursor === args.cursor) {
+        throw new Error("Zone pilot scheduling pagination made no progress.");
+      }
       await ctx.scheduler.runAfter(0, internal.zonePilot.scheduleActivePilotExpiries, {
         batchSize: args.batchSize,
         cursor: page.continueCursor,

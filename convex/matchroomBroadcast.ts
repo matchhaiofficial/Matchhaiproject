@@ -1072,12 +1072,25 @@ async function expireBroadcastCounterOfferInternal(ctx: any, offerId: Id<"zoneOf
   const offer = await ctx.db.get(offerId);
   if (!offer || offer.status !== "pending") return { expired: false };
 
+  // A stale/early scheduled invocation must never close a live offer. Do not
+  // reschedule here: duplicate early jobs would each create another future
+  // job and multiply scheduler work. The original expiry job is authoritative;
+  // normal Convex scheduling invokes it at the deadline, and a later retry can
+  // safely handle the expired row.
+  const now = Date.now();
+  const expiresAt = Number(offer.expiresAt || offer.responseExpiresAt || 0);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return { expired: false, reason: "missing_expiry" };
+  }
+  if (expiresAt > now) {
+    return { expired: false, reason: "not_due" };
+  }
+
   const request = await ctx.db.get(offer.requestId);
   if (!request || request.requestKind !== "broadcast_fanout" || !request.matchroomId) {
     return { expired: false };
   }
 
-  const now = Date.now();
   await closeBroadcastOfferRequest(ctx, {
     request,
     offerId,

@@ -2993,7 +2993,14 @@ export const removeDemoData = action({
 async function listBetterAuthUsersByDomain(ctx: any, domainSuffix: string) {
   const results: any[] = [];
   let cursor: string | null = null;
+  const seenCursors = new Set<string>();
   while (true) {
+    const cursorKey = cursor ?? "__initial__";
+    if (seenCursors.has(cursorKey)) {
+      throw new Error("Better Auth pagination made no progress while listing demo users.");
+    }
+    seenCursors.add(cursorKey);
+
     const batch: any = await ctx.runQuery(components.betterAuth.adapter.findMany, {
       model: "user",
       where: [{ field: "email", operator: "ends_with", value: domainSuffix }],
@@ -3010,6 +3017,9 @@ async function listBetterAuthUsersByDomain(ctx: any, domainSuffix: string) {
 
     const next: any = (batch as any)?.continueCursor ?? (batch as any)?.nextCursor ?? null;
     if (!next || items.length === 0) break;
+    if (String(next) === cursorKey) {
+      throw new Error("Better Auth pagination cursor did not advance while listing demo users.");
+    }
     cursor = next;
   }
   return results;

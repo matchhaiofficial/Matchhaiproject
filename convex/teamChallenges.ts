@@ -19,6 +19,7 @@ import { interruptAccountDeletionForIncomingFunds } from "./wallet";
 import { assertBranchOperatingHoursAvailable } from "./branchOperatingHours";
 import { assertZoneResourceCapacityAvailable } from "./bookingConflicts";
 import { assertUsersCanShareMatchroom } from "./userBlockPolicy";
+import { getSafeScheduleAt } from "./schedulingSafety";
 
 const venueChoiceValidator = v.object({
   zoneId: v.string(),
@@ -56,7 +57,7 @@ async function scheduleNextTeamChallengeLifecycle(ctx: any, challenge: any) {
   if (!challenge?._id || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
   if (Number(challenge.lifecycleScheduledAt || 0) === dueAt && challenge.lifecycleScheduledFnId) return;
   const scheduledId = await ctx.scheduler.runAt(
-    Math.max(Date.now(), dueAt),
+    getSafeScheduleAt(dueAt)!,
     internal.teamChallenges.processScheduledExpiry,
     { challengeId: challenge._id, expectedDueAt: dueAt },
   );

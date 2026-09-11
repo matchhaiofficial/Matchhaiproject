@@ -19,7 +19,7 @@ import {
   getBookingRequestStartAtForConflict,
   reconcileResourceLegacyAssignment,
 } from "./bookingConflicts";
-import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
+import { getLifecycleDueAt, getLifecycleScheduleAt, withLifecycleDueAt } from "./matchroomLifecycle";
 import {
   getBookingRequestLifecycleDueAt,
   withBookingRequestLifecycleDueAt,
@@ -706,7 +706,7 @@ async function scheduleMatchroomLifecycle(ctx: any, matchroomId: any) {
   if (!room || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
   if (Number(room.lifecycleScheduledAt || 0) === dueAt && room.lifecycleScheduledFnId) return;
   const scheduledId = await ctx.scheduler.runAt(
-    Math.max(Date.now(), dueAt),
+    getLifecycleScheduleAt(dueAt)!,
     internal.matchrooms.processScheduledLifecycle,
     { matchroomId: room._id, expectedDueAt: dueAt },
   );
@@ -2069,11 +2069,15 @@ export const acceptBookingRequest = mutation({
         expiresAt: offerExpiresAt,
       });
 
-      await ctx.scheduler.runAfter(
+      const expiryScheduledFnId = await ctx.scheduler.runAfter(
         offerExpiresAt - now,
         internal.matchroomBroadcast.expireBroadcastCounterOffer,
         { offerId },
       );
+      await ctx.db.patch(offerId, {
+        expiryScheduledAt: offerExpiresAt,
+        expiryScheduledFnId: String(expiryScheduledFnId),
+      });
     } else if (bookingRequest.matchroomId) {
       matchroomId = bookingRequest.matchroomId;
 
@@ -2628,13 +2632,17 @@ export const sendCounterOffer = mutation({
       });
     }
 
-    await ctx.scheduler.runAt(
+    const expiryScheduledFnId = await ctx.scheduler.runAt(
       expiresAt,
       isBroadcastRequest
         ? internal.matchroomBroadcast.expireBroadcastCounterOffer
         : internal.zoneAdminBooking.expireDirectCounterOffer,
       { offerId },
     );
+    await ctx.db.patch(offerId, {
+      expiryScheduledAt: expiresAt,
+      expiryScheduledFnId: String(expiryScheduledFnId),
+    });
 
     await recordZoneAuditEvent(ctx, {
       zoneId: String(args.zoneId),

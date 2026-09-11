@@ -135,15 +135,6 @@ export const getPlayerHomeSummary = query({
       new Map(friendships.map((friendship) => [String(friendship.friendId), friendship.friendId])).values()
     );
     const friendIdSet = new Set(uniqueFriendIds.map((id) => String(id)));
-    const friendDocs = await Promise.all(
-      uniqueFriendIds.map((friendId) => ctx.db.get(friendId))
-    );
-    const presenceNow = Date.now();
-    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
-    const friendOnlineCount = friendDocs.filter(
-      (friend) => friend?.isOnline && friend.lastActiveAt && (presenceNow - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS
-    ).length;
-
     const walletStats = bookingIntents.reduce(
       (acc, intent: any) => {
         const total = Number(intent?.pricing?.totalCost || intent?.pricing?.total || 0);
@@ -229,7 +220,6 @@ export const getPlayerHomeSummary = query({
         myRequests: myRequests.length,
         myOffers: offerCount,
       },
-      friendCount: friendOnlineCount,
       walletStats: {
         balance: Math.round(Number((user as any).walletBalance || 0)),
         totalSpent: Math.round(walletStats.totalSpent),
@@ -237,5 +227,27 @@ export const getPlayerHomeSummary = query({
         transactions: walletStats.transactions,
       },
     };
+  },
+});
+
+// Presence changes frequently. Keep it out of getPlayerHomeSummary so a
+// friend's heartbeat cannot invalidate and rerun the much larger home query.
+export const getOnlineFriendCount = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireCurrentUser(ctx);
+    const friendships = await ctx.db
+      .query("friendships")
+      .withIndex("by_userId", (q) => q.eq("userId", actor.user._id))
+      .collect();
+    const uniqueFriendIds = Array.from(
+      new Map(friendships.map((friendship) => [String(friendship.friendId), friendship.friendId])).values(),
+    );
+    const friendDocs = await Promise.all(uniqueFriendIds.map((friendId) => ctx.db.get(friendId)));
+    const now = Date.now();
+    const timeoutMs = 2 * 60 * 1000;
+    return friendDocs.filter(
+      (friend) => friend?.isOnline && friend.lastActiveAt && now - friend.lastActiveAt < timeoutMs,
+    ).length;
   },
 });

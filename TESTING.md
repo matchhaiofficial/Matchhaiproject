@@ -29,6 +29,7 @@ npm test
 npm run test:unit       # __tests__/unit  (pure logic / services)
 npm run test:ui         # __tests__/ui    (component render)
 npm run test:security   # __tests__/security
+npm run test:convex     # in-memory Convex functions and scheduled jobs
 npm run test:watch      # watch mode
 npm run test:coverage   # coverage report -> ./coverage
 ```
@@ -39,6 +40,8 @@ npm run test:coverage   # coverage report -> ./coverage
 | Unit / service | `__tests__/unit` | game labels & roles, availability, match config, matchroom lifecycle/time, status labels, notification taxonomy, payment copy & safe errors, phone utils, pricing rules, skill rating, zone lifecycle, team roster, super-admin access. |
 | UI / component | `__tests__/ui` | MatchroomCard (full/expired/completed/seats/price/request/joined, no match code), ZonePicker (loading/empty/rate), SegmentedTabs, SkillBadge. |
 | Security | `__tests__/security` | backend auth gates (negative), super-admin escalation, matchroom lock/overfill abuse, mutation negative-auth matrix (`it.todo`). |
+| Journey contracts | `__tests__/security/journeyWiringContracts.test.ts` | Source-level server/client wiring checks for matchrooms, team challenges, chat, reports/blocks, signup/OTP/KYC, zone admin, and super-admin flows; not E2E. |
+| Usage safety | `__tests__/security/*Usage*Contracts.test.ts`, `__tests__/unit/*DueSafety.test.ts`, `convex-test/` | Static scheduler/reactivity guardrails, executable deadline invariants, and an in-memory Convex scheduled lifecycle test. |
 | Coverage tracker | `__tests__/coverage` | `it.todo` smoke list for screens pending RNTL automation. |
 
 ## E2E (Maestro)

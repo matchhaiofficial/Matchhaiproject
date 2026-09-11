@@ -30,7 +30,15 @@ export type LifecycleRoom = {
   resultVerification?: { status?: string; lifecyclePromptedAt?: number };
 };
 
+import { getSafeScheduleAt, MIN_SCHEDULE_DELAY_MS } from "./schedulingSafety";
+
 const REMINDER_WINDOWS_MS = [24 * HOUR_MS, 2 * HOUR_MS, 30 * 60 * 1000];
+
+// A due lifecycle may legitimately need one immediate pass (for example a
+// newly-full broadcast room). Convex accepts a timestamp in the past, but
+// scheduling at that timestamp can run back-to-back with no opportunity for
+// the state to advance. Keep immediate work asynchronous and bounded.
+export const LIFECYCLE_MIN_SCHEDULE_DELAY_MS = MIN_SCHEDULE_DELAY_MS;
 
 function asTimestamp(value: unknown): number | undefined {
   const timestamp = Number(value || 0);
@@ -64,6 +72,31 @@ function nextDue(candidates: Array<number | undefined>, now: number): number | u
   if (!valid.length) return undefined;
   const earliest = Math.min(...valid);
   return earliest <= now ? now : earliest;
+}
+
+/**
+ * Converts a lifecycle deadline into a scheduler timestamp. A past/due
+ * deadline gets exactly one short-delay attempt; callers must recompute the
+ * lifecycle deadline after that attempt and stop if it is not in the future.
+ */
+export function getLifecycleScheduleAt(dueAt: unknown, now = Date.now()): number | undefined {
+  return getSafeScheduleAt(dueAt, now);
+}
+
+/** Returns only a deadline that is strictly after `now`.
+ *
+ * This is the termination guard for scheduled lifecycle handlers: an
+ * unchanged due-at value must never be scheduled again indefinitely.
+ */
+export function getFutureLifecycleDueAt(room: LifecycleRoom, now = Date.now()): number | undefined {
+  const dueAt = getLifecycleDueAt(room, now);
+  return typeof dueAt === "number" && dueAt > now ? dueAt : undefined;
+}
+
+/** Recomputes the deadline from current room state, ignoring persisted due-at
+ * metadata that may be stale after an interrupted/old scheduler run. */
+export function recomputeLifecycleDueAt(room: LifecycleRoom, now = Date.now()): number | undefined {
+  return getLifecycleDueAt(room, now);
 }
 
 /** Returns the next time a lifecycle sweep can make a stateful change. */

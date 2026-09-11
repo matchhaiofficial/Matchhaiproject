@@ -46,7 +46,12 @@ import {
   assertBranchOperatingHoursAvailable,
   getBranchOperatingHoursAvailability,
 } from "./branchOperatingHours";
-import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
+import {
+  getFutureLifecycleDueAt,
+  getLifecycleScheduleAt,
+  getLifecycleDueAt,
+  withLifecycleDueAt,
+} from "./matchroomLifecycle";
 import {
   withBookingRequestLifecycleDueAt,
   withTeamChallengeLifecycleDueAt,
@@ -5413,7 +5418,7 @@ async function scheduleNextMatchroomLifecycle(ctx: any, room: any) {
   if (!room?._id || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
   if (Number(room.lifecycleScheduledAt || 0) === dueAt && room.lifecycleScheduledFnId) return;
   const scheduledId = await ctx.scheduler.runAt(
-    Math.max(Date.now(), dueAt),
+    getLifecycleScheduleAt(dueAt)!,
     internal.matchrooms.processScheduledLifecycle,
     { matchroomId: room._id, expectedDueAt: dueAt },
   );
@@ -5438,7 +5443,31 @@ async function processMatchroomLifecycle(ctx: any, matchroomId: Id<"matchrooms">
     return { changed: true, status: "expired" as const };
   }
 
-  const startValidation = canStartMatchroom(room, now);
+  if (["open", "locked"].includes(String(room.status || ""))) {
+    await maybeSendMatchroomReminders(ctx, room, now);
+  }
+
+  // A full broadcast room reaches this handler at the immediate dispatch
+  // boundary. Start the venue fan-out here; otherwise the safety guard below
+  // would correctly terminate the chain while leaving the room in idle.
+  if (
+    room.locationMode === "broadcast" &&
+    isRosterFull(room) &&
+    !room.venueConfirmedAt &&
+    !room.confirmedZoneId &&
+    ["idle", "waiting_for_fill"].includes(String(room.broadcastRequestStatus || ""))
+  ) {
+    await dispatchBroadcastZoneRequestsForMatchroom(ctx, matchroomId);
+    changed = true;
+  }
+
+  const awaitingVenue =
+    room.locationMode === "broadcast"
+      ? !(room.venueConfirmedAt || room.confirmedZoneId)
+      : Boolean(room.zoneId) && !(room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true);
+  const startValidation = awaitingVenue
+    ? { ok: false, reason: "venue_not_confirmed" }
+    : canStartMatchroom(room, now);
   if (startValidation.ok) {
     await ctx.db.patch(matchroomId, withLifecycleDueAt(room, {
       status: "in-progress",
@@ -5488,6 +5517,37 @@ async function processMatchroomLifecycle(ctx: any, matchroomId: Id<"matchrooms">
     }
     changed = result.changed;
   }
+
+  // Completed rooms need one scheduled pass to open result verification and
+  // notify the captains. This used to be handled only by the indexed sweep,
+  // leaving event-driven lifecycle processing as a no-op for this state.
+  const lifecycleRoom = changed ? await ctx.db.get(matchroomId) : refreshedRoom;
+  if (lifecycleRoom?.status === "completed") {
+    const rv: any = lifecycleRoom.resultVerification || {};
+    const validation = canEnterResultVerification(lifecycleRoom);
+    if (rv.status !== "resolved" && rv.status !== "admin_review" && !validation.ok) {
+      await markInvalidResultVerificationForAdminReview(
+        ctx,
+        matchroomId,
+        lifecycleRoom,
+        validation.reason,
+      );
+      return { changed: true, status: "admin_review" as const };
+    }
+    if (validation.ok && (!rv.status || rv.status === "pending")) {
+      await maybeSendResultVerificationRequired(ctx, lifecycleRoom);
+      await ctx.db.patch(matchroomId, {
+        resultVerification: {
+          ...rv,
+          status: rv.status || "pending",
+          lifecyclePromptedAt: now,
+        },
+        lifecycleDueAt: undefined,
+        updatedAt: now,
+      });
+      return { changed: true, status: "completed" as const };
+    }
+  }
   return { changed };
 }
 
@@ -5507,7 +5567,24 @@ export const processScheduledLifecycle = internalMutation({
     }
     const result = await processMatchroomLifecycle(ctx, room._id, room);
     const fresh = await ctx.db.get(room._id);
-    if (fresh) await scheduleNextMatchroomLifecycle(ctx, fresh);
+    if (fresh) {
+      // Recompute after every run. If processing did not advance the room to
+      // a strictly-future boundary, clear the deadline and terminate this
+      // chain. This is the invariant that prevents an unchanged expired
+      // lifecycleDueAt from creating an unbounded scheduler loop.
+      const nextDueAt = getFutureLifecycleDueAt(fresh, Date.now());
+      if (fresh.lifecycleDueAt !== nextDueAt) {
+        await ctx.db.patch(fresh._id, {
+          lifecycleDueAt: nextDueAt,
+          lifecycleScheduledAt: undefined,
+          lifecycleScheduledFnId: undefined,
+        });
+      }
+      const normalized = await ctx.db.get(fresh._id);
+      if (normalized && nextDueAt !== undefined) {
+        await scheduleNextMatchroomLifecycle(ctx, normalized);
+      }
+    }
     return result;
   },
 });
@@ -7139,6 +7216,9 @@ export const notifyAreaPlayersOfNewMatchroomBatch = internalMutation({
     }
 
     if (!page.isDone) {
+      if (!page.continueCursor || page.continueCursor === args.cursor) {
+        throw new Error("Matchroom-area notification pagination made no progress.");
+      }
       await ctx.scheduler.runAfter(0, internal.matchrooms.notifyAreaPlayersOfNewMatchroomBatch, {
         matchroomId: args.matchroomId,
         targetAreas: args.targetAreas,

@@ -468,6 +468,9 @@ export const notifyZoneLiveNearbyPlayersBatch = internalMutation({
     }
 
     if (!page.isDone) {
+      if (!page.continueCursor || page.continueCursor === args.cursor) {
+        throw new Error("Zone-live notification pagination made no progress.");
+      }
       await ctx.scheduler.runAfter(0, internal.zones.notifyZoneLiveNearbyPlayersBatch, {
         zoneId: args.zoneId,
         cursor: page.continueCursor,

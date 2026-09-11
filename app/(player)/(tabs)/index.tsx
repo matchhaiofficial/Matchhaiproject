@@ -369,6 +369,10 @@ export default function PlayerDashboard() {
     api.dashboard.getPlayerHomeSummary,
     protectedQueriesReady && user?._id ? { userId: user._id as Id<"users"> } : "skip",
   );
+  const onlineFriendCount = useQuery(
+    api.dashboard.getOnlineFriendCount,
+    protectedQueriesReady && user?._id ? {} : "skip",
+  );
 
   const notificationCount =
     useQuery(
@@ -411,7 +415,7 @@ export default function PlayerDashboard() {
   const nearbyZones = ((dashboardSummary?.nearbyZones || []) as Zone[])
     .filter((zone) => zone.type !== "sports" && getZoneGameLabels(zone).length > 0);
   const requestStats = dashboardSummary?.requestStats || { myRequests: 0, myOffers: 0 };
-  const friendCount = dashboardSummary?.friendCount || 0;
+  const friendCount = onlineFriendCount || 0;
   const walletStats = dashboardSummary?.walletStats || {
     balance: Number(user?.walletBalance || 0),
     totalSpent: 0,

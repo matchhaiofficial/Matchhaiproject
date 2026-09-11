@@ -89,6 +89,9 @@ export const prepareZoneScheduleIndex = internalMutation({
     }
 
     if (!page.isDone) {
+      if (!page.continueCursor || page.continueCursor === args.cursor) {
+        throw new Error(`Schedule index migration made no progress in phase ${phase}.`);
+      }
       await ctx.scheduler.runAfter(0, (internal as any).scheduleIndexMigration.prepareZoneScheduleIndex, {
         zoneId: args.zoneId,
         phase,

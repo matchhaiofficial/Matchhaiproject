@@ -1068,6 +1068,8 @@ export default defineSchema({
     requestOwnerUid: v.optional(v.string()),
     message: v.optional(v.string()),
     responseExpiresAt: v.optional(v.number()),
+    expiryScheduledAt: v.optional(v.number()),
+    expiryScheduledFnId: v.optional(v.string()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1756,7 +1758,11 @@ export default defineSchema({
     .index("by_matchroomId", ["matchroomId"])
     .index("by_matchroomId_type_status", ["matchroomId", "type", "status"])
     .index("by_entityKey", ["entityKey"])
-    .index("by_dedupeKey", ["dedupeKey"]),
+    .index("by_dedupeKey", ["dedupeKey"])
+    // Dedupe lookups inspect the newest records first. Keeping creation time
+    // in the index lets those lookups stay bounded even after old versions
+    // have accumulated under one logical key.
+    .index("by_dedupeKey_and_createdAt", ["dedupeKey", "createdAt"]),
 
   pushDevices: defineTable({
     userId: v.id("users"),
