@@ -98,7 +98,7 @@ export const runScheduleExistingMatchroomLifecycles = migrations.runner(
 export const scheduleExistingTeamChallengeLifecycles: any = migrations.define({
   table: "teamChallenges",
   migrateOne: async (ctx, challenge): Promise<any> => {
-    const computedDueAt = challenge.lifecycleDueAt ?? getTeamChallengeLifecycleDueAt(challenge);
+    const computedDueAt = getTeamChallengeLifecycleDueAt(challenge);
     const lifecycleDueAt = Number(computedDueAt || 0);
     if (!Number.isFinite(lifecycleDueAt) || lifecycleDueAt <= 0 || lifecycleDueAt === Number.MAX_SAFE_INTEGER) {
       return challenge.lifecycleDueAt === computedDueAt ? undefined : { lifecycleDueAt: computedDueAt };
