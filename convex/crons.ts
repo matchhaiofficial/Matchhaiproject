@@ -6,8 +6,8 @@ const crons = cronJobs();
 
 if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_LIFECYCLE_CRON")) {
   crons.interval(
-    "matchroom lifecycle sweep",
-    { minutes: 2 },
+    "matchroom lifecycle recovery",
+    { minutes: 30 },
     (internal as any).matchrooms.runLifecycleSweep,
     { batchSize: 25 },
   );
@@ -24,8 +24,8 @@ if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_ZONE_PILOT_CRON")) {
 
 if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_ZONE_BOOKING_EXPIRY_CRON")) {
   crons.interval(
-    "zone booking request expiry sweep",
-    { minutes: 2 },
+    "zone booking request expiry recovery",
+    { minutes: 30 },
     (internal as any).zoneAdminBooking.expireStaleBookingRequests,
     { batchSize: 50 },
   );
@@ -38,7 +38,7 @@ if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_ZONE_BOOKING_EXPIRY_CRON")) {
 if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_PAYMENT_RECONCILER_CRON")) {
   crons.interval(
     "stale payment reconciler",
-    { minutes: 5 },
+    { minutes: 15 },
     (internal as any).easypaisa.reconcileStalePayments,
     { batchSize: 15 },
   );
@@ -50,8 +50,8 @@ if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_PAYMENT_RECONCILER_CRON")) {
 // lifecycle sweep instead.
 if (isMaintenanceJobEnabled("MATCHHAI_ENABLE_TEAM_CHALLENGE_EXPIRY_CRON")) {
   crons.interval(
-    "team challenge expiry sweep",
-    { minutes: 30 },
+    "team challenge expiry recovery",
+    { hours: 6 },
     (internal as any).teamChallenges.expireStaleChallenges,
     { batchSize: 25 },
   );

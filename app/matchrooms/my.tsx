@@ -28,7 +28,7 @@ import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { getRoomDisplayStatus } from "../../src/utils/matchroomLifecycle";
 import { formatEnumLabel } from "../../src/utils/statusLabels";
-import styles from "./my.styles";
+import styles from "../../app-shared/matchrooms/my.styles";
 
 type Tab = 'hosted' | 'joined';
 type MatchroomDateRange = "all" | "today" | "this_week" | "past";

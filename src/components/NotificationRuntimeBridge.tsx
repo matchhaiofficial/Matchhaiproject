@@ -170,9 +170,14 @@ export default function NotificationRuntimeBridge() {
     profileUserId: userId,
   });
   const playerQueriesReady = authenticatedProfileReady && !isZoneAdmin && !isSuperAdmin;
-  const dashboardSummary = useQuery(
-    api.dashboard.getPlayerHomeSummary,
-    playerQueriesReady && userId ? { userId } : "skip"
+  // The runtime bridge only needs the next few rooms for local reminders.
+  // Subscribing to the full home dashboard here kept its broad query alive on
+  // every screen and amplified unrelated database updates.
+  const upcomingSchedule = useQuery(
+    api.matchrooms.listForUserSchedule,
+    playerQueriesReady && userId
+      ? { uid: String(userId), tab: "upcoming" as const, limit: 3 }
+      : "skip"
   );
   const unreadBadgeCount = useQuery(
     api.notifications.countUnreadFast,
@@ -183,7 +188,7 @@ export default function NotificationRuntimeBridge() {
     authenticatedProfileReady && userId && isZoneAdmin ? { userId, limit: 100 } : "skip"
   );
 
-  const upcomingRooms = useMemo(() => dashboardSummary?.upcomingRooms || [], [dashboardSummary?.upcomingRooms]);
+  const upcomingRooms = useMemo(() => upcomingSchedule?.page || [], [upcomingSchedule?.page]);
   const effectiveBadgeCount = useMemo(() => {
     if (isZoneAdmin) {
       if (!zoneUnreadNotifications) return undefined;

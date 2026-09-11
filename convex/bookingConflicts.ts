@@ -1,3 +1,5 @@
+import { parseKarachiDateTimeMillis } from "./karachiDateTime";
+
 const USER_BUSY_MATCHROOM_STATUSES = new Set(["open", "locked", "in-progress"]);
 const RESOURCE_BUSY_MATCHROOM_STATUSES = new Set(["open", "locked", "in-progress"]);
 const BUSY_BOOKING_REQUEST_STATUSES = new Set(["open", "pending_payment", "accepted"]);
@@ -91,7 +93,7 @@ export function getRequiredResourceProfile(input: {
     return {
       assetType: "console",
       requiredResourceIds: 1,
-      tier: ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
+      tier: ["regular", "premium", "elite", "ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
       surface: "",
     };
   }
@@ -111,46 +113,23 @@ export function getRequiredResourceProfile(input: {
   };
 }
 
-function parseLocalDateTimeMillis(dateValue?: string | number | null, timeValue?: string | null) {
-  const timeText = String(timeValue || "").trim();
-  if (!timeText) return null;
-
-  let dateText = "";
-  if (typeof dateValue === "number" && Number.isFinite(dateValue)) {
-    const date = new Date(dateValue);
-    dateText = [
-      date.getFullYear(),
-      String(date.getMonth() + 1).padStart(2, "0"),
-      String(date.getDate()).padStart(2, "0"),
-    ].join("-");
-  } else {
-    dateText = String(dateValue || "").trim();
-  }
-  if (!dateText) return null;
-
-  let time = timeText;
-  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
-  if (twelveHour) {
-    let hour = Number(twelveHour[1]);
-    const minute = Number(twelveHour[2]);
-    const period = twelveHour[3].toUpperCase();
-    if (period === "PM" && hour !== 12) hour += 12;
-    if (period === "AM" && hour === 12) hour = 0;
-    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(`${dateText}T${time}`).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function getRoomStartAt(room: any) {
   const direct = Number(room?.scheduledStartAt || room?.startTime || 0);
   if (Number.isFinite(direct) && direct > 0) return direct;
-  return parseLocalDateTimeMillis(room?.scheduledDate, room?.scheduledTime);
+  return parseKarachiDateTimeMillis(room?.scheduledDate, room?.scheduledTime);
 }
 
 function getRequestStartAt(request: any) {
-  return parseLocalDateTimeMillis(request?.preferredDate, request?.preferredTime);
+  const direct = Number(request?.scheduledStartAt || 0);
+  return Number.isFinite(direct) && direct > 0
+    ? direct
+    : parseKarachiDateTimeMillis(request?.preferredDate, request?.preferredTime);
+}
+
+async function requestHasTerminalOrMissingLinkedRoom(ctx: any, request: any) {
+  if (!request?.matchroomId) return false;
+  const room = await ctx.db.get(request.matchroomId).catch(() => null);
+  return !room || ["completed", "cancelled", "expired"].includes(String(room.status || ""));
 }
 
 export function getBookingRequestStartAtForConflict(request: any) {
@@ -197,10 +176,245 @@ function resourceMatchesProfile(resource: any, profile: ReturnType<typeof getReq
 
 function resourceIsSelectable(resource: any, excludeRequestId?: string | null, excludeMatchroomId?: string | null) {
   const status = normalizeToken(resource?.lifecycleStatus);
+  if (resource?.isActive === false || status === "maintenance") return false;
   if (status === "available") return true;
   const sameRequest = excludeRequestId && String(resource?.bookingRequestId || "") === String(excludeRequestId);
   const sameMatchroom = excludeMatchroomId && String(resource?.matchroomId || "") === String(excludeMatchroomId);
-  return Boolean((status === "held" || status === "booked") && (sameRequest || sameMatchroom));
+  if ((status === "held" || status === "booked") && (sameRequest || sameMatchroom)) return true;
+  // A physical resource may be reserved for multiple non-overlapping future
+  // slots. Exact room/request overlap checks below are the source of truth;
+  // lifecycleStatus alone is not a global calendar lock.
+  return status === "held" || status === "booked";
+}
+
+const MAX_WINDOW_ROWS = 500;
+const MAX_BOOKING_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+async function getZoneRowsNearSlot(ctx: any, input: {
+  table: "matchrooms" | "bookingRequests";
+  zoneId: string;
+  targetStart: number;
+  targetDuration: number;
+}) {
+  const targetEnd = input.targetStart + input.targetDuration * 60_000;
+  const from = input.targetStart - MAX_BOOKING_LOOKBACK_MS;
+  const current = await ctx.db.query(input.table)
+    .withIndex("by_zoneId_and_scheduledStartAt", (q: any) =>
+      q.eq("zoneId", input.zoneId as any).gte("scheduledStartAt", from).lt("scheduledStartAt", targetEnd),
+    )
+    .take(MAX_WINDOW_ROWS + 1);
+  const legacy: any[] = [];
+  const zone = await ctx.db.get(input.zoneId as any).catch(() => null);
+  if (Number(zone?.scheduleIndexVersion || 0) < 1) {
+    const statuses = input.table === "matchrooms"
+      ? Array.from(RESOURCE_BUSY_MATCHROOM_STATUSES)
+      : Array.from(BUSY_BOOKING_REQUEST_STATUSES);
+    for (const status of statuses) {
+      const rows = input.table === "matchrooms"
+        ? await ctx.db.query("matchrooms")
+            .withIndex("by_zoneId_and_status_and_createdAt", (q: any) =>
+              q.eq("zoneId", input.zoneId).eq("status", status),
+            ).order("desc").take(MAX_WINDOW_ROWS + 1)
+        : await ctx.db.query("bookingRequests")
+            .withIndex("by_zoneId_and_status_and_updatedAt", (q: any) =>
+              q.eq("zoneId", input.zoneId as any).eq("status", status),
+            ).order("desc").take(MAX_WINDOW_ROWS + 1);
+      if (rows.length > MAX_WINDOW_ROWS) {
+        throw new Error("This venue has too many active booking records to verify safely. Please contact support.");
+      }
+      legacy.push(...rows.filter((row: any) => !Number(row.scheduledStartAt || 0)));
+    }
+  }
+  if (current.length > MAX_WINDOW_ROWS) {
+    throw new Error("This venue has too many active booking records to verify safely. Please contact support.");
+  }
+  return [...current, ...legacy];
+}
+
+async function getPendingZoneOffers(ctx: any, zoneId: string) {
+  const current = await ctx.db.query("zoneOffers")
+    .withIndex("by_zoneId_and_status_and_expiresAt", (q: any) =>
+      q.eq("zoneId", zoneId as any).eq("status", "pending").gte("expiresAt", Date.now()),
+    )
+    .take(MAX_WINDOW_ROWS + 1);
+  const legacy = await ctx.db.query("zoneOffers")
+    .withIndex("by_zoneId_and_status_and_expiresAt", (q: any) =>
+      q.eq("zoneId", zoneId as any).eq("status", "pending").eq("expiresAt", undefined),
+    )
+    .take(MAX_WINDOW_ROWS + 1);
+  if (current.length > MAX_WINDOW_ROWS || legacy.length > MAX_WINDOW_ROWS) {
+    throw new Error("This venue has too many pending offers to verify safely. Please contact support.");
+  }
+  return [...current, ...legacy];
+}
+
+function belongsToBranch(candidateBranchId: unknown, branchId: string, primaryBranchId?: string | null) {
+  const candidate = String(candidateBranchId || "").trim();
+  if (candidate) return candidate === branchId;
+  // Historical zone-scoped rows predate branch IDs and refer to the primary
+  // branch. Fail closed when that primary branch is being removed.
+  return Boolean(primaryBranchId) && branchId === String(primaryBranchId);
+}
+
+export async function findActiveBranchAssignment(ctx: any, input: {
+  zoneId: string;
+  branchId: string;
+  primaryBranchId?: string | null;
+}) {
+  for (const status of RESOURCE_BUSY_MATCHROOM_STATUSES) {
+    const rows = await ctx.db.query("matchrooms")
+      .withIndex("by_zoneId_and_status_and_createdAt", (q: any) =>
+        q.eq("zoneId", input.zoneId).eq("status", status),
+      )
+      .order("desc")
+      .take(MAX_WINDOW_ROWS + 1);
+    if (rows.length > MAX_WINDOW_ROWS) {
+      throw new Error("This venue has too many active matchrooms to delete a branch safely.");
+    }
+    const room = rows.find((candidate: any) => belongsToBranch(
+      candidate.confirmedBranchId || candidate.branchId,
+      input.branchId,
+      input.primaryBranchId,
+    ));
+    if (room) return { kind: "matchroom", id: room._id };
+  }
+
+  for (const status of BUSY_BOOKING_REQUEST_STATUSES) {
+    const rows = await ctx.db.query("bookingRequests")
+      .withIndex("by_zoneId_and_status_and_updatedAt", (q: any) =>
+        q.eq("zoneId", input.zoneId as any).eq("status", status),
+      )
+      .order("desc")
+      .take(MAX_WINDOW_ROWS + 1);
+    if (rows.length > MAX_WINDOW_ROWS) {
+      throw new Error("This venue has too many active booking requests to delete a branch safely.");
+    }
+    for (const request of rows) {
+      if (!belongsToBranch(request.allocatedBranchId, input.branchId, input.primaryBranchId)) continue;
+      if (status === "accepted" && await requestHasTerminalOrMissingLinkedRoom(ctx, request)) continue;
+      return { kind: "bookingRequest", id: request._id };
+    }
+  }
+
+  const offers = await getPendingZoneOffers(ctx, input.zoneId);
+  const offer = offers.find((candidate: any) => belongsToBranch(
+    candidate.branchId,
+    input.branchId,
+    input.primaryBranchId,
+  ));
+  return offer ? { kind: "zoneOffer", id: offer._id } : null;
+}
+
+export type ActiveResourceAssignment = {
+  lifecycleStatus: "held" | "booked";
+  bookingRequestId?: any;
+  matchroomId?: any;
+};
+
+// zoneResources keeps one legacy pointer for older clients, while the canonical
+// allocation lives on booking requests, matchrooms, and offers. Reconcile that
+// pointer after releases so cancelling one slot cannot make a resource used by
+// another slot appear globally available.
+export async function findActiveResourceAssignment(ctx: any, input: {
+  zoneId: string;
+  resourceId: any;
+  excludeBookingRequestId?: string | null;
+  excludeMatchroomId?: string | null;
+}): Promise<ActiveResourceAssignment | null> {
+  const resourceId = String(input.resourceId);
+  for (const status of RESOURCE_BUSY_MATCHROOM_STATUSES) {
+    const rows = await ctx.db.query("matchrooms")
+      .withIndex("by_zoneId_and_status_and_createdAt", (q: any) =>
+        q.eq("zoneId", input.zoneId).eq("status", status),
+      )
+      .order("desc")
+      .take(MAX_WINDOW_ROWS + 1);
+    if (rows.length > MAX_WINDOW_ROWS) {
+      throw new Error("This venue has too many active matchrooms to reconcile resource inventory safely.");
+    }
+    const room = rows.find((candidate: any) =>
+      String(candidate._id) !== String(input.excludeMatchroomId || "")
+      && (candidate.resourceIds || []).some((id: any) => String(id) === resourceId),
+    );
+    if (room) return { lifecycleStatus: "booked", matchroomId: room._id };
+  }
+
+  for (const status of BUSY_BOOKING_REQUEST_STATUSES) {
+    const rows = await ctx.db.query("bookingRequests")
+      .withIndex("by_zoneId_and_status_and_updatedAt", (q: any) =>
+        q.eq("zoneId", input.zoneId as any).eq("status", status),
+      )
+      .order("desc")
+      .take(MAX_WINDOW_ROWS + 1);
+    if (rows.length > MAX_WINDOW_ROWS) {
+      throw new Error("This venue has too many active booking requests to reconcile resource inventory safely.");
+    }
+    for (const request of rows) {
+      if (String(request._id) === String(input.excludeBookingRequestId || "")) continue;
+      if (String(request.matchroomId || "") === String(input.excludeMatchroomId || "")) continue;
+      if (!(request.allocatedResourceIds || []).some((id: any) => String(id) === resourceId)) continue;
+      if (status === "accepted" && await requestHasTerminalOrMissingLinkedRoom(ctx, request)) continue;
+      return {
+        lifecycleStatus: status === "accepted" ? "booked" : "held",
+        bookingRequestId: request._id,
+        matchroomId: request.matchroomId,
+      };
+    }
+  }
+
+  const offers = await getPendingZoneOffers(ctx, input.zoneId);
+  const offer = offers.find((candidate: any) =>
+    String(candidate.requestId || "") !== String(input.excludeBookingRequestId || "")
+    && (candidate.resourceIds || []).some((id: any) => String(id) === resourceId),
+  );
+  if (!offer) return null;
+  const request = await ctx.db.get(offer.requestId).catch(() => null);
+  return {
+    lifecycleStatus: "held",
+    bookingRequestId: offer.requestId,
+    matchroomId: request?.matchroomId,
+  };
+}
+
+export async function reconcileResourceLegacyAssignment(ctx: any, input: {
+  resourceId: any;
+  excludeBookingRequestId?: string | null;
+  excludeMatchroomId?: string | null;
+  now?: number;
+}) {
+  const resource = await ctx.db.get(input.resourceId).catch(() => null);
+  if (!resource || resource.lifecycleStatus === "maintenance") return null;
+  const assignment = await findActiveResourceAssignment(ctx, {
+    zoneId: String(resource.zoneId),
+    resourceId: resource._id,
+    excludeBookingRequestId: input.excludeBookingRequestId,
+    excludeMatchroomId: input.excludeMatchroomId,
+  });
+  await ctx.db.patch(resource._id, assignment ? {
+    lifecycleStatus: assignment.lifecycleStatus,
+    bookingRequestId: assignment.bookingRequestId,
+    matchroomId: assignment.matchroomId,
+    updatedAt: input.now || Date.now(),
+  } : {
+    lifecycleStatus: "available",
+    bookingRequestId: undefined,
+    matchroomId: undefined,
+    bookedAt: undefined,
+    bookedByUid: undefined,
+    updatedAt: input.now || Date.now(),
+  });
+  return assignment;
+}
+
+function getOfferStarts(offer: any) {
+  const options = Array.isArray(offer?.scheduleOptions) ? offer.scheduleOptions : [];
+  const starts = options.map((option: any) =>
+    Number(option?.startAt || 0) || parseKarachiDateTimeMillis(option?.date, option?.time) || 0,
+  );
+  const primary = Number(offer?.proposedStartAt || 0)
+    || parseKarachiDateTimeMillis(offer?.proposedDate, offer?.proposedTime)
+    || 0;
+  return Array.from(new Set([primary, ...starts].filter((value) => Number.isFinite(value) && value > 0)));
 }
 
 async function getUserRooms(ctx: any, uid: string) {
@@ -279,6 +493,10 @@ export async function assertNoParticipantTimeConflict(ctx: any, input: {
     for (const request of bookingRequests) {
       if (String(request._id) === String(input.excludeBookingRequestId || "")) continue;
       if (!BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+      // Accepted request rows are retained for history. Once their canonical
+      // matchroom is terminal (or missing), they must not remain a ghost time
+      // conflict forever.
+      if (await requestHasTerminalOrMissingLinkedRoom(ctx, request)) continue;
       const requestStart = getRequestStartAt(request);
       if (!requestStart) continue;
       if (timesOverlap(targetStart, targetDuration, requestStart, getDurationMinutes(request))) {
@@ -333,22 +551,30 @@ export async function assertZoneResourceCapacityAvailable(ctx: any, input: {
   if (!profile.assetType || profile.requiredResourceIds <= 0) return;
   const targetDuration = Math.max(1, Math.floor(Number(input.durationMinutes || 60)));
 
-  const resources = await ctx.db
-    .query("zoneResources")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId as any))
-    .take(500);
+  const resourceQuery = input.branchId
+    ? ctx.db.query("zoneResources").withIndex("by_zoneId_and_branchId", (q: any) =>
+        q.eq("zoneId", zoneId as any).eq("branchId", input.branchId!),
+      )
+    : ctx.db.query("zoneResources").withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId as any));
+  const resourcePage = await resourceQuery.take(501);
+  if (resourcePage.length > 500) {
+    throw new Error("This venue has too many resources to verify safely. Please contact support.");
+  }
+  const resources = resourcePage.slice(0, 500);
   const availableResourceCount = resources.filter((resource: any) =>
     sameBranchOrConservative(input.branchId, resource.branchId) &&
     resourceMatchesProfile(resource, profile) &&
-    resourceIsSelectable(resource, input.excludeBookingRequestId, input.excludeMatchroomId)
+    normalizeToken(resource.lifecycleStatus) !== "maintenance"
   ).length;
 
-  let unallocatedDemand = 0;
+  let overlappingDemand = 0;
   const countedMatchroomIds = new Set<string>();
-  const rooms = await ctx.db
-    .query("matchrooms")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId))
-    .take(300);
+  const rooms = await getZoneRowsNearSlot(ctx, {
+    table: "matchrooms",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
   for (const room of rooms) {
     if (String(room._id) === String(input.excludeMatchroomId || "")) continue;
     if (!RESOURCE_BUSY_MATCHROOM_STATUSES.has(String(room.status || ""))) continue;
@@ -364,18 +590,21 @@ export async function assertZoneResourceCapacityAvailable(ctx: any, input: {
     });
     if (!profileSharesPool(profile, roomProfile)) continue;
     countedMatchroomIds.add(String(room._id));
-    if (Array.isArray(room.resourceIds) && room.resourceIds.length > 0) continue;
-    unallocatedDemand += roomProfile.requiredResourceIds;
+    overlappingDemand += roomProfile.requiredResourceIds;
   }
 
-  const requests = await ctx.db
-    .query("bookingRequests")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId as any))
-    .take(300);
+  const requests = await getZoneRowsNearSlot(ctx, {
+    table: "bookingRequests",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
+  const countedRequestIds = new Set<string>();
   for (const request of requests) {
     if (String(request._id) === String(input.excludeBookingRequestId || "")) continue;
     if (request.matchroomId && countedMatchroomIds.has(String(request.matchroomId))) continue;
     if (!BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+    if (await requestHasTerminalOrMissingLinkedRoom(ctx, request)) continue;
     const requestStart = getRequestStartAt(request);
     if (!requestStart || !timesOverlap(targetStart, targetDuration, requestStart, getDurationMinutes(request))) continue;
     if (!sameBranchOrConservative(input.branchId, request.allocatedBranchId)) continue;
@@ -387,13 +616,149 @@ export async function assertZoneResourceCapacityAvailable(ctx: any, input: {
       selectedZoneRateKey: request.selectedZoneRateKey,
     });
     if (!profileSharesPool(profile, requestProfile)) continue;
-    if (Array.isArray(request.allocatedResourceIds) && request.allocatedResourceIds.length > 0) continue;
-    unallocatedDemand += requestProfile.requiredResourceIds;
+    countedRequestIds.add(String(request._id));
+    overlappingDemand += requestProfile.requiredResourceIds;
   }
 
-  if (availableResourceCount - unallocatedDemand < profile.requiredResourceIds) {
+
+  const pendingOffers = await getPendingZoneOffers(ctx, zoneId);
+  for (const offer of pendingOffers) {
+    if (String(offer.requestId) === String(input.excludeBookingRequestId || "")) continue;
+    if (countedRequestIds.has(String(offer.requestId))) continue;
+    if (!sameBranchOrConservative(input.branchId, offer.branchId)) continue;
+    const request = await ctx.db.get(offer.requestId);
+    if (!request || !BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+    const duration = getDurationMinutes(request);
+    if (!getOfferStarts(offer).some((start) => timesOverlap(targetStart, targetDuration, start, duration))) continue;
+    const requestProfile = getRequiredResourceProfile(request);
+    if (!profileSharesPool(profile, requestProfile)) continue;
+    overlappingDemand += requestProfile.requiredResourceIds;
+  }
+
+  if (availableResourceCount - overlappingDemand < profile.requiredResourceIds) {
     throw new Error(input.message || ZONE_RESOURCE_UNAVAILABLE_MESSAGE);
   }
+}
+
+export async function getZoneRateOptionsAvailability(ctx: any, input: {
+  zoneId: string;
+  branchId?: string | null;
+  scheduledStartAt: number;
+  durationMinutes: number;
+  game: string;
+  options: Array<{
+    key: string;
+    assetType: string;
+    tier?: string | null;
+    surface?: string | null;
+  }>;
+}) {
+  const zoneId = String(input.zoneId || "").trim();
+  const targetStart = Number(input.scheduledStartAt || 0);
+  const targetDuration = Math.max(1, Math.floor(Number(input.durationMinutes || 60)));
+  if (!zoneId || !Number.isFinite(targetStart) || targetStart <= 0) {
+    return input.options.map((option) => ({
+      key: option.key,
+      available: false,
+      availableCount: 0,
+      requiredCount: 0,
+      message: "Choose a valid date and time.",
+    }));
+  }
+
+  const resourceQuery = input.branchId
+    ? ctx.db.query("zoneResources").withIndex("by_zoneId_and_branchId", (q: any) =>
+        q.eq("zoneId", zoneId as any).eq("branchId", input.branchId!),
+      )
+    : ctx.db.query("zoneResources").withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId as any));
+  const resourcePage = await resourceQuery.take(501);
+  if (resourcePage.length > 500) {
+    throw new Error("This venue has too many resources to verify safely. Please contact support.");
+  }
+  const resources = resourcePage.slice(0, 500);
+  const rooms = await getZoneRowsNearSlot(ctx, {
+    table: "matchrooms",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
+  const requests = await getZoneRowsNearSlot(ctx, {
+    table: "bookingRequests",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
+  const pendingOffers = await getPendingZoneOffers(ctx, zoneId);
+  const activeRequests: any[] = [];
+  for (const request of requests) {
+    if (!BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+    if (await requestHasTerminalOrMissingLinkedRoom(ctx, request)) continue;
+    activeRequests.push(request);
+  }
+  const offerRequestById = new Map<string, any>();
+  for (const offer of pendingOffers) {
+    const requestId = String(offer.requestId);
+    if (offerRequestById.has(requestId)) continue;
+    offerRequestById.set(requestId, await ctx.db.get(offer.requestId));
+  }
+
+  return await Promise.all(input.options.map(async (option) => {
+    const profile = getRequiredResourceProfile({
+      game: input.game,
+      requestedResourceAssetType: option.assetType,
+      requestedResourceTier: option.tier,
+      requestedResourceSurface: option.surface,
+      selectedZoneRateKey: option.key,
+    });
+    const totalCount = resources.filter((resource: any) =>
+      sameBranchOrConservative(input.branchId, resource.branchId)
+      && resourceMatchesProfile(resource, profile)
+      && normalizeToken(resource.lifecycleStatus) !== "maintenance"
+    ).length;
+    let overlappingDemand = 0;
+    const countedRoomIds = new Set<string>();
+    for (const room of rooms) {
+      if (!RESOURCE_BUSY_MATCHROOM_STATUSES.has(String(room.status || ""))) continue;
+      const roomStart = getRoomStartAt(room);
+      if (!roomStart || !timesOverlap(targetStart, targetDuration, roomStart, getDurationMinutes(room))) continue;
+      if (!sameBranchOrConservative(input.branchId, room.branchId || room.confirmedBranchId)) continue;
+      const roomProfile = getRequiredResourceProfile(room);
+      if (!profileSharesPool(profile, roomProfile)) continue;
+      countedRoomIds.add(String(room._id));
+      overlappingDemand += roomProfile.requiredResourceIds;
+    }
+    const countedRequestIds = new Set<string>();
+    for (const request of activeRequests) {
+      if (request.matchroomId && countedRoomIds.has(String(request.matchroomId))) continue;
+      const requestStart = getRequestStartAt(request);
+      if (!requestStart || !timesOverlap(targetStart, targetDuration, requestStart, getDurationMinutes(request))) continue;
+      if (!sameBranchOrConservative(input.branchId, request.allocatedBranchId)) continue;
+      const requestProfile = getRequiredResourceProfile(request);
+      if (!profileSharesPool(profile, requestProfile)) continue;
+      countedRequestIds.add(String(request._id));
+      overlappingDemand += requestProfile.requiredResourceIds;
+    }
+    for (const offer of pendingOffers) {
+      if (countedRequestIds.has(String(offer.requestId))) continue;
+      if (!sameBranchOrConservative(input.branchId, offer.branchId)) continue;
+      const request = offerRequestById.get(String(offer.requestId));
+      if (!request || !BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
+      if (!getOfferStarts(offer).some((start) => timesOverlap(targetStart, targetDuration, start, getDurationMinutes(request)))) continue;
+      const requestProfile = getRequiredResourceProfile(request);
+      if (profileSharesPool(profile, requestProfile)) overlappingDemand += requestProfile.requiredResourceIds;
+    }
+    const availableCount = Math.max(0, totalCount - overlappingDemand);
+    const available = availableCount >= profile.requiredResourceIds;
+    return {
+      key: option.key,
+      available,
+      availableCount,
+      requiredCount: profile.requiredResourceIds,
+      message: available
+        ? "Available"
+        : `Only ${availableCount} of ${profile.requiredResourceIds} required resources are available at this time.`,
+    };
+  }));
 }
 
 export async function assertSelectedResourcesAvailableForSlot(ctx: any, input: {
@@ -425,10 +790,12 @@ export async function assertSelectedResourcesAvailableForSlot(ctx: any, input: {
     }
   }
 
-  const rooms = await ctx.db
-    .query("matchrooms")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId))
-    .take(300);
+  const rooms = await getZoneRowsNearSlot(ctx, {
+    table: "matchrooms",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
   for (const room of rooms) {
     if (String(room._id) === String(input.excludeMatchroomId || "")) continue;
     if (!RESOURCE_BUSY_MATCHROOM_STATUSES.has(String(room.status || ""))) continue;
@@ -440,10 +807,12 @@ export async function assertSelectedResourcesAvailableForSlot(ctx: any, input: {
     }
   }
 
-  const requests = await ctx.db
-    .query("bookingRequests")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", zoneId as any))
-    .take(300);
+  const requests = await getZoneRowsNearSlot(ctx, {
+    table: "bookingRequests",
+    zoneId,
+    targetStart,
+    targetDuration,
+  });
   for (const request of requests) {
     if (String(request._id) === String(input.excludeBookingRequestId || "")) continue;
     if (!BUSY_BOOKING_REQUEST_STATUSES.has(String(request.status || ""))) continue;
@@ -452,6 +821,19 @@ export async function assertSelectedResourcesAvailableForSlot(ctx: any, input: {
     const overlap = (request.allocatedResourceIds || []).some((resourceId: any) => resourceIdSet.has(String(resourceId)));
     if (overlap) {
       throw new Error("One or more selected resources are already held for another booking at this time.");
+    }
+  }
+
+
+  const pendingOffers = await getPendingZoneOffers(ctx, zoneId);
+  for (const offer of pendingOffers) {
+    if (String(offer.requestId) === String(input.excludeBookingRequestId || "")) continue;
+    if (!sameBranchOrConservative(input.branchId, offer.branchId)) continue;
+    if (!(offer.resourceIds || []).some((resourceId: any) => resourceIdSet.has(String(resourceId)))) continue;
+    const request = await ctx.db.get(offer.requestId);
+    const duration = getDurationMinutes(request);
+    if (getOfferStarts(offer).some((start) => timesOverlap(targetStart, targetDuration, start, duration))) {
+      throw new Error("One or more selected resources are already held for another offer at this time.");
     }
   }
 }

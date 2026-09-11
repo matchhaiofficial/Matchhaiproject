@@ -20,13 +20,14 @@ import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import { APP_ROUTES } from "../../src/navigation/routes";
-import BasicFields from "../matchrooms/create/components/BasicFields";
-import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import BasicFields from "../../app-shared/matchrooms/create/components/BasicFields";
+import ZonePicker from "../../app-shared/matchrooms/create/components/ZonePicker";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
-import styles from "../matchrooms/create/create.styles";
+import styles from "../../app-shared/matchrooms/create/create.styles";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
+import { getZoneBranchDisplayName, getZoneBranchId } from "../../src/utils/zoneBranch";
 
 type SeriesType = "BO1" | "BO3" | "BO5" | "BO7" | "BO10" | "BO20" | "BO40";
 const GAME_ICONS: Record<string, string> = {
@@ -177,6 +178,8 @@ type ZoneRateOption = {
     key: string;
     label: string;
     price: number;
+    available?: boolean;
+    availabilityMessage?: string;
 };
 
 const toPositiveNumber = (value: any) => {
@@ -184,12 +187,13 @@ const toPositiveNumber = (value: any) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
-const getZonePricingSources = (zone: Zone | null) => {
+const getZonePricingSources = (zone: Zone | null, branchId?: string | null) => {
     if (!zone) return [];
-    const sources = [
-        ...(Array.isArray(zone.branches) ? zone.branches.map((branch: any) => branch?.pricing) : []),
-        zone.pricing,
-    ];
+    const branches = Array.isArray(zone.branches) ? zone.branches : [];
+    const selectedBranch = branchId
+        ? branches.find((branch: any, index: number) => getZoneBranchId(branch, index) === branchId)
+        : branches[0];
+    const sources = [selectedBranch?.pricing, zone.pricing];
     return sources.filter(Boolean);
 };
 
@@ -205,9 +209,9 @@ const formatCategoryLabel = (value: string) =>
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" ");
 
-const buildZoneRateOptions = (zone: Zone | null, gameKey: string, estimatedPlayers: number): ZoneRateOption[] => {
+const buildZoneRateOptions = (zone: Zone | null, gameKey: string, estimatedPlayers: number, branchId?: string | null): ZoneRateOption[] => {
     const game = String(gameKey || "").toLowerCase();
-    const pricingSources = getZonePricingSources(zone);
+    const pricingSources = getZonePricingSources(zone, branchId);
     const options = new Map<string, ZoneRateOption>();
 
     const addOption = (key: string, label: string, price: number) => {
@@ -300,6 +304,7 @@ export default function TeamChallengeCreateScreen() {
     const [captainedTeams, setCaptainedTeams] = useState<Team[]>([]);
     const [challengerTeamId, setChallengerTeamId] = useState<string>("");
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
+    const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
     const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
     const [seriesType, setSeriesType] = useState<SeriesType>("BO1");
     const [pricePerPlayer, setPricePerPlayer] = useState(0);
@@ -422,14 +427,53 @@ export default function TeamChallengeCreateScreen() {
         () => Math.max(1, Number(challengerTeam?.mainRosterSize || getTeamMainRosterSize(challengerTeam?.game || challengeGameKey))),
         [challengeGameKey, challengerTeam],
     );
-
-    const zoneRateOptions = useMemo(
-        () => buildZoneRateOptions(selectedZone, challengeGameKey, estimatedPlayers),
-        [selectedZone, challengeGameKey, estimatedPlayers],
+    const branchOptions = useMemo(
+        () => (selectedZone?.branches || []).map((branch: any, index: number) => ({
+            id: getZoneBranchId(branch, index),
+            label: getZoneBranchDisplayName(branch, `Branch ${index + 1}`),
+            branch,
+        })),
+        [selectedZone?.branches],
     );
+    const selectedBranch = branchOptions.find((branch) => branch.id === selectedBranchId) || branchOptions[0] || null;
+
+    const rawZoneRateOptions = useMemo(
+        () => buildZoneRateOptions(selectedZone, challengeGameKey, estimatedPlayers, selectedBranch?.id),
+        [selectedZone, challengeGameKey, estimatedPlayers, selectedBranch?.id],
+    );
+    const rateAvailability = useQuery(
+        api.matchrooms.checkRateOptionsAvailability,
+        user?._id && selectedZone?.id && selectedBranch?.id && formData.date && formData.time && challengeGameKey && rawZoneRateOptions.length
+            ? {
+                zoneId: selectedZone.id as Id<"zones">,
+                branchId: selectedBranch.id,
+                game: challengeGameKey,
+                scheduledDate: formData.date,
+                scheduledTime: formData.time,
+                durationMinutes: getSeriesHours(challengeGameKey, seriesType) * 60,
+                options: rawZoneRateOptions.map((option) => {
+                    const [asset, detail] = option.key.split(":");
+                    const assetType = asset === "cricket" ? "indoor_cricket" : asset;
+                    return {
+                        key: option.key,
+                        assetType,
+                        tier: ["pc", "console"].includes(assetType) ? detail : undefined,
+                        surface: !["pc", "console"].includes(assetType) ? detail : undefined,
+                    };
+                }),
+            }
+            : "skip",
+    );
+    const zoneRateOptions = useMemo(() => {
+        const byKey = new Map((rateAvailability || []).map((entry) => [entry.key, entry]));
+        return rawZoneRateOptions.map((option) => {
+            const availability = byKey.get(option.key);
+            return availability ? { ...option, available: availability.available, availabilityMessage: availability.message } : option;
+        });
+    }, [rateAvailability, rawZoneRateOptions]);
 
     const selectedZoneRate = useMemo(
-        () => zoneRateOptions.find((option) => option.key === selectedZoneRateKey) || zoneRateOptions[0] || null,
+        () => zoneRateOptions.find((option) => option.key === selectedZoneRateKey && option.available !== false) || null,
         [zoneRateOptions, selectedZoneRateKey],
     );
 
@@ -438,14 +482,15 @@ export default function TeamChallengeCreateScreen() {
             setSelectedZoneRateKey(null);
             return;
         }
-        if (!selectedZoneRateKey || !zoneRateOptions.some((option) => option.key === selectedZoneRateKey)) {
-            setSelectedZoneRateKey(zoneRateOptions[0].key);
+        if (!selectedZoneRateKey || !zoneRateOptions.some((option) => option.key === selectedZoneRateKey && option.available !== false)) {
+            setSelectedZoneRateKey(zoneRateOptions.find((option) => option.available !== false)?.key || null);
         }
     }, [selectedZoneRateKey, zoneRateOptions]);
 
     useEffect(() => {
         setSelectedZoneRateKey(null);
-    }, [selectedZone?.id, challengeGameKey, estimatedPlayers]);
+        setSelectedBranchId(branchOptions[0]?.id || null);
+    }, [selectedZone?.id, challengeGameKey, estimatedPlayers, branchOptions]);
 
     useEffect(() => {
         const baseRate = selectedZoneRate?.price || getBaseZoneRate(selectedZone, challengeGameKey, estimatedPlayers);
@@ -465,6 +510,8 @@ export default function TeamChallengeCreateScreen() {
     const canSubmit = !!challengerTeam &&
         !!opponentTeam &&
         !!selectedZone &&
+        !!selectedBranch &&
+        !!selectedZoneRate &&
         !!formData.date &&
         !!formData.time &&
         pricePerPlayer > 0 &&
@@ -477,7 +524,7 @@ export default function TeamChallengeCreateScreen() {
 
     const handleCreateChallenge = async () => {
         if (submitting) return;
-        if (!challengerTeam || !opponentTeam || !selectedZone || !formData.date || !formData.time) {
+        if (!challengerTeam || !opponentTeam || !selectedZone || !selectedBranch || !selectedZoneRate || !formData.date || !formData.time) {
             showToast({ type: "warning", title: "Missing details", message: "Select captain team, date/time, and preferred zone before sending challenge." });
             return;
         }
@@ -499,8 +546,8 @@ export default function TeamChallengeCreateScreen() {
             showToast({ type: "warning", title: "Invalid date/time", message: "Select valid date and time." });
             return;
         }
-        if (scheduledAt.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
-            showToast({ type: "warning", title: "Invalid schedule", message: "Challenge match must be at least 24 hours from now." });
+        if (scheduledAt.getTime() - Date.now() < 48 * 60 * 60 * 1000) {
+            showToast({ type: "warning", title: "Invalid schedule", message: "Challenge match must be at least 2 days from now." });
             return;
         }
 
@@ -542,7 +589,9 @@ export default function TeamChallengeCreateScreen() {
             proposedVenueByCaptainA: {
                 zoneId: selectedZone.id,
                 venueName: selectedZone.venueBrandName,
-                areaLabel: selectedZone.primaryBranch?.areaLabel || null,
+                areaLabel: selectedBranch.branch?.areaLabel || null,
+                branchId: selectedBranch.id,
+                branchName: selectedBranch.label,
             },
             maxPlayers: estimatedPlayers,
         };
@@ -978,6 +1027,26 @@ export default function TeamChallengeCreateScreen() {
                         onZoneSelect={setSelectedZone}
                     />
 
+                    {selectedZone && branchOptions.length > 0 ? (
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>Branch<Text style={styles.requiredAsterisk}>*</Text></Text>
+                            <View style={styles.chipRow}>
+                                {branchOptions.map((branch) => (
+                                    <Pressable
+                                        key={branch.id}
+                                        style={[styles.optionChip, selectedBranch?.id === branch.id && styles.optionChipActive]}
+                                        onPress={() => {
+                                            setSelectedBranchId(branch.id);
+                                            setSelectedZoneRateKey(null);
+                                        }}
+                                    >
+                                        <Text style={[styles.optionChipText, selectedBranch?.id === branch.id && styles.optionChipTextActive]}>{branch.label}</Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+                        </View>
+                    ) : null}
+
                     {selectedZone && zoneRateOptions.length > 0 ? (
                         <View style={styles.section}>
                             <Text style={styles.sectionLabel}>Category<Text style={styles.requiredAsterisk}>*</Text></Text>
@@ -985,12 +1054,20 @@ export default function TeamChallengeCreateScreen() {
                                 {zoneRateOptions.map((option) => (
                                     <Pressable
                                         key={option.key}
-                                        style={[styles.optionChip, selectedZoneRate?.key === option.key && styles.optionChipActive]}
-                                        onPress={() => setSelectedZoneRateKey(option.key)}
+                                        accessibilityState={{ disabled: option.available === false, selected: selectedZoneRate?.key === option.key }}
+                                        style={[styles.optionChip, selectedZoneRate?.key === option.key && styles.optionChipActive, option.available === false && { opacity: 0.45 }]}
+                                        onPress={() => {
+                                            if (option.available === false) {
+                                                showToast({ type: "info", title: "Resources not available", message: option.availabilityMessage || "This category is unavailable at the selected time." });
+                                                return;
+                                            }
+                                            setSelectedZoneRateKey(option.key);
+                                        }}
                                     >
                                         <Text style={[styles.optionChipText, selectedZoneRate?.key === option.key && styles.optionChipTextActive]}>
                                             {option.label} | PKR {option.price}/hr
                                         </Text>
+                                        {option.available === false ? <AppIcon name="info-outline" size={14} color={COLORS.warning} /> : null}
                                     </Pressable>
                                 ))}
                             </View>

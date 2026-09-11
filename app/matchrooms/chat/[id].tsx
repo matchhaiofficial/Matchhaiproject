@@ -702,6 +702,7 @@ export default function MatchroomChatScreen() {
             currentUserId={user?._id}
             messages={messages}
             participants={participants}
+            showSenderIdentity
             loading={
                 (matchroomById === undefined && matchroomByCode === undefined) ||
                 (Boolean(matchroomId) && accessState === undefined)
@@ -737,7 +738,7 @@ export default function MatchroomChatScreen() {
         <ReportIssueModal
             visible={Boolean(reportMessage)}
             title="Report Message"
-            subtitle="Send this matchroom chat message to MatchHai moderation."
+            subtitle="Submitting this report also blocks the sender. You will not be able to join future matchrooms together."
             reasons={CHAT_REPORT_REASONS}
             reason={reportReason}
             description={reportDescription}
@@ -751,7 +752,5 @@ export default function MatchroomChatScreen() {
         </>
     );
 }
-
-
 
 

@@ -754,10 +754,17 @@ async function listUnreadNotificationsForUser(ctx: any, userId: any, limit: numb
 
 async function findActiveNotificationByDedupeKey(ctx: any, dedupeKey?: string) {
   if (!dedupeKey) return null;
+  // There should normally be at most one active row for a key, but archived
+  // replacement versions can accumulate indefinitely. Read only the newest
+  // bounded window and preserve the previous newest-active selection rule.
+  // The write paths enforce this invariant; the bound is a safety valve for
+  // corrupted/legacy histories rather than an invitation to scan the table.
+  const DEDUPE_LOOKUP_LIMIT = 100;
   const rows = await ctx.db
     .query("notifications")
-    .withIndex("by_dedupeKey", (q: any) => q.eq("dedupeKey", dedupeKey))
-    .collect();
+    .withIndex("by_dedupeKey_and_createdAt", (q: any) => q.eq("dedupeKey", dedupeKey))
+    .order("desc")
+    .take(DEDUPE_LOOKUP_LIMIT);
   return sortByCreatedAtDesc(rows).find(isNotificationActive) || null;
 }
 

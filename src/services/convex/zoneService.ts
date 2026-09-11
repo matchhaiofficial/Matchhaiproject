@@ -10,6 +10,7 @@ import {
   DEFAULT_CITY,
   normalizeKarachiAreaLabel,
 } from "../../../constants/profileOptions";
+import { formatBranchOperatingHoursSummary } from "../../../constants/branchOperatingHours";
 
 export interface EffectiveRateResult {
   rate: number | null;
@@ -182,6 +183,7 @@ export interface PlayerVenueBranchViewModel {
   hasPricing: boolean;
   startingPriceLabel?: string;
   locationSummary: string;
+  operatingHoursSummary: string;
   createMatchroomParams: PlayerVenueActionParams;
 }
 
@@ -486,6 +488,7 @@ function toPlayerVenueBranchViewModel(
     hasPricing: hasAnyPricing(pricingGroups),
     startingPriceLabel: getStartingPrice(pricingGroups),
     locationSummary,
+    operatingHoursSummary: formatBranchOperatingHoursSummary(branch?.operatingHours),
     createMatchroomParams: buildCreateMatchroomParams(zone, branch, supportedGameKeys),
   };
 }

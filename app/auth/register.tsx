@@ -3,8 +3,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 
 import { AGE_RANGES, DEFAULT_CITY } from "../../constants/profileOptions";
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppButton } from "../../src/components/AppPrimitives";
 import { CustomSingleSelect } from "../../src/components/CustomSingleSelect";
@@ -27,7 +27,7 @@ import {
   normalizePakistaniPhone,
 } from "../../src/utils/phoneUtils";
 import { Perf, PerfScope } from "../../src/utils/perfInstrumentation";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 
 type FocusField =
   | "fullName"
@@ -528,7 +528,7 @@ export default function Register() {
       />
 
       <Text style={styles.heading}>Account details</Text>
-      <Text style={styles.sub}>Use your real login/contact details. Didit identity verification comes after signup.</Text>
+      <Text style={styles.sub}>Use your real login/contact details. You must verify the 6-digit phone OTP before continuing. Didit identity verification comes after signup and gameplay stays locked until it is approved.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Full Name" required />

@@ -10,6 +10,8 @@ import {
   getBookingRequestStartAtForConflict,
 } from "./bookingConflicts";
 import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
+import { isLegacyZoneOffer, isStandaloneLegacyBookingRequest } from "./legacyCompatibility";
+import { assertBranchOperatingHoursAvailable } from "./branchOperatingHours";
 
 const BOOKING_INTENT_TTL_MS = PAYMENT_INTENT_TTL_MS;
 
@@ -491,12 +493,26 @@ export const listRequestsByZone = query({
 export const listOpenRequestsByGame = query({
   args: { gameKey: v.string() },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    const ownedZones = await ctx.db
+      .query("zones")
+      .withIndex("by_ownerUid", (q) => q.eq("ownerUid", actor.user._id))
+      .collect();
+    const activeZoneIds = new Set(
+      ownedZones.filter((zone) => zone.status === "active").map((zone) => String(zone._id)),
+    );
+    if (activeZoneIds.size === 0) {
+      throw new Error("Only an active venue owner can view open booking requests.");
+    }
     const requests = await ctx.db
       .query("bookingRequests")
       .withIndex("by_gameKey", (q) => q.eq("gameKey", args.gameKey))
       .order("desc")
       .take(100);
-    return requests.map(serializeBookingRequest);
+    return requests
+      .filter((request) => request.status === "open")
+      .filter((request) => !request.zoneId || activeZoneIds.has(String(request.zoneId)))
+      .map(serializeBookingRequest);
   },
 });
 
@@ -539,14 +555,33 @@ export const createRequest = mutation({
     selectedZoneRateKey: v.optional(v.string()),
     matchroomId: v.optional(v.id("matchrooms")),
     lifecycleStatus: v.optional(v.string()),
+    workflowVersion: v.optional(v.literal("canonical_v2")),
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
     const normalizedGameKey = normalizeBookingGameKey(args.gameKey);
     const user = await getAuthenticatedBookingUser(ctx, args.userId);
-    const scheduledStartAt = getBookingRequestStartAtForConflict(args);
-    const durationMinutes = Math.max(1, Math.round(Number(args.durationHours || 1) * 60));
+    // Older clients do not send workflowVersion. Keep their isolated,
+    // no-resource booking flow working without allowing them to create paid or
+    // matchroom-linked canonical state. Current clients opt into canonical_v2.
+    const createAsLegacy = args.workflowVersion !== "canonical_v2"
+      && !args.matchroomId
+      && !args.lifecycleStatus
+      && !args.requestedResourceAssetType
+      && !args.requestedResourceSurface
+      && !args.requestedResourceTier
+      && !args.selectedZoneRateKey;
+    const linkedRoom = args.matchroomId
+      ? await ctx.db.get(args.matchroomId).catch(() => null)
+      : null;
+    const scheduledStartAt =
+      Number((linkedRoom as any)?.scheduledStartAt || (linkedRoom as any)?.startTime || 0) ||
+      getBookingRequestStartAtForConflict(args);
+    const durationMinutes = Math.max(
+      1,
+      Math.round(Number((linkedRoom as any)?.durationMinutes || Number(args.durationHours || 1) * 60)),
+    );
 
     if (args.matchroomId) {
       const existingByUser = await ctx.db
@@ -563,13 +598,21 @@ export const createRequest = mutation({
 
     await assertNoParticipantTimeConflict(ctx, {
       userIds: [String(user._id)],
-      scheduledStartAt,
+      scheduledStartAt: scheduledStartAt || undefined,
       durationMinutes,
       excludeMatchroomId: args.matchroomId ? String(args.matchroomId) : null,
       message: "You already have a matchroom or booking request scheduled at this time.",
     });
 
     if (args.zoneId) {
+      if (!createAsLegacy) {
+        await assertBranchOperatingHoursAvailable(ctx, {
+          zoneId: args.zoneId,
+          branchId: (linkedRoom as any)?.branchId || (linkedRoom as any)?.confirmedBranchId || null,
+          scheduledStartAt,
+          durationMinutes,
+        });
+      }
       await assertZoneResourceCapacityAvailable(ctx, {
         zoneId: String(args.zoneId),
         gameKey: normalizedGameKey,
@@ -583,9 +626,6 @@ export const createRequest = mutation({
       });
     }
 
-    const linkedRoom = args.matchroomId
-      ? await ctx.db.get(args.matchroomId).catch(() => null)
-      : null;
     const requestId = await ctx.db.insert("bookingRequests", withBookingRequestLifecycleDueAt(null, linkedRoom, {
       userId: user._id,
       gameKey: normalizedGameKey,
@@ -609,21 +649,23 @@ export const createRequest = mutation({
       status: "open",
       preferredDate: args.preferredDate,
       preferredTime: args.preferredTime,
+      scheduledStartAt: scheduledStartAt || undefined,
       flexibilityWindow: args.flexibilityWindow,
       locationMode: args.locationMode,
       preferredAreas: args.preferredAreas,
       budgetPerPlayer: args.budgetPerPlayer,
       currency: args.currency,
       playerCount: args.playerCount,
-      paymentStatus: args.paymentStatus,
-      paymentAmount: args.paymentAmount,
-      paymentReservedSlots: args.paymentReservedSlots,
+      paymentStatus: createAsLegacy ? "unpaid" : args.paymentStatus,
+      paymentAmount: createAsLegacy ? undefined : args.paymentAmount,
+      paymentReservedSlots: createAsLegacy ? undefined : args.paymentReservedSlots,
       requestedResourceAssetType: args.requestedResourceAssetType,
       requestedResourceSurface: args.requestedResourceSurface,
       requestedResourceTier: args.requestedResourceTier,
       selectedZoneRateKey: args.selectedZoneRateKey,
       matchroomId: args.matchroomId,
       lifecycleStatus: args.lifecycleStatus,
+      workflowVersion: createAsLegacy ? "legacy_v1" : "canonical_v2",
       notes: args.notes,
       createdAt: now,
       updatedAt: now,
@@ -657,16 +699,65 @@ export const updateRequestStatus = mutation({
   handler: async (ctx, args) => {
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Booking request not found");
-    if (request.zoneId) {
-      await requireOwnedZone(ctx, request.zoneId);
-    } else {
-      const actor = await requireCurrentUser(ctx);
-      if (String(request.userId) !== String(actor.user._id)) throw new Error("Not authorized");
+    if (!isStandaloneLegacyBookingRequest(request)) {
+      throw new Error("This booking uses the current venue workflow and must be updated there.");
     }
+
+    const actor = await requireCurrentUser(ctx);
+    const isRequester = String(request.userId) === String(actor.user._id);
+    const zone = request.zoneId ? await ctx.db.get(request.zoneId) : null;
+    const isZoneOwner = String(zone?.ownerUid || "") === String(actor.user._id);
+    if (!isRequester && !isZoneOwner) throw new Error("Not authorized");
+    if (request.status === args.status) return true;
+
+    const now = Date.now();
+    const offers = await ctx.db
+      .query("zoneOffers")
+      .withIndex("by_requestId", (q) => q.eq("requestId", args.requestId))
+      .collect();
+    const legacyOffers = offers.filter(isLegacyZoneOffer);
+    if (offers.length !== legacyOffers.length) {
+      throw new Error("This booking has entered the current venue workflow and must be updated there.");
+    }
+
+    if (args.status === "cancelled") {
+      if (!isRequester || !["open", "pending_payment"].includes(request.status)) {
+        throw new Error("Only the requester can cancel an active legacy booking request.");
+      }
+      for (const offer of legacyOffers) {
+        if (offer.status === "pending") {
+          await ctx.db.patch(offer._id, { status: "rejected", updatedAt: now });
+        }
+      }
+    } else if (args.status === "accepted") {
+      if (!isRequester || !["open", "pending_payment"].includes(request.status)) {
+        throw new Error("Only the requester can accept an offer for an active legacy request.");
+      }
+      if (!legacyOffers.some((offer: any) => offer.status === "accepted")) {
+        throw new Error("Accept a legacy venue offer before accepting the request.");
+      }
+    } else if (args.status === "pending_payment") {
+      if (!isRequester || request.status !== "open") {
+        throw new Error("This legacy request cannot enter payment from its current state.");
+      }
+      if (!legacyOffers.some((offer: any) => offer.status === "accepted")) {
+        throw new Error("An accepted legacy venue offer is required before payment.");
+      }
+    } else if (args.status === "expired") {
+      if (!["open", "pending_payment"].includes(request.status)) {
+        throw new Error("Only an active legacy request can expire.");
+      }
+      const dueAt = Number(request.lifecycleDueAt || 0);
+      if (!Number.isFinite(dueAt) || dueAt <= 0 || dueAt > now) {
+        throw new Error("This booking request has not reached its expiry time.");
+      }
+    } else {
+      throw new Error("Closed legacy booking requests cannot be reopened.");
+    }
+
     const linkedRoom = request.matchroomId
       ? await ctx.db.get(request.matchroomId).catch(() => null)
       : null;
-    const now = Date.now();
     await ctx.db.patch(args.requestId, withBookingRequestLifecycleDueAt(request, linkedRoom, {
       status: args.status,
       updatedAt: now,
@@ -771,21 +862,48 @@ export const createOffer = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    await requireOwnedZone(ctx, args.zoneId);
+    const { zone } = await requireOwnedZone(ctx, args.zoneId);
+    const request = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Booking request not found");
+    if (!isStandaloneLegacyBookingRequest(request)) {
+      throw new Error("This booking uses the current venue workflow; create its offer there.");
+    }
+    if (request.status !== "open") throw new Error("This booking request is no longer open.");
+    if (request.zoneId && String(request.zoneId) !== String(args.zoneId)) {
+      throw new Error("This booking request belongs to another venue.");
+    }
+    if (zone.status !== "active") throw new Error("This venue is not active.");
+    if (!Number.isFinite(args.proposedPrice) || args.proposedPrice < 0) {
+      throw new Error("Enter a valid proposed price.");
+    }
+    if (args.proposedDate !== undefined && !Number.isFinite(args.proposedDate)) {
+      throw new Error("Enter a valid proposed booking date.");
+    }
+    const existingPendingOffer = await ctx.db
+      .query("zoneOffers")
+      .withIndex("by_requestId_and_status", (q) =>
+        q.eq("requestId", args.requestId).eq("status", "pending")
+      )
+      .filter((q) => q.eq(q.field("zoneId"), args.zoneId))
+      .first();
+    if (existingPendingOffer) {
+      if (!isLegacyZoneOffer(existingPendingOffer)) {
+        throw new Error("This booking has entered the current venue workflow; manage its offer there.");
+      }
+      return existingPendingOffer._id;
+    }
 
-    const offerId = await ctx.db.insert("zoneOffers", {
+    return await ctx.db.insert("zoneOffers", {
       requestId: args.requestId,
       zoneId: args.zoneId,
       status: "pending",
       proposedPrice: args.proposedPrice,
       proposedDate: args.proposedDate,
-      proposedTime: args.proposedTime,
-      message: args.message,
+      proposedTime: args.proposedTime?.trim() || undefined,
+      message: args.message?.trim().slice(0, 500) || undefined,
       createdAt: now,
       updatedAt: now,
     });
-
-    return offerId;
   },
 });
 
@@ -803,18 +921,57 @@ export const updateOfferStatus = mutation({
   handler: async (ctx, args) => {
     const offer = await ctx.db.get(args.offerId);
     if (!offer) throw new Error("Offer not found");
-    const request = await ctx.db.get(offer.requestId);
-    const actor = await requireCurrentUser(ctx);
-    let allowed = request && String(request.userId) === String(actor.user._id);
-    if (!allowed) {
-      const zone = await ctx.db.get(offer.zoneId);
-      allowed = String(zone?.ownerUid || "") === String(actor.user._id);
+    if (!isLegacyZoneOffer(offer)) {
+      throw new Error("This offer uses the current venue workflow and must be answered there.");
     }
-    if (!allowed) throw new Error("Not authorized");
-    await ctx.db.patch(args.offerId, {
-      status: args.status,
-      updatedAt: Date.now(),
-    });
+    const request = await ctx.db.get(offer.requestId);
+    if (!request || !isStandaloneLegacyBookingRequest(request)) {
+      throw new Error("Legacy booking request not found");
+    }
+    const actor = await requireCurrentUser(ctx);
+    const zone = await ctx.db.get(offer.zoneId);
+    const isRequester = String(request.userId) === String(actor.user._id);
+    const isZoneOwner = String(zone?.ownerUid || "") === String(actor.user._id);
+    if (!isRequester && !isZoneOwner) throw new Error("Not authorized");
+    if (offer.status === args.status) return true;
+    if (offer.status !== "pending" || args.status === "pending") {
+      throw new Error("Closed legacy offers cannot be changed or reopened.");
+    }
+
+    const now = Date.now();
+    if (args.status === "accepted") {
+      if (!isRequester || !["open", "pending_payment"].includes(request.status)) {
+        throw new Error("Only the requester can accept an offer for an active legacy request.");
+      }
+      await ctx.db.patch(args.offerId, { status: "accepted", updatedAt: now });
+      const siblingOffers = await ctx.db
+        .query("zoneOffers")
+        .withIndex("by_requestId_and_status", (q) =>
+          q.eq("requestId", offer.requestId).eq("status", "pending")
+        )
+        .collect();
+      for (const sibling of siblingOffers) {
+        if (isLegacyZoneOffer(sibling)) {
+          await ctx.db.patch(sibling._id, { status: "rejected", updatedAt: now });
+        }
+      }
+      const linkedRoom = request.matchroomId
+        ? await ctx.db.get(request.matchroomId).catch(() => null)
+        : null;
+      await ctx.db.patch(request._id, withBookingRequestLifecycleDueAt(request, linkedRoom, {
+        status: "accepted",
+        updatedAt: now,
+      }, now));
+      return true;
+    }
+
+    if (args.status === "rejected" && !isRequester && !isZoneOwner) {
+      throw new Error("Only a booking participant can reject this offer.");
+    }
+    if (args.status === "expired" && !isZoneOwner) {
+      throw new Error("Only the venue can withdraw this legacy offer as expired.");
+    }
+    await ctx.db.patch(args.offerId, { status: args.status, updatedAt: now });
     return true;
   },
 });

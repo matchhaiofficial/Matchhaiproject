@@ -190,6 +190,17 @@ export default defineSchema({
     suspendedUntil: v.optional(v.union(v.number(), v.null())),
     suspensionReason: v.optional(v.union(v.string(), v.null())),
     suspendedByAdminUserId: v.optional(v.id("users")),
+    accountDeletionJobId: v.optional(v.id("accountDeletionJobs")),
+    accountDeletionStatus: v.optional(v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("blocked"),
+      v.literal("failed"),
+      v.literal("completed"),
+    )),
+    accountDeletionStage: v.optional(v.string()),
+    accountDeletionError: v.optional(v.string()),
+    accountDeletionUpdatedAt: v.optional(v.number()),
     kycVerificationStatus: v.optional(v.union(
       v.literal("not_started"),
       v.literal("pending"),
@@ -353,6 +364,45 @@ export default defineSchema({
     .index("by_accountStatus_updatedAt", ["accountStatus", "updatedAt"])
     .index("by_accountType_updatedAt", ["accountType", "updatedAt"]),
 
+  accountDeletionJobs: defineTable({
+    userId: v.id("users"),
+    ticketId: v.optional(v.id("supportTickets")),
+    ticketIds: v.optional(v.array(v.id("supportTickets"))),
+    requestedByAdminId: v.optional(v.id("users")),
+    requestedByAdminName: v.string(),
+    requestedByAdminEmail: v.string(),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("blocked"),
+      v.literal("failed"),
+      v.literal("completed"),
+    ),
+    stage: v.string(),
+    cursor: v.optional(v.string()),
+    error: v.optional(v.string()),
+    authId: v.optional(v.string()),
+    verificationIdentifiers: v.array(v.string()),
+    displayNames: v.optional(v.array(v.string())),
+    shortId: v.string(),
+    anonEmail: v.string(),
+    processedRows: v.number(),
+    attempts: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    priorAccountStatus: v.optional(v.union(v.literal("active"), v.literal("suspended"))),
+    priorSuspendedAt: v.optional(v.number()),
+    priorSuspendedUntil: v.optional(v.union(v.number(), v.null())),
+    priorSuspensionReason: v.optional(v.union(v.string(), v.null())),
+    priorSuspendedByAdminUserId: v.optional(v.id("users")),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"])
+    .index("by_ticketId", ["ticketId"])
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_status_and_updatedAt", ["status", "updatedAt"]),
+
   // ============================================
   // IDENTITY VERIFICATIONS
   // ============================================
@@ -431,6 +481,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])
+    .index("by_blockedUserId", ["blockedUserId"])
     .index("by_userId_and_blockedUserId", ["userId", "blockedUserId"]),
 
   // ============================================
@@ -481,10 +532,13 @@ export default defineSchema({
     resendCount: v.number(),
     provider: v.literal("veevotech"),
     providerMessageId: v.optional(v.string()),
+    receiverNetwork: v.optional(v.string()),
+    providerStatus: v.optional(v.string()),
     expiresAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_userId", ["userId"])
     .index("by_phoneHash_and_createdAt", ["phoneHash", "createdAt"])
     .index("by_phoneHash_and_status_and_updatedAt", ["phoneHash", "status", "updatedAt"]),
 
@@ -607,6 +661,8 @@ export default defineSchema({
     scheduledStartAt: v.optional(v.number()),
     lockAt: v.optional(v.number()),
     lifecycleDueAt: v.optional(v.number()),
+    lifecycleScheduledAt: v.optional(v.number()),
+    lifecycleScheduledFnId: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
     durationMinutes: v.optional(v.number()),
     pricing: v.object({
@@ -693,6 +749,8 @@ export default defineSchema({
     venuePayoutAt: v.optional(v.number()),
     venuePayoutAmount: v.optional(v.number()),
     venuePayoutReference: v.optional(v.string()),
+    venuePayoutEligibleAt: v.optional(v.number()),
+    venuePayoutScheduledFnId: v.optional(v.string()),
 
     // Result verification
     resultVerification: v.optional(v.object({
@@ -746,6 +804,7 @@ export default defineSchema({
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   })
+    .index("by_zoneId_and_scheduledStartAt", ["zoneId", "scheduledStartAt"])
     .index("by_hostUid", ["hostUid"])
     .index("by_hostUid_and_clientCreateRequestId", ["hostUid", "clientCreateRequestId"])
     .index("by_hostUid_and_scheduledStartAt", ["hostUid", "scheduledStartAt"])
@@ -904,6 +963,9 @@ export default defineSchema({
     requestKind: v.optional(
       v.union(v.literal("direct_zone"), v.literal("broadcast_fanout"))
     ),
+    workflowVersion: v.optional(
+      v.union(v.literal("legacy_v1"), v.literal("canonical_v2"))
+    ),
     fanoutGroupKey: v.optional(v.string()),
     responseExpiresAt: v.optional(v.number()),
     targetAreaLabel: v.optional(v.string()),
@@ -918,6 +980,7 @@ export default defineSchema({
 
     preferredDate: v.optional(v.number()),
     preferredTime: v.optional(v.string()),
+    scheduledStartAt: v.optional(v.number()),
     flexibilityWindow: v.optional(v.string()),
     locationMode: v.optional(v.union(v.literal("zone"), v.literal("broadcast"))),
     preferredAreas: v.optional(v.array(v.string())),
@@ -943,7 +1006,9 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_zoneId_and_scheduledStartAt", ["zoneId", "scheduledStartAt"])
     .index("by_userId", ["userId"])
+    .index("by_userId_and_status", ["userId", "status"])
     .index("by_zoneId", ["zoneId"])
     .index("by_matchroomId", ["matchroomId"])
     .index("by_status", ["status"])
@@ -1003,11 +1068,14 @@ export default defineSchema({
     requestOwnerUid: v.optional(v.string()),
     message: v.optional(v.string()),
     responseExpiresAt: v.optional(v.number()),
+    expiryScheduledAt: v.optional(v.number()),
+    expiryScheduledFnId: v.optional(v.string()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_requestId", ["requestId"])
+    .index("by_requestId_and_status", ["requestId", "status"])
     .index("by_zoneId", ["zoneId"])
     .index("by_status", ["status"])
     .index("by_zoneId_and_status_and_updatedAt", ["zoneId", "status", "updatedAt"])
@@ -1170,6 +1238,8 @@ export default defineSchema({
         zoneId: v.string(),
         venueName: v.string(),
         areaLabel: v.optional(v.union(v.string(), v.null())),
+        branchId: v.optional(v.string()),
+        branchName: v.optional(v.string()),
       })
     ),
     alternativeVenueByCaptainB: v.optional(
@@ -1177,6 +1247,8 @@ export default defineSchema({
         zoneId: v.string(),
         venueName: v.string(),
         areaLabel: v.optional(v.union(v.string(), v.null())),
+        branchId: v.optional(v.string()),
+        branchName: v.optional(v.string()),
       })
     ),
     captainVenueChoices: v.optional(v.any()),
@@ -1185,6 +1257,8 @@ export default defineSchema({
         zoneId: v.string(),
         venueName: v.string(),
         areaLabel: v.optional(v.union(v.string(), v.null())),
+        branchId: v.optional(v.string()),
+        branchName: v.optional(v.string()),
       })
     ),
     chatId: v.optional(v.string()),
@@ -1201,6 +1275,8 @@ export default defineSchema({
     zoneName: v.optional(v.string()),
     scheduledAt: v.optional(v.number()),
     lifecycleDueAt: v.optional(v.number()),
+    lifecycleScheduledAt: v.optional(v.number()),
+    lifecycleScheduledFnId: v.optional(v.string()),
 
     // Result
     result: v.optional(
@@ -1217,6 +1293,10 @@ export default defineSchema({
   })
     .index("by_challengerTeamId", ["challengerTeamId"])
     .index("by_opponentTeamId", ["opponentTeamId"])
+    .index("by_captainAUid_and_createdAt", ["captainAUid", "createdAt"])
+    .index("by_captainBUid_and_createdAt", ["captainBUid", "createdAt"])
+    .index("by_captainAUid_and_status", ["captainAUid", "status"])
+    .index("by_captainBUid_and_status", ["captainBUid", "status"])
     .index("by_status", ["status"])
     .index("by_status_and_lifecycleDueAt", ["status", "lifecycleDueAt"])
     .index("by_matchroomId", ["matchroomId"]),
@@ -1284,6 +1364,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_chatId", ["chatId"])
+    .index("by_senderUid", ["senderUid"])
     .index("by_chatId_and_createdAt", ["chatId", "createdAt"]),
 
   // ============================================
@@ -1446,6 +1527,7 @@ export default defineSchema({
       branchCount: v.optional(v.number()),
       resourceCount: v.optional(v.number()),
     })),
+    scheduleIndexVersion: v.optional(v.number()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1578,6 +1660,19 @@ export default defineSchema({
     .index("by_lifecycleStatus", ["lifecycleStatus"])
     .index("by_bookingRequestId", ["bookingRequestId"]),
 
+  // Low-churn public inventory projection. Player clients subscribe to this
+  // aggregate instead of every resource row, so booking/status events do not
+  // repeatedly charge hundreds of Database I/O reads.
+  zoneResourceCapacitySnapshots: defineTable({
+    zoneId: v.id("zones"),
+    branchId: v.string(),
+    capacityByKey: v.record(v.string(), v.number()),
+    complete: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_zoneId", ["zoneId"])
+    .index("by_zoneId_and_branchId", ["zoneId", "branchId"]),
+
   // ============================================
   // NOTIFICATIONS
   // ============================================
@@ -1663,7 +1758,11 @@ export default defineSchema({
     .index("by_matchroomId", ["matchroomId"])
     .index("by_matchroomId_type_status", ["matchroomId", "type", "status"])
     .index("by_entityKey", ["entityKey"])
-    .index("by_dedupeKey", ["dedupeKey"]),
+    .index("by_dedupeKey", ["dedupeKey"])
+    // Dedupe lookups inspect the newest records first. Keeping creation time
+    // in the index lets those lookups stay bounded even after old versions
+    // have accumulated under one logical key.
+    .index("by_dedupeKey_and_createdAt", ["dedupeKey", "createdAt"]),
 
   pushDevices: defineTable({
     userId: v.id("users"),
@@ -1712,6 +1811,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_deviceId", ["deviceId"])
     .index("by_receiptId", ["receiptId"])
     .index("by_notificationId", ["notificationId"])
     .index("by_pushKind_and_createdAt", ["pushKind", "createdAt"])
@@ -1788,6 +1888,7 @@ export default defineSchema({
     deletedFor: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
+    .index("by_senderUid", ["senderUid"])
     .index("by_chatroomId", ["chatroomId"])
     .index("by_chatroomId_and_createdAt", ["chatroomId", "createdAt"]),
 
@@ -1800,6 +1901,7 @@ export default defineSchema({
     userName: v.string(),
     updatedAt: v.number(),
   })
+    .index("by_userId", ["userId"])
     .index("by_chatKey", ["chatKey"])
     .index("by_chatKey_and_userId", ["chatKey", "userId"]),
 

@@ -66,7 +66,7 @@ import {
     cleanConvexErrorMessage,
     getUserFacingErrorMessage,
 } from "../../src/utils/userFacingErrors";
-import styles from "./wallet.styles";
+import styles from "../../app-shared/(player)/wallet.styles";
 
 type WalletTab = "overview" | "transactions";
 type WalletFilterType =
@@ -1130,11 +1130,11 @@ export default function WalletScreen() {
                     <Text style={[styles.summarySubText, { marginTop: 8 }]}>
                       Next step:{" "}
                       {checkoutStatus.actionRequired === "pay_with_token"
-                        ? `Pay with OTC token ${checkoutStatus.paymentToken || ""}`.trim()
+                        ? "Use the OTC token shown when this payment started"
                         : "Approve in Easypaisa"}
                     </Text>
                   ) : null}
-                  {checkoutStatus.lastError ? (
+                  {checkoutStatus.hasSyncIssue ? (
                     <Text
                       style={[
                         styles.summarySubText,

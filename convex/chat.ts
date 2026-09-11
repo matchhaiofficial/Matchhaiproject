@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys } from "./chatIdentity";
 import { markUserPresent } from "./presence";
+import { assertKycAccessAllowed } from "./kycGate";
 
 type UserIdString = string;
 
@@ -39,7 +40,10 @@ type MatchroomAccessState =
   | { status: "unauthenticated" };
 
 async function getMatchroomActorUserId(ctx: any): Promise<Id<"users">> {
-  return await getStrictAuthenticatedUserId(ctx);
+  const userId = await getStrictAuthenticatedUserId(ctx);
+  const user = await ctx.db.get(userId);
+  assertKycAccessAllowed(user);
+  return userId;
 }
 
 async function getSenderProfile(ctx: any, userId: Id<"users">) {
@@ -285,6 +289,29 @@ export const getMatchroomAccess = query({
       participantUids: state.participantUids,
       userId: state.userId,
     };
+  },
+});
+
+export const getUnreadCountForMatchroom = query({
+  args: { matchroomId: v.id("matchrooms") },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const state = await getMatchroomAccessState(ctx, args.matchroomId);
+    if (state.status !== "ok") return 0;
+
+    const chatroom = await ctx.db
+      .query("chatrooms")
+      .withIndex("by_matchroomId", (q) => q.eq("matchroomId", args.matchroomId))
+      .unique();
+    if (!chatroom) return 0;
+
+    const membership = await ctx.db
+      .query("chatroomMembers")
+      .withIndex("by_chatroomId_and_userId", (q) =>
+        q.eq("chatroomId", chatroom._id).eq("userId", String(state.userId)),
+      )
+      .unique();
+    return Math.max(0, Number(membership?.unreadCount || 0));
   },
 });
 
@@ -599,23 +626,25 @@ export const sendMessageToMatchroom = mutation({
   },
 });
 
+async function deleteMessageForCurrentParticipant(ctx: any, messageId: Id<"chatMessages">) {
+  const message = await ctx.db.get(messageId);
+  if (!message) throw new Error("Message not found");
+  const { userId } = await requireAuthorizedChatroomParticipant(ctx, message.chatroomId);
+
+  const deletedFor = message.deletedFor || [];
+  if (!deletedFor.includes(String(userId))) {
+    await ctx.db.patch(messageId, {
+      deletedFor: [...deletedFor, String(userId)],
+    });
+  }
+  return true;
+}
+
 export const deleteForMe = mutation({
   args: {
     messageId: v.id("chatMessages"),
   },
-  handler: async (ctx, args) => {
-    const message = await ctx.db.get(args.messageId);
-    if (!message) throw new Error("Message not found");
-    const { userId } = await requireAuthorizedChatroomParticipant(ctx, message.chatroomId);
-
-    const deletedFor = message.deletedFor || [];
-    if (!deletedFor.includes(String(userId))) {
-      await ctx.db.patch(args.messageId, {
-        deletedFor: [...deletedFor, String(userId)],
-      });
-    }
-    return true;
-  },
+  handler: async (ctx, args) => deleteMessageForCurrentParticipant(ctx, args.messageId),
 });
 
 export const markRead = mutation({
@@ -803,7 +832,8 @@ export const unpinMessage = mutation({
 
 export const deleteMessage = mutation({
   args: { messageId: v.id("chatMessages") },
-  handler: async () => {
-    throw new Error("Full message deletion is disabled.");
-  },
+  // Backwards-compatible alias: older clients asked for a destructive global
+  // delete. Preserve the endpoint while routing it through the authenticated,
+  // per-participant hide used by current clients.
+  handler: async (ctx, args) => deleteMessageForCurrentParticipant(ctx, args.messageId),
 });

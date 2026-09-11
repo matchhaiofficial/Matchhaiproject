@@ -31,12 +31,12 @@ import { usePressScale } from "../../src/motion/usePressScale";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { recordCountMetric } from "../../src/utils/perfInstrumentation";
-import { InboxEmptyState } from "./components/InboxEmptyState";
-import { InboxNotificationCard } from "./components/InboxNotificationCard";
-import { InboxSwipeableRow } from "./components/InboxSwipeableRow";
-import { useInboxActions } from "./hooks/useInboxActions";
-import { useInboxViewModel, type InboxTypeFilter } from "./hooks/useInboxViewModel";
-import styles from "./inbox.styles";
+import { InboxEmptyState } from "../../app-shared/(player)/components/InboxEmptyState";
+import { InboxNotificationCard } from "../../app-shared/(player)/components/InboxNotificationCard";
+import { InboxSwipeableRow } from "../../app-shared/(player)/components/InboxSwipeableRow";
+import { useInboxActions } from "../../app-shared/(player)/hooks/useInboxActions";
+import { useInboxViewModel, type InboxTypeFilter } from "../../app-shared/(player)/hooks/useInboxViewModel";
+import styles from "../../app-shared/(player)/inbox.styles";
 
 const HIT_SLOP_8 = { top: 8, bottom: 8, left: 8, right: 8 } as const;
 const DRAWER_WIDTH = Math.min(380, Dimensions.get("window").width * 0.9);

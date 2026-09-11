@@ -9,6 +9,9 @@ import {
   View,
 } from "react-native";
 import Animated from "react-native-reanimated";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import BottomActionBar from "../../src/components/BottomActionBar";
@@ -26,7 +29,7 @@ import {
   MatchroomSuggestSheet,
   MatchroomSummarySection,
   MatchroomTeamSection,
-} from "./components";
+} from "../../app-shared/matchrooms/components/index";
 import { useMatchroomJoinFlow } from "../../src/hooks/useMatchroomJoinFlow";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
@@ -38,13 +41,13 @@ import Logger from "../../src/utils/logger";
 import { canSubmitComplain } from "../../src/utils/matchroomLifecycle";
 import {
   getSlotUserId,
-} from "./utils/matchroomLobbyState";
-import { deriveLobbyBanner, type LobbyBannerTone } from "./utils/lobbyBanner";
-import { useMatchroomDetailState } from "./hooks/useMatchroomDetailState";
-import { useMatchroomDetailActions } from "./hooks/useMatchroomDetailActions";
-import { useMatchroomDetailUiState } from "./hooks/useMatchroomDetailUiState";
-import { useMatchroomDetailViewModel } from "./hooks/useMatchroomDetailViewModel";
-import styles from "./detail.styles";
+} from "../../app-shared/matchrooms/utils/matchroomLobbyState";
+import { deriveLobbyBanner, type LobbyBannerTone } from "../../app-shared/matchrooms/utils/lobbyBanner";
+import { useMatchroomDetailState } from "../../app-shared/matchrooms/hooks/useMatchroomDetailState";
+import { useMatchroomDetailActions } from "../../app-shared/matchrooms/hooks/useMatchroomDetailActions";
+import { useMatchroomDetailUiState } from "../../app-shared/matchrooms/hooks/useMatchroomDetailUiState";
+import { useMatchroomDetailViewModel } from "../../app-shared/matchrooms/hooks/useMatchroomDetailViewModel";
+import styles from "../../app-shared/matchrooms/detail.styles";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -84,12 +87,14 @@ function HeaderIconButton({
   onPress,
   onPressIn,
   hitSlop,
+  badgeCount = 0,
 }: {
   icon: React.ComponentProps<typeof AppIcon>["name"];
   color: string;
   onPress: () => void;
   onPressIn?: () => void;
   hitSlop?: { top: number; bottom: number; left: number; right: number };
+  badgeCount?: number;
 }) {
   const { animatedStyle, onPressIn: motionPressIn, onPressOut } = usePressScale({
     activeScale: 0.98,
@@ -107,6 +112,11 @@ function HeaderIconButton({
       hitSlop={hitSlop}
     >
       <AppIcon name={icon} size={24} color={color} />
+      {badgeCount > 0 ? (
+        <View style={styles.headerActionBadge}>
+          <Text style={styles.headerActionBadgeText}>{badgeCount > 99 ? "99+" : badgeCount}</Text>
+        </View>
+      ) : null}
     </AnimatedPressable>
   );
 }
@@ -152,6 +162,10 @@ export default function MatchroomDetails() {
   } = useMatchroomDetailState({
     id: matchroomId,
   });
+  const unreadChatCount = useQuery(
+    api.chat.getUnreadCountForMatchroom,
+    room?._id && user?._id ? { matchroomId: room._id as Id<"matchrooms"> } : "skip",
+  ) || 0;
 
   useRouteLogger("MatchroomDetailsScreen", {
     matchroomId: id,
@@ -524,6 +538,7 @@ export default function MatchroomDetails() {
               <HeaderIconButton
                 icon="chat"
                 color={COLORS.accent}
+                badgeCount={unreadChatCount}
                 onPress={() => router.push(`/matchrooms/chat/${id}`)}
                 onPressIn={() => {
                   if (touchDebugEnabled) {
@@ -1179,7 +1194,7 @@ export default function MatchroomDetails() {
       <ReportIssueModal
         visible={showComplainModal}
         title={reportedPlayer ? `Report ${reportedPlayer.name}` : "Report Matchroom"}
-        subtitle={reportedPlayer ? "Report a player in this matchroom." : "Help us keep MatchHai safe."}
+        subtitle={reportedPlayer ? "Submitting this report also blocks this player. You will not be able to join future matchrooms together." : "Help us keep MatchHai safe."}
         reasons={COMPLAIN_REASONS}
         reason={complainReason}
         description={complainDescription}
@@ -1229,4 +1244,3 @@ export default function MatchroomDetails() {
     </Screen>
   );
 }
-

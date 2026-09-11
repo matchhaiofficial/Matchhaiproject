@@ -48,7 +48,7 @@ export default function PlayerLayout() {
 
   if (isSuperAdmin || isZoneUser) {
     if (isZoneUser && pathname === "/wallet") {
-      return <Redirect href="/zone/wallet" />;
+      return <Redirect href={"/zone/wallet" as any} />;
     }
     return <Redirect href={getDefaultSignedInRoute(user) as any} />;
   }

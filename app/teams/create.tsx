@@ -28,7 +28,7 @@ import { createTeamAction, inviteToTeamAction } from "../../src/services/convex/
 import { COLORS } from "../../src/theme";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import Logger from "../../src/utils/logger";
-import styles from "./create.styles";
+import styles from "../../app-shared/teams/create.styles";
 
 const GAMES = [
     { key: 'cs2', label: 'CS2' },

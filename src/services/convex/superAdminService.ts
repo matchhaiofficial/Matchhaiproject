@@ -79,6 +79,11 @@ export type SuperAdminUser = {
   suspendedAt?: number | null;
   suspendedUntil?: number | null;
   suspensionReason?: string | null;
+  accountDeletionJobId?: string;
+  accountDeletionStatus?: "queued" | "running" | "blocked" | "failed" | "completed";
+  accountDeletionStage?: string;
+  accountDeletionError?: string;
+  accountDeletionUpdatedAt?: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -178,6 +183,15 @@ export type SuperAdminSupportTicket = {
   userDisplayName?: string;
   userEmail?: string;
   excerptPreview?: string;
+  accountDeletionJob?: {
+    id: string;
+    status: "queued" | "running" | "blocked" | "failed" | "completed";
+    stage: string;
+    error?: string | null;
+    attempts: number;
+    updatedAt: number;
+    completedAt?: number | null;
+  } | null;
   conversationExcerpt?: Array<{
     role: "user" | "assistant";
     text: string;
@@ -553,7 +567,7 @@ export type SuperAdminAllowlistEntry = {
 };
 
 type Result<T> = { ok: true; data: T } | { ok: false; message: string };
-type BasicResult = { ok: true } | { ok: false; message: string };
+type BasicResult = { ok: true; message?: string } | { ok: false; message: string };
 export type SuperAdminPageResult<T> = {
   page: T[];
   isDone: boolean;
@@ -1381,6 +1395,41 @@ export async function getSupportTicketById(ticketId: string): Promise<Result<Sup
   }
 }
 
+export function subscribeSupportTicketById(
+  ticketId: string,
+  onData: (ticket: SuperAdminSupportTicket | null) => void,
+  onError: (error: unknown) => void,
+) {
+  let disposed = false;
+  let unsubscribe: (() => void) | undefined;
+  void (async () => {
+    try {
+      const sessionToken = await getRequiredSessionToken();
+      if (disposed) return;
+      const watch = convex.watchQuery(api.admin.getSupportTicketById, {
+        sessionToken,
+        ticketId: ticketId as Id<"supportTickets">,
+      });
+      const publishCurrent = () => {
+        try {
+          const result = watch.localQueryResult();
+          if (result !== undefined) onData(result as SuperAdminSupportTicket | null);
+        } catch (error) {
+          onError(error);
+        }
+      };
+      unsubscribe = watch.onUpdate(publishCurrent);
+      publishCurrent();
+    } catch (error) {
+      if (!disposed) onError(error);
+    }
+  })();
+  return () => {
+    disposed = true;
+    unsubscribe?.();
+  };
+}
+
 export async function updateSupportTicketStatus(
   ticketId: string,
   status: SuperAdminSupportTicketStatus
@@ -1466,12 +1515,12 @@ export async function resolveSupportTicket(ticketId: string, resolutionSummary: 
 export async function processAccountDeletion(ticketId: string): Promise<BasicResult> {
   try {
     const sessionToken = await getRequiredSessionToken();
-    await convex.mutation(api.admin.processAccountDeletion, {
+    const result = await convex.mutation(api.admin.processAccountDeletion, {
       sessionToken,
       ticketId: ticketId as Id<"supportTickets">,
     });
     clearSuperAdminCache();
-    return { ok: true };
+    return { ok: true, message: result.status === "scheduled" ? "Account deletion was scheduled." : undefined };
   } catch (error: any) {
     console.error("[superAdminService] processAccountDeletion error", error);
     return { ok: false, message: getUserFacingErrorMessage(error, "Failed to process account deletion.") };
@@ -1481,12 +1530,12 @@ export async function processAccountDeletion(ticketId: string): Promise<BasicRes
 export async function deleteUserAccount(userId: string): Promise<BasicResult> {
   try {
     const sessionToken = await getRequiredSessionToken();
-    await convex.mutation(api.admin.deleteUserAccount, {
+    const result = await convex.mutation(api.admin.deleteUserAccount, {
       sessionToken,
       userId: userId as Id<"users">,
     });
     clearSuperAdminCache();
-    return { ok: true };
+    return { ok: true, message: result.status === "scheduled" ? "Account deletion was scheduled." : undefined };
   } catch (error: any) {
     console.error("[superAdminService] deleteUserAccount error", error);
     return { ok: false, message: getUserFacingErrorMessage(error, "Failed to delete user account.") };
@@ -1662,6 +1711,29 @@ export async function getZoneWithdrawalRequestsPage(
   } catch (error: any) {
     console.error("[superAdminService] getZoneWithdrawalRequestsPage error", error);
     return { ok: false, message: "Failed to load withdrawal requests." };
+  }
+}
+
+export async function getZoneWithdrawalPayoutDetails(
+  withdrawalId: string,
+): Promise<Result<{ accountNumberFull?: string | null; accountNumberMasked?: string | null; bankName?: string | null }>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const detail = await convex.query((api as any).admin.getZoneWithdrawalPayoutDetails, {
+      sessionToken,
+      withdrawalId: withdrawalId as Id<"walletTransactions">,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_withdrawal_payout_details",
+      module: "withdrawals",
+      targetType: "walletTransaction",
+      targetId: withdrawalId,
+      metadataSafe: { found: Boolean(detail) },
+    });
+    return { ok: true, data: detail || {} };
+  } catch (error) {
+    console.error("[superAdminService] getZoneWithdrawalPayoutDetails error", error);
+    return { ok: false, message: "Failed to load payout details." };
   }
 }
 

@@ -3,10 +3,12 @@ import { AppState, type AppStateStatus } from "react-native";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
-const HEARTBEAT_INTERVAL_MS = 60_000;
+// The server treats a user as present for two minutes. Ninety seconds keeps a
+// safe margin while cutting steady-state presence mutations by one third.
+const HEARTBEAT_INTERVAL_MS = 90_000;
 
 /**
- * Calls `users.touchPresence` on app foreground and every 60 s while active.
+ * Calls `users.touchPresence` on app foreground and every 90 s while active.
  * Calls `users.goOffline` only when the app backgrounds or the authenticated
  * user logs out. Route unmounts must not mark the user offline.
  */

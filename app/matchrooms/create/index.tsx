@@ -56,38 +56,38 @@ import { normalizeValorantRole } from "../../../constants/profileOptions";
 
 import Logger from "../../../src/utils/logger";
 import { PAYMENT_VERIFICATION_SAFE_MESSAGE } from "../../../src/utils/paymentUiCopy";
-import BasicFields from "./components/BasicFields";
-import BroadcastAreaSelector from "./components/BroadcastAreaSelector";
-import GameDynamicFields from "./components/GameDynamicFields";
-import GameSelector from "./components/GameSelector";
-import LocationModeSelector from "./components/LocationModeSelector";
-import RoleAutoFill from "./components/RoleAutoFill";
-import SkillBracketSection from "./components/SkillBracketSection";
-import TeamBookingSection from "./components/TeamBookingSection";
-import WalkInRosterEditor from "./components/WalkInRosterEditor";
+import BasicFields from "../../../app-shared/matchrooms/create/components/BasicFields";
+import BroadcastAreaSelector from "../../../app-shared/matchrooms/create/components/BroadcastAreaSelector";
+import GameDynamicFields from "../../../app-shared/matchrooms/create/components/GameDynamicFields";
+import GameSelector from "../../../app-shared/matchrooms/create/components/GameSelector";
+import LocationModeSelector from "../../../app-shared/matchrooms/create/components/LocationModeSelector";
+import RoleAutoFill from "../../../app-shared/matchrooms/create/components/RoleAutoFill";
+import SkillBracketSection from "../../../app-shared/matchrooms/create/components/SkillBracketSection";
+import TeamBookingSection from "../../../app-shared/matchrooms/create/components/TeamBookingSection";
+import WalkInRosterEditor from "../../../app-shared/matchrooms/create/components/WalkInRosterEditor";
 import {
   useMatchroomCreatePricing,
   type ZoneRateOption,
-} from "./hooks/useMatchroomCreatePricing";
+} from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreatePricing";
 import {
   useMatchroomCreateSubmitFlow,
   type MatchroomCreateSubmitFeedback,
-} from "./hooks/useMatchroomCreateSubmitFlow";
-import { useMatchroomCreateTeamBooking } from "./hooks/useMatchroomCreateTeamBooking";
-import { useMatchroomCreateBroadcastAreas } from "./hooks/useMatchroomCreateBroadcastAreas";
+} from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateSubmitFlow";
+import { useMatchroomCreateTeamBooking } from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateTeamBooking";
+import { useMatchroomCreateBroadcastAreas } from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateBroadcastAreas";
 import {
   useMatchroomCreateWalkInRoster,
-} from "./hooks/useMatchroomCreateWalkInRoster";
+} from "../../../app-shared/matchrooms/create/hooks/useMatchroomCreateWalkInRoster";
 import {
   getMatchroomCreateSubmitBlockers,
   getMatchroomCreateValidationError,
-} from "./utils/matchroomCreateValidation";
-// import TeamModeSelector from './components/TeamModeSelector';
-// import TeamPicker from './components/TeamPicker';
-// import SlotReservation from './components/SlotReservation';
-import { MotionPressable } from "./components/MotionPressable";
-import ZonePicker from "./components/ZonePicker";
-import styles from "./create.styles";
+} from "../../../app-shared/matchrooms/create/utils/matchroomCreateValidation";
+// import TeamModeSelector from '../../../app-shared/matchrooms/create/components/TeamModeSelector';
+// import TeamPicker from '../../../app-shared/matchrooms/create/components/TeamPicker';
+// import SlotReservation from '../../../app-shared/matchrooms/create/components/SlotReservation';
+import { MotionPressable } from "../../../app-shared/matchrooms/create/components/MotionPressable";
+import ZonePicker from "../../../app-shared/matchrooms/create/components/ZonePicker";
+import styles from "../../../app-shared/matchrooms/create/create.styles";
 
 const ZONE_GAME_SUPPORT_MAP: Array<{ gameKey: string; flags: string[] }> = [
   { gameKey: "cs2", flags: ["supportsCs2"] },
@@ -338,6 +338,7 @@ export default function CreateMatchroom() {
     zonePricingRules,
     zoneRate,
     zoneRateOptions,
+    hasInsufficientCapacityOptions,
     selectedZoneRateKey,
     setZoneRate,
     setSelectedZoneRateKey,
@@ -1283,9 +1284,7 @@ export default function CreateMatchroom() {
         ? "This payment was not completed. You can try again when ready."
       : "Approve the payment in Easypaisa. MatchHai will keep checking this screen."
     : "Use the number you want to pay with for this matchroom payment.";
-  const easypaisaStartTimedOut = String(easypaisaCheckoutStatus?.lastError || "")
-    .toLowerCase()
-    .includes("taking too long");
+  const easypaisaStartTimedOut = Boolean(easypaisaCheckoutStatus?.startTimedOut);
   const easypaisaStatusMessage =
     isEasypaisaFinalized
       ? "Your payment was received and your matchroom is ready."
@@ -1523,14 +1522,21 @@ export default function CreateMatchroom() {
                 <View style={styles.chipRow}>
                   {zoneRateOptions.map((opt) => {
                     const active = selectedZoneRateKey === opt.key;
+                    const unavailable = opt.available === false;
                     return (
                       <Pressable
                         key={opt.key}
+                        accessibilityState={{ disabled: unavailable, selected: active }}
                         style={[
                           styles.optionChip,
                           active && styles.optionChipActive,
+                          unavailable && { opacity: 0.45 },
                         ]}
                         onPress={() => {
+                          if (unavailable) {
+                            showToast({ type: "info", title: "PCs not available", message: opt.availabilityMessage || "This category is unavailable at the selected time." });
+                            return;
+                          }
                           selectZoneRateOption(opt.key, opt.price);
                         }}
                       >
@@ -1542,6 +1548,7 @@ export default function CreateMatchroom() {
                         >
                           {opt.label}
                         </Text>
+                        {unavailable ? <AppIcon name="info-outline" size={14} color={COLORS.warning} /> : null}
                       </Pressable>
                     );
                   })}
@@ -1815,15 +1822,22 @@ export default function CreateMatchroom() {
                   <View style={styles.chipRow}>
                     {zoneRateOptions.map((opt) => {
                       const isActive = selectedZoneRateKey === opt.key;
+                      const unavailable = opt.available === false;
                       return (
                         <Pressable
                           key={opt.key}
+                          accessibilityState={{ disabled: unavailable, selected: isActive }}
                           style={({ pressed }) => [
                             styles.optionChip,
                             isActive && styles.optionChipActive,
+                            unavailable && { opacity: 0.45 },
                             pressed && { opacity: 0.9 },
                           ]}
                           onPress={() => {
+                            if (unavailable) {
+                              showToast({ type: "info", title: "Resources not available", message: opt.availabilityMessage || "This category is unavailable at the selected time." });
+                              return;
+                            }
                             selectZoneRateOption(opt.key, opt.price);
                           }}
                         >
@@ -1835,6 +1849,7 @@ export default function CreateMatchroom() {
                           >
                             {opt.label}
                           </Text>
+                          {unavailable ? <AppIcon name="info-outline" size={14} color={COLORS.warning} /> : null}
                         </Pressable>
                       );
                     })}
@@ -1854,6 +1869,14 @@ export default function CreateMatchroom() {
                   )}
                 </View>
               )}
+
+              {selectedZoneId && selectedGame && zoneRateOptions.length === 0 && hasInsufficientCapacityOptions ? (
+                <View style={styles.section}>
+                  <Text style={styles.helperText}>
+                    This branch does not have enough configured resources for this game. Choose another branch, venue, or game.
+                  </Text>
+                </View>
+              ) : null}
 
               {/* Series Type Selector (CS2 & FC & Tekken) */}
               {(isCsStyleGame(selectedGame) ||

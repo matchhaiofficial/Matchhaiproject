@@ -1,11 +1,14 @@
 import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
+import { assertNewGameEntityCreationAllowed } from "./gameAvailabilityPolicy";
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { requireCurrentUser, requireSuperAdmin, getCurrentUser, isSuperAdminProfile } from "./authz";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
+import { syncMatchroomMembers } from "./matchroomMembers";
 import { deductWalletFunds } from "./wallet";
 import { computeAuthoritativeMatchroomPricing } from "./matchroomPricing";
 import {
@@ -36,13 +39,46 @@ import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import {
   assertNoParticipantTimeConflict,
   assertZoneResourceCapacityAvailable,
+  getZoneRateOptionsAvailability,
+  reconcileResourceLegacyAssignment,
 } from "./bookingConflicts";
-import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
+import {
+  assertBranchOperatingHoursAvailable,
+  getBranchOperatingHoursAvailability,
+} from "./branchOperatingHours";
+import {
+  getFutureLifecycleDueAt,
+  getLifecycleScheduleAt,
+  getLifecycleDueAt,
+  withLifecycleDueAt,
+} from "./matchroomLifecycle";
 import {
   withBookingRequestLifecycleDueAt,
   withTeamChallengeLifecycleDueAt,
 } from "./maintenanceDue";
-import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
+import { isMaintenanceJobEnabled } from "./runtimeEnv";
+import { getKarachiDayStartMillis, parseKarachiDateTimeMillis } from "./karachiDateTime";
+import { assertUsersCanShareMatchroom } from "./userBlockPolicy";
+
+function getAuthoritativeMatchDurationMinutes(input: {
+  game: string;
+  seriesType?: string | null;
+  overs?: string | number | null;
+  durationHours?: number | null;
+}) {
+  const game = String(input.game || "").trim().toLowerCase();
+  const series = String(input.seriesType || "BO1").trim().toUpperCase();
+  if (["cs2", "cs16", "valorant"].includes(game)) return series === "BO10" ? 600 : series === "BO5" ? 300 : series === "BO3" ? 180 : 60;
+  if (["fc25", "fc26"].includes(game)) return series === "BO10" ? 180 : series === "BO5" ? 120 : series === "BO3" ? 60 : 30;
+  if (game === "tekken8") return series === "BO40" ? 180 : series === "BO20" ? 120 : 60;
+  if (game === "indoor_cricket") return String(input.overs || "") === "6" ? 150 : 120;
+  if (["padel", "pickleball"].includes(game)) return series === "BO10" ? 180 : series === "BO5" ? 120 : 60;
+  if (game === "futsal") {
+    const requestedHours = Number(input.durationHours || 1);
+    return Math.round(Math.min(6, Math.max(0.5, Number.isFinite(requestedHours) ? requestedHours : 1)) * 60);
+  }
+  return 60;
+}
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -195,8 +231,7 @@ function getScheduleRoomStartMs(room: any): number | null {
   const date = String(room?.scheduledDate || "").trim();
   const time = String(room?.scheduledTime || "").trim();
   if (!date || !time) return null;
-  const parsed = new Date(`${date}T${time}`).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseKarachiDateTimeMillis(date, time);
 }
 
 function shouldExpireForNotFull(room: any, now = Date.now()): boolean {
@@ -227,24 +262,6 @@ function shouldExpireInProgressRoom(room: any, now = Date.now()): boolean {
   const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
   if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
   return scheduledStartAt <= now && !isRosterFull(room);
-}
-
-async function findVenueGameTimeConflict(
-  ctx: any,
-  args: { zoneId?: string | null; game: string; scheduledStartAt: number },
-) {
-  if (!args.zoneId || typeof args.scheduledStartAt !== "number") return null;
-
-  const existing = await ctx.db
-    .query("matchrooms")
-    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", args.zoneId))
-    .take(100);
-
-  return existing.find((room: any) => {
-    if (String(room.game || "") !== String(args.game || "")) return false;
-    if (room.scheduledStartAt !== args.scheduledStartAt) return false;
-    return !["cancelled", "completed", "expired"].includes(String(room.status || ""));
-  }) || null;
 }
 
 function canStartMatchroom(room: any, now = Date.now()) {
@@ -335,14 +352,13 @@ async function completeMatchroomForResultVerification(
     updatedAt: now,
   });
 
-  const completedRoom = await ctx.db.get(matchroomId);
+  await releaseAllocatedResourcesForMatchroom(ctx, matchroomId, room);
   await captureHeldBookingIntentsForMatchroom(ctx, matchroomId);
   await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
     matchroomId,
     action: "capture",
     reason: "matchroom_completed",
   });
-  await payVenueWalletForCompletedMatchroom(ctx, matchroomId, completedRoom);
 
   return { ok: true, changed: true, status: "completed" as const };
 }
@@ -420,10 +436,6 @@ function resolveResultCaptains(room: any, rv: any = {}) {
     "",
   );
   return { team1Captain, team2Captain };
-}
-
-function chooseRandomWinner() {
-  return Math.random() < 0.5 ? "team1" as const : "team2" as const;
 }
 
 async function notifyResultFinalized(ctx: any, room: any, winner: "team1" | "team2", source: string) {
@@ -956,26 +968,51 @@ async function finalizeMatchroomResult(
     resolutionSource: source,
   };
 
+  const venuePayoutEligibleAt = now + ONE_DAY_MS;
+  const venuePayoutScheduledFnId = room.zoneOwnerUid
+    ? await ctx.scheduler.runAt(
+        venuePayoutEligibleAt,
+        internal.matchrooms.settleVenuePayoutAfterResult,
+        { matchroomId },
+      )
+    : null;
   await ctx.db.patch(matchroomId, {
     resultVerification: nextVerification,
+    venuePayoutEligibleAt: room.zoneOwnerUid ? venuePayoutEligibleAt : undefined,
+    venuePayoutScheduledFnId: venuePayoutScheduledFnId ? String(venuePayoutScheduledFnId) : undefined,
     lifecycleDueAt: undefined,
     updatedAt: now,
   });
   await notifyResultFinalized(ctx, { ...room, _id: matchroomId }, winner, source);
 
-  // Apply server-authoritative ELO after the result is finalized. Best-effort:
-  // a rating failure must never roll back the finalized result. Idempotent.
-  try {
-    await applyRatingsForFinalizedMatch(ctx, matchroomId, winner, source);
-  } catch (error) {
-    console.error("[matchrooms] applyRatingsForFinalizedMatch failed", {
-      matchroomId: String(matchroomId),
-      error: String(error),
-    });
-  }
+  // Keep result finalization, every player/team rating update, ledger writes,
+  // and the idempotency marker in one atomic transaction. If rating application
+  // fails, the whole result submission rolls back and can be retried safely.
+  await applyRatingsForFinalizedMatch(ctx, matchroomId, winner, source);
 
   return { ok: true, status: "resolved", winner, source };
 }
+
+// Compatibility target for the former client-calculated rating mutation.
+// Supplied ratings are never trusted; this only reapplies the already-finalized
+// server result and is idempotent through the rating history marker.
+export const reconcileFinalizedRatings = internalMutation({
+  args: { matchroomId: v.id("matchrooms") },
+  handler: async (ctx, args) => {
+    const room: any = await ctx.db.get(args.matchroomId);
+    const winner = room?.resultVerification?.finalWinner;
+    if (!room || room.status !== "completed" || !["team1", "team2"].includes(String(winner))) {
+      throw new Error("Match result must be finalized before ratings can be reconciled.");
+    }
+    await applyRatingsForFinalizedMatch(
+      ctx,
+      args.matchroomId,
+      winner as "team1" | "team2",
+      String(room.resultVerification?.resolutionSource || "legacy_reconciliation"),
+    );
+    return true;
+  },
+});
 
 export async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
@@ -995,6 +1032,29 @@ export async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .unique();
 }
 
+async function assertUserCanJoinRoom(ctx: any, userId: Id<"users">, room: any) {
+  const participants: Id<"users">[] = [];
+  for (const rawUid of getMatchroomPlayerUids(room)) {
+    const participant = await resolveUserByAnyId(ctx, rawUid);
+    if (participant && String(participant._id) !== String(userId)) {
+      participants.push(participant._id);
+    }
+  }
+  await assertUsersCanShareMatchroom(ctx, userId, participants);
+}
+
+async function assertRosterHasNoBlockedPair(ctx: any, rawUserIds: string[]) {
+  const users = (await Promise.all(rawUserIds.map((uid) => resolveUserByAnyId(ctx, uid))))
+    .filter(Boolean);
+  for (let index = 0; index < users.length; index += 1) {
+    await assertUsersCanShareMatchroom(
+      ctx,
+      users[index]._id,
+      users.slice(index + 1).map((user: any) => user._id),
+    );
+  }
+}
+
 async function requireVerifiedActor(ctx: any, expectedUid?: string) {
   const actor = await requireCurrentUser(ctx);
   const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
@@ -1008,6 +1068,9 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
 
   assertKycAccessAllowed(actor.user, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
+  if (expectedUid && !expectedUser) {
+    throw new Error("The requested account could not be verified");
+  }
   if (expectedUser && expectedUser._id !== actor.user._id) {
     throw new Error("You can only perform this action for your own account");
   }
@@ -1443,8 +1506,8 @@ function getDefaultResourceAssetType(game?: string | null) {
 
 function getZoneRequestPreferredDate(room: any) {
   if (room.scheduledDate) {
-    const timestamp = new Date(String(room.scheduledDate)).getTime();
-    if (Number.isFinite(timestamp)) return timestamp;
+    const timestamp = getKarachiDayStartMillis(room.scheduledDate);
+    if (timestamp) return timestamp;
   }
   return typeof room.scheduledStartAt === "number" ? room.scheduledStartAt : undefined;
 }
@@ -1514,6 +1577,16 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
       amount: Number(room.venuePayoutAmount || 0),
       paidAt: room.venuePayoutAt || null,
     };
+  }
+  if (room.resultVerification?.status !== "resolved") {
+    return { status: "pending", reason: "result_not_resolved" };
+  }
+  const eligibleAt = Number(
+    room.venuePayoutEligibleAt
+      || (Number(room.resultVerification?.resolvedAt || 0) + ONE_DAY_MS),
+  );
+  if (!Number.isFinite(eligibleAt) || eligibleAt > Date.now()) {
+    return { status: "pending", reason: "clearing_window", eligibleAt };
   }
 
   const owner = await resolveUserByAnyId(ctx, String(room.zoneOwnerUid));
@@ -1595,6 +1668,16 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
   });
   return { status: "paid", reference, amount: payoutAmount, paidAt: now };
 }
+
+export const settleVenuePayoutAfterResult = internalMutation({
+  args: { matchroomId: v.id("matchrooms") },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return { ok: false, reason: "matchroom_not_found" };
+    const result = await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, room);
+    return { ok: true, result };
+  },
+});
 
 function getBookingHoldReference(intentId: Id<"bookingIntents">, sourceReference?: string | null) {
   const source = String(sourceReference || "wallet").replace(/[^a-zA-Z0-9:_-]/g, "_");
@@ -2044,6 +2127,29 @@ async function expirePendingMatchroomNotifications(ctx: any, matchroomId: Id<"ma
   return { expiredCount };
 }
 
+async function releaseAllocatedResourcesForMatchroom(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  roomInput?: any,
+) {
+  const room = roomInput || await ctx.db.get(matchroomId);
+  const resourceIds = Array.isArray(room?.resourceIds) ? room.resourceIds : [];
+  let releasedCount = 0;
+  const now = Date.now();
+  for (const resourceId of resourceIds) {
+    const resource = await ctx.db.get(resourceId).catch(() => null);
+    if (!resource || String(resource.matchroomId || "") !== String(matchroomId)) continue;
+    await reconcileResourceLegacyAssignment(ctx, {
+      resourceId: resource._id,
+      excludeBookingRequestId: resource.bookingRequestId ? String(resource.bookingRequestId) : null,
+      excludeMatchroomId: String(matchroomId),
+      now,
+    });
+    releasedCount += 1;
+  }
+  return releasedCount;
+}
+
 async function expireMatchroomForInvalidLifecycle(
   ctx: any,
   matchroomId: Id<"matchrooms">,
@@ -2073,6 +2179,7 @@ async function expireMatchroomForInvalidLifecycle(
     updatedAt: now,
     lifecycleDueAt: undefined,
   });
+  await releaseAllocatedResourcesForMatchroom(ctx, matchroomId, room);
   await expireBookingIntentsForMatchroom(ctx, matchroomId, reason);
   await expirePendingMatchroomNotifications(ctx, matchroomId, reason);
   await releaseHeldBookingIntentsForMatchroom(ctx, matchroomId, reason);
@@ -2219,6 +2326,7 @@ async function dispatchZoneAdminRequestForFullMatchroom(
     reservedSlots: room.reservedSlots,
     preferredDate: getZoneRequestPreferredDate(room),
     preferredTime: room.scheduledTime,
+    scheduledStartAt: room.scheduledStartAt || room.startTime,
     flexibilityWindow: "Exact time",
     locationMode: "zone",
     budgetPerPlayer: Number(room.pricing?.perPlayer || 0),
@@ -2474,6 +2582,9 @@ export async function buildMatchroomRosterPatch(
   targetTeam?: string | null,
   requestedSlotId?: string | null,
 ) {
+  const requester = await resolveUserByAnyId(ctx, requesterUid);
+  if (!requester) throw new Error("Player profile not found.");
+  await assertUserCanJoinRoom(ctx, requester._id, room);
   const requesterSkill = await requireUserGameSkill(ctx, requesterUid, room.game);
   const now = Date.now();
   const playerRecord = {
@@ -2873,9 +2984,9 @@ function matchesViewerIdentity(values: Set<string>, candidate: unknown) {
   return false;
 }
 
-async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
+async function resolveCheckInAccess(ctx: any, room: any, actorOverride?: any): Promise<boolean> {
   try {
-    const actor = await getCurrentUser(ctx);
+    const actor = actorOverride ?? await getCurrentUser(ctx);
     const viewer = actor.user;
     if (!viewer) return false;
     const viewerValues = getViewerIdentityValues(actor, viewer);
@@ -2923,9 +3034,10 @@ function isTerminalMatchroomStatus(status: any): boolean {
 async function viewerMayViewPrivateMatchroom(
   ctx: any,
   room: any,
+  actorOverride?: any,
 ): Promise<boolean> {
   try {
-    const actor = await getCurrentUser(ctx);
+    const actor = actorOverride ?? await getCurrentUser(ctx);
     const viewer = actor.user;
     if (!viewer) return false;
     const viewerValues = getViewerIdentityValues(actor, viewer);
@@ -3070,11 +3182,12 @@ function buildPublicMatchroomView(room: any): any {
 async function projectMatchroomForViewer(
   ctx: any,
   room: any,
+  actorOverride?: any,
 ): Promise<any | null> {
-  const authorized = await resolveCheckInAccess(ctx, room);
+  const authorized = await resolveCheckInAccess(ctx, room, actorOverride);
   if (!authorized) {
     if (room.isPrivate) {
-      const mayView = await viewerMayViewPrivateMatchroom(ctx, room);
+      const mayView = await viewerMayViewPrivateMatchroom(ctx, room, actorOverride);
       if (!mayView) return null;
     }
     return buildPublicMatchroomView(room);
@@ -3090,6 +3203,21 @@ async function projectMatchroomForViewer(
     result.matchCode = null;
   }
   return result;
+}
+
+async function requireRequestedMatchroomIdentity(ctx: any, requestedUid: string) {
+  const actor = await requireCurrentUser(ctx);
+  const viewerValues = getViewerIdentityValues(actor, actor.user);
+  if (!matchesViewerIdentity(viewerValues, requestedUid)) {
+    throw new Error("Not authorized to access another user's matchrooms.");
+  }
+  return String(requestedUid);
+}
+
+async function projectMatchroomListForViewer(ctx: any, rooms: any[]) {
+  const actor = await getCurrentUser(ctx);
+  const projected = await Promise.all(rooms.map((room) => projectMatchroomForViewer(ctx, room, actor)));
+  return projected.filter((room): room is any => room !== null);
 }
 
 export const getById = query({
@@ -3155,7 +3283,7 @@ export const list = query({
       filtered = filtered.filter((m) => m.game === args.game);
     }
 
-    return filtered.map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, filtered);
   },
 });
 
@@ -3178,7 +3306,7 @@ export const listOpen = query({
       filtered = filtered.filter((m) => m.game === args.game);
     }
 
-    return filtered.map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, filtered);
   },
 });
 
@@ -3192,9 +3320,7 @@ export const listByHost = query({
       .order("desc")
       .collect();
 
-    return matchrooms
-      .filter((m) => !isRoomExpired(m))
-      .map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, matchrooms.filter((m) => !isRoomExpired(m)));
   },
 });
 
@@ -3202,30 +3328,6 @@ export const listByHost = query({
 // Reconcile member rows to the room's current playerUids. Called after every
 // membership-changing write so user-scoped lists are correct & scalable instead
 // of scanning the global newest-200 rooms.
-async function syncMatchroomMembers(
-  ctx: any,
-  matchroomId: Id<"matchrooms">,
-  playerUids: string[],
-) {
-  const desired = new Set((playerUids || []).map((u) => String(u)).filter(Boolean));
-  const existing = await ctx.db
-    .query("matchroomMembers")
-    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
-    .collect();
-  const existingUids = new Set<string>();
-  for (const row of existing) {
-    existingUids.add(String(row.uid));
-    if (!desired.has(String(row.uid))) {
-      await ctx.db.delete(row._id);
-    }
-  }
-  for (const uid of desired) {
-    if (!existingUids.has(uid)) {
-      await ctx.db.insert("matchroomMembers", { matchroomId, uid, createdAt: Date.now() });
-    }
-  }
-}
-
 // Rooms a user is in, via the member index, defensively filtered against the
 // live playerUids so a stale member row can never surface a wrong room.
 async function getRoomsForUserViaMembers(ctx: any, uid: string) {
@@ -3389,6 +3491,7 @@ export const listForUserSchedule = query({
     })),
   },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
     const offset = Math.max(0, Number(args.cursor || 0) || 0);
     const now = Date.now();
@@ -3425,18 +3528,29 @@ export const listForUserSchedule = query({
   },
 });
 
-// One-time backfill of matchroomMembers from existing matchrooms.playerUids.
-// Run via `npx convex run matchrooms:backfillMatchroomMembers` after deploy.
-// NOTE: collects all matchrooms in a single transaction — fine for current
-// scale; convert to a paginated job if the table grows very large.
+// One-time/backward-compatible backfill of matchroomMembers from existing
+// matchrooms.playerUids. Each page schedules the next so this remains safe as
+// the table grows. Calling it with no args starts from the beginning.
 export const backfillMatchroomMembers = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const rooms = await ctx.db.query("matchrooms").collect();
-    for (const room of rooms) {
+  args: {
+    cursor: v.optional(v.string()),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("matchrooms").paginate({
+      cursor: args.cursor ?? null,
+      numItems: Math.min(50, Math.max(1, Number(args.batchSize || 25))),
+    });
+    for (const room of page.page) {
       await syncMatchroomMembers(ctx, room._id, (room.playerUids || []) as string[]);
     }
-    return { processed: rooms.length };
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.matchrooms.backfillMatchroomMembers, {
+        cursor: page.continueCursor,
+        batchSize: args.batchSize,
+      });
+    }
+    return { processed: page.page.length, isDone: page.isDone, continueCursor: page.continueCursor };
   },
 });
 
@@ -3444,6 +3558,7 @@ export const backfillMatchroomMembers = internalMutation({
 export const listByPlayer = query({
   args: { playerUid: v.string() },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.playerUid);
     const rooms = await getRoomsForUserViaMembers(ctx, args.playerUid);
     return rooms
       .filter((m) => !isRoomExpired(m))
@@ -3457,6 +3572,7 @@ export const listByPlayer = query({
 export const getUserMatchrooms = query({
   args: { uid: v.string() },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const hostedRooms = await ctx.db
       .query("matchrooms")
       .withIndex("by_hostUid", (q) => q.eq("hostUid", args.uid))
@@ -3493,6 +3609,7 @@ export const listUserMatchroomsPage = query({
     })),
   },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
     const offset = Math.max(0, Number(args.cursor || 0) || 0);
     const now = Date.now();
@@ -3564,9 +3681,7 @@ export const listByZone = query({
       .order("desc")
       .collect();
 
-    return matchrooms
-      .filter((m) => !isRoomExpired(m))
-      .map((m) => ({ ...m, id: m._id }));
+    return await projectMatchroomListForViewer(ctx, matchrooms.filter((m) => !isRoomExpired(m)));
   },
 });
 
@@ -3579,6 +3694,7 @@ export const checkTimeConflict = query({
     excludeRoomId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireRequestedMatchroomIdentity(ctx, args.uid);
     const targetStart = args.scheduledStartAt;
     const targetEnd = targetStart + args.durationMinutes * 60 * 1000;
 
@@ -3633,21 +3749,26 @@ export const checkCreateAvailability = query({
     }
 
     if (args.locationMode === "zone" && args.zoneId) {
-      const conflict = await findVenueGameTimeConflict(ctx, {
-        game: args.game,
+      const zone = await ctx.db.get(args.zoneId as Id<"zones">).catch(() => null);
+      if (!zone) {
+        return { available: false, message: "Venue not found.", reason: "venue_unavailable" };
+      }
+      if (String(zone.status || "") !== "active") {
+        return { available: false, message: "This venue is not currently accepting bookings.", reason: "venue_unavailable" };
+      }
+      const operatingHours = getBranchOperatingHoursAvailability({
+        zone,
+        branchId: args.branchId,
         scheduledStartAt: args.scheduledStartAt,
-        zoneId: args.zoneId,
+        durationMinutes: args.durationMinutes || 60,
       });
-
-      if (conflict) {
+      if (!operatingHours.available) {
         return {
           available: false,
-          conflictId: String(conflict._id),
-          message: MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE,
-          reason: "venue_time_conflict",
+          message: operatingHours.message,
+          reason: operatingHours.reason,
         };
       }
-
       try {
         await assertZoneResourceCapacityAvailable(ctx, {
           zoneId: args.zoneId,
@@ -3674,6 +3795,67 @@ export const checkCreateAvailability = query({
       message: null,
       reason: null,
     };
+  },
+});
+
+const rateOptionAvailabilityValidator = v.object({
+  key: v.string(),
+  available: v.boolean(),
+  availableCount: v.number(),
+  requiredCount: v.number(),
+  message: v.string(),
+});
+
+export const checkRateOptionsAvailability = query({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.optional(v.string()),
+    game: v.string(),
+    scheduledDate: v.string(),
+    scheduledTime: v.string(),
+    durationMinutes: v.number(),
+    options: v.array(v.object({
+      key: v.string(),
+      assetType: v.string(),
+      tier: v.optional(v.string()),
+      surface: v.optional(v.string()),
+    })),
+  },
+  returns: v.array(rateOptionAvailabilityValidator),
+  handler: async (ctx, args) => {
+    await requireVerifiedActor(ctx);
+    const startAt = parseKarachiDateTimeMillis(args.scheduledDate, args.scheduledTime);
+    const invalid = (message: string) => args.options.map((option) => ({
+      key: option.key,
+      available: false,
+      availableCount: 0,
+      requiredCount: 0,
+      message,
+    }));
+    if (!startAt) return invalid("Choose a valid date and time.");
+    const scheduleValidation = validateMatchroomScheduleWindow(startAt, Date.now());
+    if (!scheduleValidation.ok) return invalid(scheduleValidation.message || "Choose a valid future date and time.");
+
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone || String(zone.status || "") !== "active") {
+      return invalid("This venue is not currently accepting bookings.");
+    }
+    const operatingHours = getBranchOperatingHoursAvailability({
+      zone,
+      branchId: args.branchId,
+      scheduledStartAt: startAt,
+      durationMinutes: args.durationMinutes,
+    });
+    if (!operatingHours.available) return invalid(operatingHours.message || "The selected branch is closed at that time.");
+
+    return await getZoneRateOptionsAvailability(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      scheduledStartAt: startAt,
+      durationMinutes: args.durationMinutes,
+      game: args.game,
+      options: args.options,
+    });
   },
 });
 
@@ -3772,7 +3954,11 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   verifiedActor?: any;
   walletPrecheckHostUser?: any;
   sourcePaymentOrderRefNum?: string | null;
+  allowDisabledGameForSeed?: boolean;
 }) {
+  if (!options?.allowDisabledGameForSeed) {
+    assertNewGameEntityCreationAllowed(args.game);
+  }
   const actor = options?.verifiedActor
     ? options.verifiedActor
     : options?.trustedHostUid
@@ -3787,6 +3973,24 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
 
   if (actorUid !== args.hostUid) {
     throw new Error("You can only create a matchroom as yourself");
+  }
+
+  // Never trust independent client timing fields. The displayed Karachi date
+  // and time determine the persisted epoch, and game rules determine duration.
+  if (args.scheduledDate || args.scheduledTime) {
+    const canonicalStartAt = parseKarachiDateTimeMillis(args.scheduledDate, args.scheduledTime);
+    if (!canonicalStartAt) throw new Error("Enter a valid scheduled date and time.");
+    args.scheduledStartAt = canonicalStartAt;
+    args.lockAt = getMatchroomLockAt(canonicalStartAt) || undefined;
+  }
+  args.durationMinutes = getAuthoritativeMatchDurationMinutes({
+    game: args.game,
+    seriesType: args.seriesType,
+    overs: args.overs,
+    durationHours: args.durationHours,
+  });
+  if (args.locationMode === "zone" && args.zoneId && !args.requestedResourceAssetType) {
+    args.requestedResourceAssetType = getDefaultResourceAssetType(args.game);
   }
 
   const sourcePaymentOrderRefNum = String(options?.sourcePaymentOrderRefNum || args.sourcePaymentOrderRefNum || "").trim();
@@ -3838,7 +4042,6 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   if (
     args.locationMode === "zone"
     && args.zoneId
-    && args.requestedResourceAssetType
   ) {
     const clientPerPlayer = Number(args?.pricing?.perPlayer || 0);
     const paidSlots = Math.max(1, Number(args.paymentReservedSlots || 1));
@@ -3906,14 +4109,16 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     && args.zoneId
     && typeof args.scheduledStartAt === "number"
   ) {
-    const conflict = await findVenueGameTimeConflict(ctx, {
-      game: args.game,
-      scheduledStartAt: args.scheduledStartAt,
-      zoneId: args.zoneId,
-    });
-    if (conflict) {
-      throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
+    const zone = await ctx.db.get(args.zoneId as Id<"zones">);
+    if (!zone || String(zone.status || "") !== "active") {
+      throw new Error("This venue is not currently accepting bookings.");
     }
+    await assertBranchOperatingHoursAvailable(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      scheduledStartAt: args.scheduledStartAt,
+      durationMinutes: args.durationMinutes || 60,
+    });
     await assertZoneResourceCapacityAvailable(ctx, {
       zoneId: args.zoneId,
       branchId: args.branchId,
@@ -3940,6 +4145,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     ),
   );
   const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
+  await assertRosterHasNoBlockedPair(ctx, normalizedPlayerUids);
   await assertNoParticipantTimeConflict(ctx, {
     userIds: normalizedPlayerUids.length ? normalizedPlayerUids : [actorUid],
     scheduledStartAt: args.scheduledStartAt,
@@ -4037,6 +4243,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   await syncMatchroomMembers(ctx, matchroomId, normalizedPlayerUids);
   const insertedRoom = await ctx.db.get(matchroomId);
   if (insertedRoom) {
+    await scheduleNextMatchroomLifecycle(ctx, insertedRoom);
     await scheduleNewMatchroomAreaNotifications(ctx, matchroomId, insertedRoom, args);
   }
 
@@ -4109,6 +4316,27 @@ export const create = mutation({
   },
 });
 
+// Guarded demo seeding must not call the authenticated public mutation with a
+// fabricated actor. Keep the trusted entry point internal, limited to unpaid
+// rows that are explicitly tagged as seed data, and reuse the exact production
+// validation/member/lifecycle pipeline.
+export const createSeededDemo = internalMutation({
+  args: createMatchroomArgsValidator,
+  handler: async (ctx, args) => {
+    if (args.bookingSource !== "seed" || args.paymentStatus !== "unpaid") {
+      throw new Error("Seeded matchrooms must be unpaid and tagged with bookingSource=seed.");
+    }
+    const result = await createMatchroomFromValidatedArgs(ctx, args, {
+      trustedHostUid: true,
+      allowDisabledGameForSeed: true,
+    });
+    if (isMatchroomCreateFailureResult(result)) {
+      throw new Error(result.message || "Could not create seeded matchroom.");
+    }
+    return result;
+  },
+});
+
 export const finalizePaidCreateFromProvider = internalMutation({
   args: {
     orderRefNum: v.string(),
@@ -4155,7 +4383,20 @@ export const createTeamChallengeMatchroom = internalMutation({
     if (!venue?.zoneId) return { ok: false, reason: "no_confirmed_venue" };
 
     const zone: any = await ctx.db.get(venue.zoneId as Id<"zones">);
-    if (!zone) return { ok: false, reason: "zone_not_found" };
+    if (!zone || zone.status !== "active") return { ok: false, reason: "zone_unavailable" };
+    const choices = challenge.captainVenueChoices || {};
+    const captainAChoice = choices[String(challenge.captainAUid)];
+    const captainBChoice = choices[String(challenge.captainBUid)];
+    if (
+      challenge.status !== "venue_confirmed"
+      || !captainAChoice?.zoneId
+      || captainAChoice.zoneId !== captainBChoice?.zoneId
+      || captainAChoice.zoneId !== venue.zoneId
+      || String(captainAChoice.branchId || "") !== String(captainBChoice?.branchId || "")
+      || String(captainAChoice.branchId || "") !== String(venue.branchId || "")
+    ) {
+      return { ok: false, reason: "venue_agreement_changed" };
+    }
     const zoneOwnerUid = zone.ownerUid ? String(zone.ownerUid) : undefined;
 
     const game = String(challenge.gameKey || challenge.game || "");
@@ -4165,46 +4406,80 @@ export const createTeamChallengeMatchroom = internalMutation({
     const now = Date.now();
     const scheduledStartAt = typeof challenge.scheduledAt === "number" ? challenge.scheduledAt : undefined;
 
-    const buildCaptainPlayer = async (uid: any, name: any) => {
+    const buildLineupPlayer = async (uid: any, fallbackName: any, teamLetter: "A" | "B") => {
       const user = uid ? await resolveUserByAnyId(ctx, String(uid)) : null;
-      const resolvedUid = user ? String(user._id) : String(uid || "");
+      if (!user) return null;
+      const resolvedUid = String(user._id);
       const skill = user ? getSkillScoreForGame(user, game) : null;
+      const isCaptain = resolvedUid === String(teamLetter === "A" ? challenge.captainAUid : challenge.captainBUid);
       return {
         uid: resolvedUid,
-        username: String(name || user?.username || user?.fullName || "Captain"),
+        username: String(user?.username || user?.fullName || (isCaptain ? fallbackName : "Player")),
         joinedAt: now,
-        role: "Captain",
+        role: isCaptain ? "Captain" : `Team ${teamLetter}`,
         skillTier: typeof skill?.tier === "string" ? skill.tier : undefined,
       };
     };
-    const captainA = await buildCaptainPlayer(challenge.captainAUid, challenge.captainAName);
-    const captainB = await buildCaptainPlayer(challenge.captainBUid, challenge.captainBName);
-    const players = [captainA, captainB].filter((p) => p.uid);
+    const lineupA = Array.isArray(challenge.lineupA) ? Array.from(new Set(challenge.lineupA.map(String))) : [];
+    const lineupB = Array.isArray(challenge.lineupB) ? Array.from(new Set(challenge.lineupB.map(String))) : [];
+    if (
+      lineupA.length !== teamSize
+      || lineupB.length !== teamSize
+      || !lineupA.includes(String(challenge.captainAUid))
+      || !lineupB.includes(String(challenge.captainBUid))
+    ) {
+      return { ok: false, reason: "invalid_lineup" };
+    }
+    const teamAPlayers = (await Promise.all(
+      lineupA.map((uid) => buildLineupPlayer(uid, challenge.captainAName, "A")),
+    )).filter(Boolean) as any[];
+    const teamBPlayers = (await Promise.all(
+      lineupB.map((uid) => buildLineupPlayer(uid, challenge.captainBName, "B")),
+    )).filter(Boolean) as any[];
+    if (teamAPlayers.length !== teamSize || teamBPlayers.length !== teamSize) {
+      return { ok: false, reason: "lineup_user_missing" };
+    }
+    const players = [...teamAPlayers, ...teamBPlayers];
     const playerUids = Array.from(new Set(players.map((p) => p.uid)));
+    await assertRosterHasNoBlockedPair(ctx, playerUids);
 
-    const buildSlots = (teamLetter: "A" | "B", captain: { uid: string; username: string; skillTier?: string } | null) => {
-      const slots: any[] = [];
-      for (let i = 0; i < teamSize; i++) {
-        const slotId = `${teamLetter}${i + 1}`;
-        if (i === 0 && captain?.uid) {
-          slots.push({
-            slotId,
-            uid: captain.uid,
-            user: { uid: captain.uid, username: captain.username, skillTier: captain.skillTier },
-            status: "confirmed" as const,
-            role: "Captain",
-          });
-        } else {
-          slots.push({ slotId, status: "open" as const });
-        }
-      }
-      return slots;
-    };
+    const buildSlots = (teamLetter: "A" | "B", lineupPlayers: any[]) => lineupPlayers.map((player, index) => ({
+      slotId: `${teamLetter}${index + 1}`,
+      uid: player.uid,
+      user: { uid: player.uid, username: player.username, skillTier: player.skillTier },
+      status: "confirmed" as const,
+      role: player.role,
+    }));
 
     const skillStats = await buildRoomSkillStats(ctx, game, playerUids);
-    const slotsA = buildSlots("A", captainA.uid ? captainA : null);
-    const slotsB = buildSlots("B", captainB.uid ? captainB : null);
+    const slotsA = buildSlots("A", teamAPlayers);
+    const slotsB = buildSlots("B", teamBPlayers);
+    const captainA = teamAPlayers.find((player) => player.uid === String(challenge.captainAUid))!;
+    const captainB = teamBPlayers.find((player) => player.uid === String(challenge.captainBUid))!;
     const lockAt = getMatchroomLockAt(scheduledStartAt) || undefined;
+    const durationMinutes = getAuthoritativeMatchDurationMinutes({
+      game,
+      seriesType: challenge.seriesType,
+    });
+    try {
+      await assertBranchOperatingHoursAvailable(ctx, {
+        zoneId: venue.zoneId,
+        zone,
+        branchId: venue.branchId,
+        scheduledStartAt,
+        durationMinutes,
+      });
+      await assertZoneResourceCapacityAvailable(ctx, {
+        zoneId: venue.zoneId,
+        branchId: venue.branchId,
+        game,
+        selectedZoneRateKey: challenge.zoneRateKey,
+        scheduledStartAt,
+        durationMinutes,
+      });
+    } catch (error: any) {
+      return { ok: false, reason: "venue_time_unavailable", message: String(error?.message || MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE) };
+    }
 
     const matchroomId = await ctx.db.insert("matchrooms", {
       hostUid: captainA.uid,
@@ -4213,16 +4488,18 @@ export const createTeamChallengeMatchroom = internalMutation({
       title: `${challenge.challengerTeamName || "Team A"} vs ${challenge.opponentTeamName || "Team B"}`,
       status: "open",
       maxPlayers,
-      currentPlayers: players.length,
+      currentPlayers: maxPlayers,
       players,
       playerUids,
       location: venue.venueName || zone.name || "Zone",
       locationMode: "zone" as any,
       zoneId: String(venue.zoneId),
+      branchId: venue.branchId,
       zoneOwnerUid,
       scheduledDate: challenge.scheduledDate,
       scheduledTime: challenge.scheduledTime,
       scheduledStartAt,
+      durationMinutes,
       lockAt,
       lifecycleDueAt: getLifecycleDueAt({
         status: "open",
@@ -4232,6 +4509,7 @@ export const createTeamChallengeMatchroom = internalMutation({
         slotsA,
         slotsB,
         scheduledStartAt,
+        durationMinutes,
         lockAt,
         locationMode: "zone",
         zoneId: String(venue.zoneId),
@@ -4266,6 +4544,8 @@ export const createTeamChallengeMatchroom = internalMutation({
     });
 
     await syncMatchroomMembers(ctx, matchroomId, playerUids);
+    const insertedRoom = await ctx.db.get(matchroomId);
+    if (insertedRoom) await scheduleNextMatchroomLifecycle(ctx, insertedRoom);
 
     await ctx.db.patch(args.challengeId, withTeamChallengeLifecycleDueAt(challenge, {
       matchroomId,
@@ -4333,6 +4613,7 @@ export const join = mutation({
     if (room.playerUids.includes(actorUid)) {
       throw new Error("You are already in this matchroom.");
     }
+    await assertUserCanJoinRoom(ctx, actor.convexUser._id, room);
 
     const nextPlayer = await createPlayerRecord(
       ctx,
@@ -4575,6 +4856,7 @@ export const updateStatus = mutation({
 
     await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, updateData));
     if (args.status === "cancelled" || args.status === "expired") {
+      await releaseAllocatedResourcesForMatchroom(ctx, args.matchroomId, room);
       await expireBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
       await expirePendingMatchroomNotifications(ctx, args.matchroomId, `matchroom_${args.status}`);
       await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
@@ -4701,13 +4983,11 @@ export const submitCaptainReport = mutation({
 
       const participantUids = getMatchroomPlayerUids(room);
       if (participantUids.length <= 2) {
-        return await finalizeMatchroomResult(
+        return await markInvalidResultVerificationForAdminReview(
           ctx,
           args.matchroomId,
-          room,
-          nextRv,
-          chooseRandomWinner(),
-          "two_player_random_tiebreak",
+          { ...room, resultVerification: nextRv },
+          "captain_reports_disagree",
         );
       }
 
@@ -4801,13 +5081,11 @@ export const submitParticipantVote = mutation({
     }
 
     if (submittedCount >= participantUids.length && team1Votes === team2Votes) {
-      return await finalizeMatchroomResult(
+      return await markInvalidResultVerificationForAdminReview(
         ctx,
         args.matchroomId,
-        room,
-        nextRv,
-        chooseRandomWinner(),
-        "participant_random_tiebreak",
+        { ...room, resultVerification: nextRv },
+        "participant_vote_tied",
       );
     }
 
@@ -4916,6 +5194,7 @@ export async function performAdminCancel(
   if (!room) throw new Error("Matchroom not found");
 
   if (room.status === "cancelled") {
+    await releaseAllocatedResourcesForMatchroom(ctx, args.matchroomId, room);
     return { ok: true, message: "Matchroom is already cancelled.", alreadyCancelled: true };
   }
 
@@ -4931,6 +5210,7 @@ export async function performAdminCancel(
     lifecycleDueAt: undefined,
     updatedAt: cancelledAt,
   });
+  await releaseAllocatedResourcesForMatchroom(ctx, args.matchroomId, room);
   await expireBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
   await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
   await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
@@ -5096,6 +5376,7 @@ export const inviteToMatchroom = mutation({
     if (!invitee || isUserHiddenFromPublic(invitee)) {
       throw new Error("This user is not available.");
     }
+    await assertUserCanJoinRoom(ctx, invitee._id, room);
 
     const entityKey = `match.seat_invite:${args.matchroomId}:${args.toUid}:${args.slotId}`;
     const now = Date.now();
@@ -5132,6 +5413,182 @@ export const inviteToMatchroom = mutation({
   },
 });
 
+async function scheduleNextMatchroomLifecycle(ctx: any, room: any) {
+  const dueAt = Number(room?.lifecycleDueAt || 0);
+  if (!room?._id || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
+  if (Number(room.lifecycleScheduledAt || 0) === dueAt && room.lifecycleScheduledFnId) return;
+  const scheduledId = await ctx.scheduler.runAt(
+    getLifecycleScheduleAt(dueAt)!,
+    internal.matchrooms.processScheduledLifecycle,
+    { matchroomId: room._id, expectedDueAt: dueAt },
+  );
+  await ctx.db.patch(room._id, {
+    lifecycleScheduledAt: dueAt,
+    lifecycleScheduledFnId: String(scheduledId),
+  });
+}
+
+async function processMatchroomLifecycle(ctx: any, matchroomId: Id<"matchrooms">, room: any) {
+  const now = Date.now();
+  const scheduledStartAt = room.scheduledStartAt || room.startTime;
+  const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
+  let changed = false;
+
+  if (shouldExpireForNotFull(room, now)) {
+    await expireMatchroomForInvalidLifecycle(ctx, matchroomId, room, "scheduled_start_roster_incomplete");
+    return { changed: true, status: "expired" as const };
+  }
+  if (shouldExpireInProgressRoom(room, now)) {
+    await expireMatchroomForInvalidLifecycle(ctx, matchroomId, room, "in_progress_roster_incomplete");
+    return { changed: true, status: "expired" as const };
+  }
+
+  if (["open", "locked"].includes(String(room.status || ""))) {
+    await maybeSendMatchroomReminders(ctx, room, now);
+  }
+
+  // A full broadcast room reaches this handler at the immediate dispatch
+  // boundary. Start the venue fan-out here; otherwise the safety guard below
+  // would correctly terminate the chain while leaving the room in idle.
+  if (
+    room.locationMode === "broadcast" &&
+    isRosterFull(room) &&
+    !room.venueConfirmedAt &&
+    !room.confirmedZoneId &&
+    ["idle", "waiting_for_fill"].includes(String(room.broadcastRequestStatus || ""))
+  ) {
+    await dispatchBroadcastZoneRequestsForMatchroom(ctx, matchroomId);
+    changed = true;
+  }
+
+  const awaitingVenue =
+    room.locationMode === "broadcast"
+      ? !(room.venueConfirmedAt || room.confirmedZoneId)
+      : Boolean(room.zoneId) && !(room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true);
+  const startValidation = awaitingVenue
+    ? { ok: false, reason: "venue_not_confirmed" }
+    : canStartMatchroom(room, now);
+  if (startValidation.ok) {
+    await ctx.db.patch(matchroomId, withLifecycleDueAt(room, {
+      status: "in-progress",
+      startTime: room.startTime || scheduledStartAt,
+      startedAt: now,
+      startedWithFullRoster: true,
+      startedPlayerCount: getConfirmedPlayerCount(room),
+      captainUidA: room.captainUidA || room.hostUid,
+      lifecycleScheduledAt: undefined,
+      lifecycleScheduledFnId: undefined,
+      updatedAt: now,
+    }, now));
+    changed = true;
+  }
+
+  const refreshedRoom = changed ? await ctx.db.get(matchroomId) : room;
+  if (!refreshedRoom) return { changed };
+  const effectiveStart = refreshedRoom.startTime || refreshedRoom.scheduledStartAt;
+  const completeDue = refreshedRoom.status === "in-progress"
+    && effectiveStart
+    && effectiveStart + durationMinutes * 60 * 1000 <= now;
+  const completeValidation = canCompleteMatchroom(refreshedRoom, now);
+  if (completeDue && !completeValidation.ok) {
+    await expireMatchroomForInvalidLifecycle(ctx, matchroomId, refreshedRoom, `invalid_in_progress_${completeValidation.reason}`);
+    return { changed: true, status: "expired" as const };
+  }
+  if (
+    refreshedRoom.locationMode === "broadcast"
+    && refreshedRoom.broadcastRequestStatus === "waiting_for_zones"
+    && refreshedRoom.broadcastRequestExpiresAt
+    && refreshedRoom.broadcastRequestExpiresAt <= now
+  ) {
+    await finalizeBroadcastFailure(ctx, matchroomId, "no_zone_response");
+    return { changed: true };
+  }
+  if (completeValidation.ok) {
+    const teamTwoCaptain = refreshedRoom.captainUidB
+      || refreshedRoom.players?.find((player: any) => player.uid !== refreshedRoom.hostUid)?.uid;
+    if ((!refreshedRoom.captainUidA && !refreshedRoom.hostUid) || !teamTwoCaptain) {
+      await markInvalidResultVerificationForAdminReview(ctx, matchroomId, refreshedRoom, "missing_result_captains");
+      return { changed: true, status: "admin_review" as const };
+    }
+    const result = await completeMatchroomForResultVerification(ctx, matchroomId, refreshedRoom, now);
+    if (!result.ok) {
+      await markInvalidResultVerificationForAdminReview(ctx, matchroomId, refreshedRoom, result.reason || "completion_failed");
+      return { changed: true, status: "admin_review" as const };
+    }
+    changed = result.changed;
+  }
+
+  // Completed rooms need one scheduled pass to open result verification and
+  // notify the captains. This used to be handled only by the indexed sweep,
+  // leaving event-driven lifecycle processing as a no-op for this state.
+  const lifecycleRoom = changed ? await ctx.db.get(matchroomId) : refreshedRoom;
+  if (lifecycleRoom?.status === "completed") {
+    const rv: any = lifecycleRoom.resultVerification || {};
+    const validation = canEnterResultVerification(lifecycleRoom);
+    if (rv.status !== "resolved" && rv.status !== "admin_review" && !validation.ok) {
+      await markInvalidResultVerificationForAdminReview(
+        ctx,
+        matchroomId,
+        lifecycleRoom,
+        validation.reason,
+      );
+      return { changed: true, status: "admin_review" as const };
+    }
+    if (validation.ok && (!rv.status || rv.status === "pending")) {
+      await maybeSendResultVerificationRequired(ctx, lifecycleRoom);
+      await ctx.db.patch(matchroomId, {
+        resultVerification: {
+          ...rv,
+          status: rv.status || "pending",
+          lifecyclePromptedAt: now,
+        },
+        lifecycleDueAt: undefined,
+        updatedAt: now,
+      });
+      return { changed: true, status: "completed" as const };
+    }
+  }
+  return { changed };
+}
+
+export const processScheduledLifecycle = internalMutation({
+  args: { matchroomId: v.id("matchrooms"), expectedDueAt: v.number() },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return { changed: false, missing: true };
+    if (Number(room.lifecycleScheduledAt || 0) !== args.expectedDueAt) {
+      return { changed: false, stale: true };
+    }
+    await ctx.db.patch(room._id, { lifecycleScheduledAt: undefined, lifecycleScheduledFnId: undefined });
+    if (Number(room.lifecycleDueAt || 0) > Date.now()) {
+      const fresh = await ctx.db.get(room._id);
+      if (fresh) await scheduleNextMatchroomLifecycle(ctx, fresh);
+      return { changed: false, early: true };
+    }
+    const result = await processMatchroomLifecycle(ctx, room._id, room);
+    const fresh = await ctx.db.get(room._id);
+    if (fresh) {
+      // Recompute after every run. If processing did not advance the room to
+      // a strictly-future boundary, clear the deadline and terminate this
+      // chain. This is the invariant that prevents an unchanged expired
+      // lifecycleDueAt from creating an unbounded scheduler loop.
+      const nextDueAt = getFutureLifecycleDueAt(fresh, Date.now());
+      if (fresh.lifecycleDueAt !== nextDueAt) {
+        await ctx.db.patch(fresh._id, {
+          lifecycleDueAt: nextDueAt,
+          lifecycleScheduledAt: undefined,
+          lifecycleScheduledFnId: undefined,
+        });
+      }
+      const normalized = await ctx.db.get(fresh._id);
+      if (normalized && nextDueAt !== undefined) {
+        await scheduleNextMatchroomLifecycle(ctx, normalized);
+      }
+    }
+    return result;
+  },
+});
+
 export const syncLifecycleIfDue = mutation({
   args: {
     matchroomId: v.id("matchrooms"),
@@ -5162,99 +5619,10 @@ export const syncLifecycleIfDue = mutation({
     }
     assertKycAccessAllowed(actor.user, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
-    const now = Date.now();
-    const scheduledStartAt = room.scheduledStartAt || room.startTime;
-    const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
-    let changed = false;
-
-    if (shouldExpireForNotFull(room, now)) {
-      await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "scheduled_start_roster_incomplete");
-      changed = true;
-      return { changed, status: "expired" };
-    }
-
-    if (shouldExpireInProgressRoom(room, now)) {
-      await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "in_progress_roster_incomplete");
-      changed = true;
-      return { changed, status: "expired" };
-    }
-
-    const startValidation = canStartMatchroom(room, now);
-    if (startValidation.ok) {
-      await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, {
-        status: "in-progress",
-        startTime: room.startTime || scheduledStartAt,
-        startedAt: now,
-        startedWithFullRoster: true,
-        startedPlayerCount: getConfirmedPlayerCount(room),
-        captainUidA: room.captainUidA || room.hostUid,
-        updatedAt: now,
-      }, now));
-      changed = true;
-    }
-
-    const refreshedRoom = changed ? await ctx.db.get(args.matchroomId) : room;
-    if (!refreshedRoom) return { changed };
-
-    const effectiveStart = refreshedRoom.startTime || refreshedRoom.scheduledStartAt;
-    const completeDue =
-      refreshedRoom.status === "in-progress" &&
-      effectiveStart &&
-      effectiveStart + durationMinutes * 60 * 1000 <= now;
-    const completeValidation = canCompleteMatchroom(refreshedRoom, now);
-    const shouldComplete = completeValidation.ok;
-
-    if (completeDue && !completeValidation.ok) {
-      await expireMatchroomForInvalidLifecycle(
-        ctx,
-        args.matchroomId,
-        refreshedRoom,
-        `invalid_in_progress_${completeValidation.reason}`,
-      );
-      return { changed: true, status: "expired" };
-    }
-
-    if (
-      refreshedRoom.locationMode === "broadcast" &&
-      refreshedRoom.broadcastRequestStatus === "waiting_for_zones" &&
-      refreshedRoom.broadcastRequestExpiresAt &&
-      refreshedRoom.broadcastRequestExpiresAt <= now
-    ) {
-      await finalizeBroadcastFailure(ctx, args.matchroomId, "no_zone_response");
-      changed = true;
-      return { changed };
-    }
-
-    if (shouldComplete) {
-      const teamTwoCaptain =
-        refreshedRoom.captainUidB ||
-        refreshedRoom.players?.find((player: any) => player.uid !== refreshedRoom.hostUid)?.uid ||
-        undefined;
-
-      if ((!refreshedRoom.captainUidA && !refreshedRoom.hostUid) || !teamTwoCaptain) {
-        await markInvalidResultVerificationForAdminReview(
-          ctx,
-          args.matchroomId,
-          refreshedRoom,
-          "missing_result_captains",
-        );
-        return { changed: true, status: "admin_review" };
-      }
-
-      const result = await completeMatchroomForResultVerification(ctx, args.matchroomId, refreshedRoom, now);
-      if (!result.ok) {
-        await markInvalidResultVerificationForAdminReview(
-          ctx,
-          args.matchroomId,
-          refreshedRoom,
-          result.reason || "completion_failed",
-        );
-        return { changed: true, status: "admin_review" };
-      }
-      changed = result.changed;
-    }
-
-    return { changed };
+    const scheduledResult = await processMatchroomLifecycle(ctx, args.matchroomId, room);
+    const latestRoom = await ctx.db.get(args.matchroomId);
+    if (latestRoom) await scheduleNextMatchroomLifecycle(ctx, latestRoom);
+    return scheduledResult;
   },
 });
 
@@ -5328,6 +5696,7 @@ export const requestToJoinMatchroom = mutation({
     if ((room.playerUids || []).includes(actorUid)) {
       return matchroomJoinFailure("You are already in this matchroom.", "ALREADY_JOINED");
     }
+    await assertUserCanJoinRoom(ctx, actor.convexUser._id, room);
     const now = Date.now();
     const role = args.role || "Player";
     const targetTeam = args.targetTeam || "Any";
@@ -5546,6 +5915,7 @@ export const respondToMatchroomInvite = mutation({
     accept: v.boolean(),
   },
   handler: async (ctx, args) => {
+    await requireVerifiedActor(ctx, String(args.userId));
     const notif = await ctx.db.get(args.notificationId);
     if (!notif) throw new Error("Notification not found");
     if (notif.toUid !== args.userId) throw new Error("Not authorized");
@@ -5684,6 +6054,7 @@ export const respondToMatchroomJoinRequest = mutation({
     accept: v.boolean(),
   },
   handler: async (ctx, args) => {
+    const verifiedActor = await requireVerifiedActor(ctx, args.hostUid);
     const notif = await ctx.db.get(args.notificationId);
     if (!notif) throw new Error("Request not found");
     if (!isMatchJoinRequestNotification(notif)) {
@@ -5698,8 +6069,7 @@ export const respondToMatchroomJoinRequest = mutation({
 
     const room = await ctx.db.get(matchroomId as Id<"matchrooms">);
     if (!room) throw new Error("Matchroom not found");
-    const actor = await resolveUserByAnyId(ctx, args.hostUid);
-    if (!actor) throw new Error("Only captains can respond to join requests");
+    const actor = verifiedActor.convexUser;
 
     const approvalRequired = data?.approvalRequired === true;
     const availableCaptainUids = getAvailableCaptainUids(room);
@@ -6447,7 +6817,7 @@ export const runLifecycleSweep = internalMutation({
     const now = Date.now();
     // Keep the status scan available during the schema/backfill rollout. The
     // production flag is enabled only after every existing room has a due time.
-    const useIndexedSweep = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_LIFECYCLE_SWEEP");
+    const useIndexedSweep = true;
     let changedRooms = 0;
     let expiredNotifications = 0;
     let inspectedRooms = 0;
@@ -6791,7 +7161,7 @@ export const notifyAreaPlayersOfNewMatchroomBatch = internalMutation({
     for (const user of page.page) {
       if (!user || joinedUids.has(String(user._id))) continue;
       if (isUserHiddenFromPublic(user)) continue;
-      if (user.accountStatus === "suspended") continue;
+      if (isAccountSuspensionActive(user)) continue;
       if (user.onboardingCompleted !== true) continue;
       if (!isGameEnabledForUser(user, room.game)) continue;
       if (targetCityKey) {
@@ -6846,6 +7216,9 @@ export const notifyAreaPlayersOfNewMatchroomBatch = internalMutation({
     }
 
     if (!page.isDone) {
+      if (!page.continueCursor || page.continueCursor === args.cursor) {
+        throw new Error("Matchroom-area notification pagination made no progress.");
+      }
       await ctx.scheduler.runAfter(0, internal.matchrooms.notifyAreaPlayersOfNewMatchroomBatch, {
         matchroomId: args.matchroomId,
         targetAreas: args.targetAreas,

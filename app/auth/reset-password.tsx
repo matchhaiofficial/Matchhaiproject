@@ -1,6 +1,6 @@
 import { useLocalSearchParams, router } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
-import registerStyles from "./register.styles";
+import registerStyles from "../../app-shared/auth/register.styles";
 import {
     KeyboardAvoidingView,
     Platform,
@@ -16,7 +16,7 @@ import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import { resetPasswordWithToken } from "../../src/services/convex/authService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
-import styles from "./login.styles";
+import styles from "../../app-shared/auth/login.styles";
 
 type FocusField = "password" | "confirm" | null;
 

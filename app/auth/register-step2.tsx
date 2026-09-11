@@ -9,15 +9,15 @@ import {
   PLAY_TIME_OPTIONS,
   SPORT_OPTIONS,
 } from "../../constants/profileOptions";
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 import { Perf } from "../../src/utils/perfInstrumentation";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 
 export default function RegisterStep2() {
   const { step1, step2, setStep2, setCurrentStep } = useOnboardingStore();

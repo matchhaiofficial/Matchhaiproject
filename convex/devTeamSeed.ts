@@ -1,10 +1,13 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { api, components } from "./_generated/api";
+import { components } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { hashPassword } from "better-auth/crypto";
 
 function requireSeedKey(seedKey: string) {
+  if (String(process.env.DEMO_SEED_ENABLED || "").trim() !== "true") {
+    throw new Error("Demo seed is disabled. Set DEMO_SEED_ENABLED=true in the Convex environment to enable seeding.");
+  }
   const expected = process.env.DEMO_SEED_KEY;
   if (!expected) throw new Error("DEMO_SEED_KEY is not configured.");
   if (seedKey !== expected) throw new Error("Invalid seedKey.");
@@ -199,6 +202,83 @@ function getRosterRule(gameKey: string) {
   return { mainSize: 5, maxSubstitutes: 0 };
 }
 
+async function createSeedTeam(ctx: any, input: {
+  name: string;
+  tag?: string;
+  game: string;
+  captainUid: Id<"users">;
+  captainUsername: string;
+  mainRosterSize?: number;
+  maxSubstitutes?: number;
+  maxMembers?: number;
+  description?: string;
+}) {
+  const rule = getRosterRule(input.game);
+  const mainRosterSize = input.mainRosterSize || rule.mainSize;
+  const maxSubstitutes = Math.max(0, input.maxSubstitutes ?? rule.maxSubstitutes);
+  const maxMembers = input.maxMembers || mainRosterSize + maxSubstitutes;
+  const now = Date.now();
+  const teamId = await ctx.db.insert("teams", {
+    name: input.name,
+    nameLower: input.name.toLowerCase(),
+    tag: input.tag,
+    game: input.game,
+    captainUid: input.captainUid,
+    captainUsername: input.captainUsername,
+    memberUids: [input.captainUid],
+    memberCount: 1,
+    maxMembers,
+    mainRosterSize,
+    maxSubstitutes,
+    description: input.description,
+    stats: { wins: 0, losses: 0, matchesPlayed: 0 },
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await ctx.db.insert("teamMembers", {
+    teamId,
+    odxerId: input.captainUid,
+    username: input.captainUsername,
+    role: "captain",
+    rosterRole: "main",
+    rosterOrder: 0,
+    joinedAt: now,
+  });
+  return teamId;
+}
+
+async function addSeedTeamMember(ctx: any, team: Doc<"teams">, candidate: {
+  userId: Id<"users">;
+  username: string;
+}) {
+  if (team.memberUids.includes(candidate.userId)) return false;
+  const capacity = Number(team.maxMembers || 0);
+  if (team.memberCount >= capacity) return false;
+  const existing = await ctx.db.query("teamMembers")
+    .withIndex("by_teamId_and_userId", (q: any) =>
+      q.eq("teamId", team._id).eq("odxerId", candidate.userId),
+    )
+    .unique();
+  if (existing) return false;
+  const now = Date.now();
+  await ctx.db.patch(team._id, {
+    memberUids: [...team.memberUids, candidate.userId],
+    memberCount: team.memberCount + 1,
+    updatedAt: now,
+  });
+  await ctx.db.insert("teamMembers", {
+    teamId: team._id,
+    odxerId: candidate.userId,
+    username: candidate.username,
+    role: "member",
+    rosterRole: team.memberCount < Number(team.mainRosterSize || capacity) ? "main" : "substitute",
+    rosterOrder: team.memberCount,
+    joinedAt: now,
+  });
+  return true;
+}
+
 async function findUserByEmail(ctx: any, email: string) {
   return (await ctx.db
     .query("users")
@@ -235,6 +315,13 @@ async function ensureDemoPlayersForGame(ctx: any, args: {
 
     const existing = await findUserByEmail(ctx, email);
     if (existing) {
+      const currentWallet = Number(existing.walletBalance || 0);
+      if (currentWallet < 5000) {
+        await ctx.db.patch(existing._id, {
+          walletBalance: 5000,
+          updatedAt: Date.now(),
+        });
+      }
       created.push({ userId: existing._id, username: existing.username, email: existing.email });
       continue;
     }
@@ -268,7 +355,7 @@ async function ensureDemoPlayersForGame(ctx: any, args: {
       accountType: "player",
       isOnline: false,
       isVerified: true,
-      walletBalance: 0,
+      walletBalance: 5000,
       ...doesUserPlayGamePatch(game),
       createdAt: now,
       updatedAt: now,
@@ -290,12 +377,10 @@ async function fillTeamToCapacity(ctx: any, seedKey: string, teamId: Id<"teams">
 
   for (const candidate of candidates) {
     if (added >= missing) break;
+    const current = await ctx.db.get(teamId);
+    if (!current) throw new Error("Team not found");
     try {
-      await ctx.runMutation(api.teams.addMember, {
-        teamId,
-        userId: candidate.userId,
-        username: candidate.username,
-      });
+      if (!await addSeedTeamMember(ctx, current, candidate)) continue;
       added += 1;
     } catch {
       // Ignore duplicates / validation failures.
@@ -336,7 +421,7 @@ export const seedChallengeTeamsForUser = mutation({
 
       const rand = mulberry32(880000 + game.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0));
       const name = `${game.toUpperCase()} ${randomTag(rand)} Squad`;
-      const teamId = await ctx.runMutation(api.teams.create, {
+      const teamId = await createSeedTeam(ctx, {
         name,
         tag: randomTag(rand),
         game,
@@ -379,7 +464,7 @@ export const seedChallengeTeamsForUser = mutation({
       const demoPlayers = await ensureDemoPlayersForGame(ctx, {
         seedKey: args.seedKey,
         game,
-        count: 50,
+        count: Math.max(1, desiredMax),
         emailPrefix: "captain_fill",
         withBetterAuth: false,
       });
@@ -426,7 +511,7 @@ export const seedChallengeTeamsForUser = mutation({
       });
       const captain = demoCaptain.players[0]!;
 
-      const teamId = await ctx.runMutation(api.teams.create, {
+      const teamId = await createSeedTeam(ctx, {
         name,
         tag: `OPP${String(i).padStart(2, "0")}`.slice(0, 5),
         game,
@@ -439,7 +524,7 @@ export const seedChallengeTeamsForUser = mutation({
       const morePlayers = await ensureDemoPlayersForGame(ctx, {
         seedKey: args.seedKey,
         game,
-        count: 20,
+        count: Math.max(1, getRosterRule(game).mainSize + getRosterRule(game).maxSubstitutes),
         emailPrefix: `opp_${i}`,
         withBetterAuth: false,
       });
@@ -498,7 +583,7 @@ export const seedExtraFc26CaptainTeam = mutation({
     } else {
       const rand = mulberry32(770000 + label.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0));
       const rule = getRosterRule(game);
-      teamId = await ctx.runMutation(api.teams.create, {
+      teamId = await createSeedTeam(ctx, {
         name: teamName,
         tag: `F26${randomTag(rand)}`.slice(0, 5),
         game,
@@ -514,7 +599,7 @@ export const seedExtraFc26CaptainTeam = mutation({
     const demoFill = await ensureDemoPlayersForGame(ctx, {
       seedKey: args.seedKey,
       game,
-      count: 20,
+      count: Math.max(1, getRosterRule(game).mainSize + getRosterRule(game).maxSubstitutes),
       emailPrefix: `demo_fc26_${label}`.slice(0, 40),
       withBetterAuth: false,
     });
@@ -531,5 +616,69 @@ export const seedExtraFc26CaptainTeam = mutation({
       team: { teamId: String(teamId), name: teamName, game, memberCount: fill.memberCount, maxMembers: fill.maxMembers },
       passwordHint: "Uses DEFAULT_DEMO_PASSWORD in convex/devTeamSeed.ts (do not share passwords in chat).",
     };
+  },
+});
+
+export const ensureDemoPlayerWalletMinimums = mutation({
+  args: { seedKey: v.string(), minimumBalance: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const minimumBalance = Math.max(0, Math.min(50_000, Math.floor(args.minimumBalance ?? 5000)));
+    const players = await ctx.db
+      .query("users")
+      .withIndex("by_accountType", (q) => q.eq("accountType", "player"))
+      .take(500);
+    let updated = 0;
+    for (const player of players) {
+      const isDemoPlayer = player.isDemo === true || String(player.email || "").endsWith(DEMO_DOMAIN);
+      if (!isDemoPlayer || Number(player.walletBalance || 0) >= minimumBalance) continue;
+      await ctx.db.patch(player._id, {
+        walletBalance: minimumBalance,
+        updatedAt: Date.now(),
+      });
+      updated += 1;
+    }
+    return { ok: true, scanned: players.length, updated, minimumBalance };
+  },
+});
+
+export const setDemoKycStatesForQa = mutation({
+  args: {
+    seedKey: v.string(),
+    accounts: v.array(v.object({
+      email: v.string(),
+      status: v.union(
+        v.literal("not_started"),
+        v.literal("pending"),
+        v.literal("in_progress"),
+        v.literal("in_review"),
+        v.literal("verified"),
+        v.literal("rejected"),
+        v.literal("expired"),
+      ),
+    })),
+  },
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const now = Date.now();
+    const results: Array<{ email: string; status: string; updated: boolean }> = [];
+    for (const requested of args.accounts.slice(0, 50)) {
+      const email = String(requested.email || "").trim().toLowerCase();
+      if (!email.endsWith(DEMO_DOMAIN)) {
+        throw new Error("Only @matchhai.demo accounts can be changed by this QA seed.");
+      }
+      const user = await findUserByEmail(ctx, email);
+      if (!user) {
+        results.push({ email, status: requested.status, updated: false });
+        continue;
+      }
+      await ctx.db.patch(user._id, {
+        kycVerificationStatus: requested.status,
+        kycVerifiedAt: requested.status === "verified" ? now : undefined,
+        updatedAt: now,
+      });
+      results.push({ email, status: requested.status, updated: true });
+    }
+    return { ok: true, results };
   },
 });

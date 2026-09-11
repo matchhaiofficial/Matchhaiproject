@@ -38,14 +38,14 @@ import { recordCountMetric } from "../../../src/utils/perfInstrumentation";
 import { getZoneStatusLabel } from "../../../src/utils/statusLabels";
 import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
 import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
-import DashboardAlertRow from "../components/dashboard/DashboardAlertRow";
-import DashboardAtGlancePanel from "../components/dashboard/DashboardAtGlancePanel";
-import DashboardQuickActionTile from "../components/dashboard/DashboardQuickActionTile";
-import DashboardTeamCard from "../components/dashboard/DashboardTeamCard";
-import DashboardVenueCard from "../components/dashboard/DashboardVenueCard";
-import { PlayerEmptyStateCard, PlayerSectionHeader } from "../components/PlayerSurface";
-import MatchroomCard from "../../matchrooms/components/MatchroomCard";
-import styles from "./_dashboard.styles";
+import DashboardAlertRow from "../../../app-shared/(player)/components/dashboard/DashboardAlertRow";
+import DashboardAtGlancePanel from "../../../app-shared/(player)/components/dashboard/DashboardAtGlancePanel";
+import DashboardQuickActionTile from "../../../app-shared/(player)/components/dashboard/DashboardQuickActionTile";
+import DashboardTeamCard from "../../../app-shared/(player)/components/dashboard/DashboardTeamCard";
+import DashboardVenueCard from "../../../app-shared/(player)/components/dashboard/DashboardVenueCard";
+import { PlayerEmptyStateCard, PlayerSectionHeader } from "../../../app-shared/(player)/components/PlayerSurface";
+import MatchroomCard from "../../../app-shared/matchrooms/components/MatchroomCard";
+import styles from "../../../app-shared/(player)/(tabs)/_dashboard.styles";
 
 type DashboardNotification = {
   id: string;
@@ -369,6 +369,10 @@ export default function PlayerDashboard() {
     api.dashboard.getPlayerHomeSummary,
     protectedQueriesReady && user?._id ? { userId: user._id as Id<"users"> } : "skip",
   );
+  const onlineFriendCount = useQuery(
+    api.dashboard.getOnlineFriendCount,
+    protectedQueriesReady && user?._id ? {} : "skip",
+  );
 
   const notificationCount =
     useQuery(
@@ -411,7 +415,7 @@ export default function PlayerDashboard() {
   const nearbyZones = ((dashboardSummary?.nearbyZones || []) as Zone[])
     .filter((zone) => zone.type !== "sports" && getZoneGameLabels(zone).length > 0);
   const requestStats = dashboardSummary?.requestStats || { myRequests: 0, myOffers: 0 };
-  const friendCount = dashboardSummary?.friendCount || 0;
+  const friendCount = onlineFriendCount || 0;
   const walletStats = dashboardSummary?.walletStats || {
     balance: Number(user?.walletBalance || 0),
     totalSpent: 0,

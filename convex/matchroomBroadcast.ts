@@ -12,6 +12,10 @@ import {
 } from "./timing";
 import { withLifecycleDueAt } from "./matchroomLifecycle";
 import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
+import { requireCurrentUser } from "./authz";
+import { getKarachiDayStartMillis } from "./karachiDateTime";
+import { reconcileResourceLegacyAssignment } from "./bookingConflicts";
+import { interruptAccountDeletionForIncomingFunds } from "./wallet";
 
 export const BROADCAST_COUNTER_RESPONSE_WINDOW_MS = BROADCAST_COUNTER_RESPONSE_WINDOW_MS_FROM_TIMING;
 const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
@@ -100,8 +104,7 @@ function findMatchingArea(zone: any, selectedAreas: string[]) {
 function getPreferredDateMillis(room: any) {
   if (typeof room?.scheduledStartAt === "number") return room.scheduledStartAt;
   if (typeof room?.scheduledDate === "string" && room.scheduledDate.trim()) {
-    const parsed = new Date(`${room.scheduledDate}T00:00:00`).getTime();
-    return Number.isFinite(parsed) ? parsed : undefined;
+    return getKarachiDayStartMillis(room.scheduledDate) || undefined;
   }
   return undefined;
 }
@@ -147,17 +150,8 @@ async function resolveUserId(ctx: any, value?: string | null): Promise<Id<"users
 }
 
 async function resolveAuthenticatedUser(ctx: any) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("You must be signed in to select a venue offer.");
-  const candidates = normalizeStringList([identity.tokenIdentifier, identity.subject]);
-  for (const candidate of candidates) {
-    const userId = await resolveUserId(ctx, candidate);
-    if (userId) {
-      const user = await ctx.db.get(userId);
-      if (user) return user;
-    }
-  }
-  throw new Error("Signed-in user profile not found.");
+  const { user } = await requireCurrentUser(ctx);
+  return user;
 }
 
 async function getBroadcastNotificationRecipients(
@@ -343,13 +337,10 @@ export async function releaseHeldResourcesForBroadcastRequest(ctx: any, request:
       String(resource.bookingRequestId || "") === String(request._id) &&
       String(resource.lifecycleStatus || "") === "held"
     ) {
-      await ctx.db.patch(resource._id, {
-        lifecycleStatus: "available",
-        bookingRequestId: undefined,
-        matchroomId: undefined,
-        bookedAt: undefined,
-        bookedByUid: undefined,
-        updatedAt: now,
+      await reconcileResourceLegacyAssignment(ctx, {
+        resourceId: resource._id,
+        excludeBookingRequestId: String(request._id),
+        now,
       });
     }
   }
@@ -457,6 +448,7 @@ async function refundBroadcastPayments(ctx: any, room: any, reason: string) {
     if (!refundable.length) continue;
 
     let walletBalance = Number(userRecord.walletBalance || 0);
+    let refundedAmount = 0;
 
     for (const transaction of refundable) {
       const refundReference = `broadcast_refund:${String(room._id)}:${String(transaction._id)}`;
@@ -470,6 +462,7 @@ async function refundBroadcastPayments(ctx: any, room: any, reason: string) {
       if (!Number.isFinite(amount) || amount <= 0) continue;
 
       walletBalance += amount;
+      refundedAmount += amount;
       await ctx.db.insert("walletTransactions", {
         userId: userRecord._id,
         type: "refund",
@@ -486,8 +479,15 @@ async function refundBroadcastPayments(ctx: any, room: any, reason: string) {
       });
     }
 
+    if (refundedAmount <= 0) continue;
+    const deletionPatch = await interruptAccountDeletionForIncomingFunds(
+      ctx,
+      userRecord,
+      "a broadcast cancellation refund arrived",
+    );
     await ctx.db.patch(userRecord._id, {
       walletBalance,
+      ...deletionPatch,
       updatedAt: Date.now(),
     });
   }
@@ -847,6 +847,7 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
       status: "open",
       preferredDate: getPreferredDateMillis(room),
       preferredTime: room.scheduledTime || undefined,
+      scheduledStartAt: room.scheduledStartAt || room.startTime || undefined,
       flexibilityWindow: room.flexibility || "Exact time",
       locationMode: "broadcast",
       preferredAreas: selectedAreas,
@@ -1071,12 +1072,25 @@ async function expireBroadcastCounterOfferInternal(ctx: any, offerId: Id<"zoneOf
   const offer = await ctx.db.get(offerId);
   if (!offer || offer.status !== "pending") return { expired: false };
 
+  // A stale/early scheduled invocation must never close a live offer. Do not
+  // reschedule here: duplicate early jobs would each create another future
+  // job and multiply scheduler work. The original expiry job is authoritative;
+  // normal Convex scheduling invokes it at the deadline, and a later retry can
+  // safely handle the expired row.
+  const now = Date.now();
+  const expiresAt = Number(offer.expiresAt || offer.responseExpiresAt || 0);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return { expired: false, reason: "missing_expiry" };
+  }
+  if (expiresAt > now) {
+    return { expired: false, reason: "not_due" };
+  }
+
   const request = await ctx.db.get(offer.requestId);
   if (!request || request.requestKind !== "broadcast_fanout" || !request.matchroomId) {
     return { expired: false };
   }
 
-  const now = Date.now();
   await closeBroadcastOfferRequest(ctx, {
     request,
     offerId,
@@ -1162,6 +1176,15 @@ export const expireBroadcastFanout = internalMutation({
     }
     if (room.broadcastRequestStartedAt !== args.startedAt) {
       return { expired: false, reason: "stale_timer" };
+    }
+    const currentDeadline = Number(room.broadcastRequestExpiresAt || 0);
+    if (Number.isFinite(currentDeadline) && currentDeadline > Date.now()) {
+      await ctx.scheduler.runAt(
+        currentDeadline,
+        internal.matchroomBroadcast.expireBroadcastFanout,
+        args,
+      );
+      return { expired: false, reason: "live_offer_extended_deadline", rescheduled: true };
     }
     return await finalizeBroadcastFailure(ctx, args.matchroomId, "no_zone_response");
   },

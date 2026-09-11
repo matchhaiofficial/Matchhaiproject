@@ -33,7 +33,7 @@ import {
     getZoneMigrationStatus,
     isZoneMigrationReady,
 } from "../../../src/utils/zoneLifecycle";
-import styles from "./settings.styles";
+import styles from "../../../app-shared/zone/modules/settings.styles";
 
 export default function ZoneMigrationToolsModule() {
     const router = useRouter();

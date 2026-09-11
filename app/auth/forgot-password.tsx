@@ -16,7 +16,7 @@ import { AppButton } from "../../src/components/AppPrimitives";
 import { useToast } from "../../src/hooks/useToast";
 import { sendPasswordReset } from "../../src/services/convex/authService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
-import styles from "./login.styles";
+import styles from "../../app-shared/auth/login.styles";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");

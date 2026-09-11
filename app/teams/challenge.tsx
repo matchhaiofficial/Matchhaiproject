@@ -27,9 +27,10 @@ import { COLORS } from "../../src/theme";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { formatTeamChallengeShare } from "../../src/utils/shareContent";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
-import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import ZonePicker from "../../app-shared/matchrooms/create/components/ZonePicker";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
-import styles from "./challenge.styles";
+import styles from "../../app-shared/teams/challenge.styles";
+import { getZoneBranchDisplayName, getZoneBranchId } from "../../src/utils/zoneBranch";
 
 const formatGameLabel = (value?: string | null) => {
     const key = String(value || "").trim().toLowerCase();
@@ -59,6 +60,16 @@ const getEasypaisaStatus = (value: any) => String(value?.status || "").trim().to
 const isEasypaisaPaid = (value: any) => getEasypaisaStatus(value) === "paid";
 const isEasypaisaStopped = (value: any) => ["failed", "cancelled", "expired"].includes(getEasypaisaStatus(value));
 
+const getChallengeDurationMinutes = (gameKey?: string | null, seriesType?: string | null) => {
+    const game = String(gameKey || "").toLowerCase();
+    const series = String(seriesType || "BO1").toUpperCase();
+    if (["cs2", "cs16", "valorant"].includes(game)) return series === "BO5" ? 300 : series === "BO3" ? 180 : 60;
+    if (["fc25", "fc26"].includes(game)) return series === "BO10" ? 180 : series === "BO5" ? 120 : series === "BO3" ? 60 : 30;
+    if (game === "tekken8") return series === "BO40" ? 180 : series === "BO20" ? 120 : 60;
+    if (game === "indoor_cricket") return 120;
+    return series === "BO10" ? 180 : series === "BO5" ? 120 : 60;
+};
+
 export default function TeamMatchChallengeDetails() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
     const router = useRouter();
@@ -70,6 +81,7 @@ export default function TeamMatchChallengeDetails() {
 
     const [submitting, setSubmitting] = useState(false);
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
+    const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
     const [selectedLineup, setSelectedLineup] = useState<string[]>([]);
 
     const [easypaisaModalVisible, setEasypaisaModalVisible] = useState(false);
@@ -141,10 +153,46 @@ export default function TeamMatchChallengeDetails() {
     const bothConfirmed = useMemo(() => !!challenge?.matchroomId && !!challenge?.confirmedVenue, [challenge]);
     const proposalFromA = challenge?.proposedVenueByCaptainA || null;
     const alternativeFromB = challenge?.alternativeVenueByCaptainB || null;
-    const hasAlternative = !!alternativeFromB?.zoneId;
-    const canAcceptNow = !!(isPending && !isAdminPending && isCaptain && ((hasAlternative && isCaptainA) || (!hasAlternative && isCaptainB)));
+    const canAcceptNow = !!(isPending && !isAdminPending && isCaptainB);
     const canRejectNow = !!(isPending && !isAdminPending && isCaptain);
-    const canProposeVenue = !!(isAcceptedFlow && isCaptain && !challenge?.matchroomId);
+    const canProposeVenue = !!(
+        isCaptain &&
+        !challenge?.matchroomId &&
+        (["accepted", "venue_proposed"].includes(normalizedStatus) ||
+            (normalizedStatus === "venue_confirmed" && challenge?.confirmedVenueIsActive === false))
+    );
+    const selectedZoneBranches = useMemo(
+        () => (selectedZone?.branches || []).map((branch: any, index: number) => ({
+            id: getZoneBranchId(branch, index),
+            label: getZoneBranchDisplayName(branch, `Branch ${index + 1}`),
+            branch,
+        })),
+        [selectedZone?.branches],
+    );
+    const selectedBranch = selectedZoneBranches.find((branch) => branch.id === selectedBranchId) || selectedZoneBranches[0] || null;
+    useEffect(() => {
+        setSelectedBranchId(selectedZoneBranches[0]?.id || null);
+    }, [selectedZone?.id, selectedZoneBranches]);
+    const venueRateAvailability = useQuery(
+        api.matchrooms.checkRateOptionsAvailability,
+        user?._id && selectedZone?.id && selectedBranch?.id && challenge?.scheduledDate && challenge?.scheduledTime && challenge?.zoneRateKey
+            ? {
+                zoneId: selectedZone.id as Id<"zones">,
+                branchId: selectedBranch.id,
+                game: challenge.gameKey,
+                scheduledDate: challenge.scheduledDate,
+                scheduledTime: challenge.scheduledTime,
+                durationMinutes: getChallengeDurationMinutes(challenge.gameKey, challenge.seriesType),
+                options: [{
+                    key: challenge.zoneRateKey,
+                    assetType: challenge.zoneRateKey.split(":")[0] === "cricket" ? "indoor_cricket" : challenge.zoneRateKey.split(":")[0],
+                    tier: ["pc", "console"].includes(challenge.zoneRateKey.split(":")[0]) ? challenge.zoneRateKey.split(":")[1] : undefined,
+                    surface: !["pc", "console"].includes(challenge.zoneRateKey.split(":")[0]) ? challenge.zoneRateKey.split(":")[1] : undefined,
+                }],
+            }
+            : "skip",
+    );
+    const selectedVenueAvailable = venueRateAvailability?.[0]?.available !== false;
 
     // ---- Captain-paid payment state (server-owned, read via summary) ----
     const mySide: "teamA" | "teamB" | null = isCaptainA ? "teamA" : isCaptainB ? "teamB" : null;
@@ -212,13 +260,19 @@ export default function TeamMatchChallengeDetails() {
     };
 
     const handleProposeVenue = async () => {
-        if (!challengeId || !selectedZone || !isCaptain) return;
+        if (!challengeId || !selectedZone || !selectedBranch || !isCaptain) return;
+        if (!selectedVenueAvailable) {
+            showToast({ type: "warning", title: "Resources not available", message: venueRateAvailability?.[0]?.message || "This branch cannot host the challenge at that time." });
+            return;
+        }
         setSubmitting(true);
         const result = await proposeTeamChallengeVenue({
             challengeId,
             zoneId: selectedZone.id,
             venueName: selectedZone.venueBrandName,
-            areaLabel: selectedZone.primaryBranch?.areaLabel || null,
+            areaLabel: selectedBranch.branch?.areaLabel || null,
+            branchId: selectedBranch.id,
+            branchName: selectedBranch.label,
         });
         setSubmitting(false);
         if (!result.ok) {
@@ -299,7 +353,7 @@ export default function TeamMatchChallengeDetails() {
         });
     }, [showToast]);
 
-    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string) => {
+    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string, statusLike: any) => {
         if (!easypaisaPay || !challengeId) return;
         if (resumedOrderRef.current === orderRefNum) return;
         resumedOrderRef.current = orderRefNum;
@@ -312,10 +366,15 @@ export default function TeamMatchChallengeDetails() {
             setEasypaisaModalVisible(false);
             setEasypaisaPay(null);
             setActiveEasypaisaOrderRef(null);
-            showToast({
+            const holdWasPlaced = statusLike?.teamChallengeHoldStatus === "held";
+            showToast(holdWasPlaced ? {
                 type: "success",
                 title: "Payment held",
                 message: "Your Easypaisa payment is held for your team.",
+            } : {
+                type: "warning",
+                title: "Payment added to wallet",
+                message: "Payment was received, but the challenge hold was not placed. The funds remain available in your MatchHai wallet.",
             });
         } finally {
             setFinishingEasypaisa(false);
@@ -327,7 +386,7 @@ export default function TeamMatchChallengeDetails() {
         try {
             const result = await syncCheckoutStatus({ orderRefNum, userId: user._id as Id<"users"> } as any);
             if (isEasypaisaPaid(result)) {
-                await finishAfterEasypaisaPayment(orderRefNum);
+                await finishAfterEasypaisaPayment(orderRefNum, result);
                 return;
             }
             if (isEasypaisaStopped(result)) {
@@ -392,13 +451,15 @@ export default function TeamMatchChallengeDetails() {
                 type: paidImmediately ? "success" : "info",
                 title: paidImmediately ? "Payment confirmed" : "Payment started",
                 message: paidImmediately
-                    ? "Payment received. Accepting the challenge now."
+                    ? checkout?.teamChallengeHoldStatus === "held"
+                        ? "Payment received and held for your team."
+                        : "Payment received. Confirming whether the team hold was placed."
                     : checkout.transactionType === "OTC"
                     ? `${attemptMessage} Use token ${checkout.paymentToken || "generated by Easypaisa"} before it expires.`
                     : `${attemptMessage} Approve the payment in Easypaisa. MatchHai will keep checking the status.`,
             });
             if (paidImmediately && orderRefNum) {
-                await finishAfterEasypaisaPayment(orderRefNum);
+                await finishAfterEasypaisaPayment(orderRefNum, checkout);
                 return;
             }
             if (orderRefNum) {
@@ -416,7 +477,7 @@ export default function TeamMatchChallengeDetails() {
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !checkoutStatus || !easypaisaPay || !challengeId) return;
         if (isEasypaisaPaid(checkoutStatus)) {
-            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef);
+            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef, checkoutStatus);
             return;
         }
         if (isEasypaisaStopped(checkoutStatus)) {
@@ -748,9 +809,7 @@ export default function TeamMatchChallengeDetails() {
                                 ? "Waiting for the responding captain."
                                 : canAcceptNow
                                     ? "Review this challenge and choose accept or reject."
-                                    : hasAlternative
-                                        ? "Waiting for Captain A to accept Team B's alternative venue."
-                                        : "Waiting for challenged captain to accept, or reject if needed."}
+                                    : "Waiting for challenged captain to accept, or reject if needed."}
                         </Text>
                         {canAcceptNow && isCaptainB && hasOpponentSubstitutes ? (
                             <View style={styles.lineupPanel}>
@@ -839,12 +898,22 @@ export default function TeamMatchChallengeDetails() {
                                     onZoneSelect={setSelectedZone}
                                     userPreferredAreas={challenge.commonAreas || []}
                                 />
-                                <Text style={styles.meta}>Your choice: {myChoice?.venueName || "None"}</Text>
+                                {selectedZoneBranches.length > 0 ? (
+                                    <View style={styles.chipsWrap}>
+                                        {selectedZoneBranches.map((branch) => (
+                                            <Pressable key={branch.id} style={[styles.chip, selectedBranch?.id === branch.id && { borderColor: COLORS.accent }]} onPress={() => setSelectedBranchId(branch.id)}>
+                                                <Text style={styles.chipText}>{branch.label}</Text>
+                                            </Pressable>
+                                        ))}
+                                    </View>
+                                ) : null}
+                                {!selectedVenueAvailable ? <Text style={[styles.meta, { color: COLORS.warning }]}>{venueRateAvailability?.[0]?.message}</Text> : null}
+                                <Text style={styles.meta}>Your choice: {myChoice?.venueName || "None"}{myChoice?.branchName ? ` — ${myChoice.branchName}` : ""}</Text>
                                 <Text style={styles.meta}>Captain A choice: {captainAChoice?.venueName || "None"}</Text>
                                 <Text style={styles.meta}>Captain B choice: {captainBChoice?.venueName || "None"}</Text>
                                 <AppButton
                                     onPress={handleProposeVenue}
-                                    disabled={!selectedZone || submitting || bothConfirmed}
+                                    disabled={!selectedZone || !selectedBranch || !selectedVenueAvailable || submitting || bothConfirmed}
                                     size="md"
                                     style={styles.challengeActionButton}
                                 >

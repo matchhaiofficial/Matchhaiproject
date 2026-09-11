@@ -9,7 +9,7 @@ function read(relativePath: string) {
 
 describe("matchroom join request regression guards", () => {
   it("hides card requests using the shared availability rule", () => {
-    const source = read("app/matchrooms/components/MatchroomCard.tsx");
+    const source = read("app-shared/matchrooms/components/MatchroomCard.tsx");
 
     expect(source).toContain("getMatchroomJoinAvailability(room)");
     expect(source).toContain("onJoinPress && joinAvailability.available");

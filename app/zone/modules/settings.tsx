@@ -10,7 +10,8 @@ import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { COLORS } from "../../../src/theme";
 import { getZoneLifecycleLabel, getZoneMigrationLabel } from "../../../src/utils/zoneLifecycle";
-import styles from "./settings.styles";
+import styles from "../../../app-shared/zone/modules/settings.styles";
+import { formatBranchOperatingHoursSummary } from "../../../constants/branchOperatingHours";
 
 function InfoRow({ label, value }: { label: string; value: string }) {
     return (
@@ -71,21 +72,29 @@ export default function ZoneSettingsModule() {
                 <View style={styles.card}>
                     <Text style={styles.cardTitle}>Configuration Panels</Text>
                     <Text style={styles.cardDescription}>
-                        These settings are intentionally shown as explicit placeholders until editable forms are wired.
+                        Operating hours are configured separately for each branch and enforced for new bookings.
                     </Text>
 
-                    <View style={styles.pointRow}>
-                        <AppIcon name="schedule" size="sm" tone="accent" />
-                        <Text style={styles.pointText}>Operating hours: read-only placeholder</Text>
-                    </View>
-                    <View style={styles.pointRow}>
-                        <AppIcon name="policy" size="sm" tone="accent" />
-                        <Text style={styles.pointText}>Venue policies: read-only placeholder</Text>
-                    </View>
-                    <View style={styles.pointRow}>
+                    {(Array.isArray(zone?.branches) ? zone.branches : []).map((branch: any, index: number) => {
+                        const branchId = String(branch?.id || (index === 0 ? "primary" : `branch_${index + 1}`));
+                        return (
+                            <Pressable
+                                key={branchId}
+                                style={styles.pointRow}
+                                onPress={() => router.push(`/zone/branch/${branchId}` as any)}
+                            >
+                                <AppIcon name="schedule" size="sm" tone="accent" />
+                                <Text style={styles.pointText}>
+                                    {branch?.branchDisplayName || branch?.name || `Branch ${index + 1}`}: {formatBranchOperatingHoursSummary(branch?.operatingHours)}
+                                </Text>
+                            </Pressable>
+                        );
+                    })}
+                    {branchCount === 0 ? <InfoRow label="Operating hours" value="Add a branch first" /> : null}
+                    <Pressable style={styles.pointRow} onPress={() => router.push("/zone/wallet" as any)}>
                         <AppIcon name="payments" size="sm" tone="accent" />
-                        <Text style={styles.pointText}>Payout and finance settings: read-only placeholder</Text>
-                    </View>
+                        <Text style={styles.pointText}>Payouts and withdrawals: Open wallet</Text>
+                    </Pressable>
                 </View>
 
                 <View style={[styles.card, styles.systemToolsCard]}>

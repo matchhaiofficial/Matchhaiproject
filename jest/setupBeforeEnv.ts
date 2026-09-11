@@ -6,7 +6,7 @@
 // missing / placeholder URLs) can be imported in tests without a real backend.
 // This is a dummy value; no network calls are made because convex/react is mocked.
 process.env.EXPO_PUBLIC_CONVEX_URL =
-  process.env.EXPO_PUBLIC_CONVEX_URL || "https://test-deployment.convex.cloud";
+  process.env.EXPO_PUBLIC_CONVEX_URL || "https://acrobatic-bison-271.convex.cloud";
 process.env.EXPO_PUBLIC_CONVEX_SITE_URL =
   process.env.EXPO_PUBLIC_CONVEX_SITE_URL || "https://test-deployment.convex.site";
 process.env.EXPO_PUBLIC_APP_SCHEME = process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai";

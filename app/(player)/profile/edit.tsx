@@ -53,7 +53,7 @@ import {
 } from "../../../src/services/userService";
 import { sendPhoneOtp, verifyPhoneOtp } from "../../../src/services/convex/phoneOtpService";
 import { COLORS } from "../../../src/theme";
-import styles from "./edit.styles";
+import styles from "../../../app-shared/(player)/profile/edit.styles";
 
 // FACEIT Level Icons (matching register-step3 logic)
 const faceitLevelIcons: Record<number, any> = {

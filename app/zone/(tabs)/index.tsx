@@ -23,7 +23,7 @@ import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { useToast } from "../../../src/hooks/useToast";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
-import MatchroomCard from "../../matchrooms/components/MatchroomCard";
+import MatchroomCard from "../../../app-shared/matchrooms/components/MatchroomCard";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -50,7 +50,8 @@ import { type Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
-import styles from "./dashboard.styles";
+import { combineKarachiDateTime } from "../../../src/utils/scheduleTime";
+import styles from "../../../app-shared/zone/(tabs)/dashboard.styles";
 
 const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
 
@@ -93,8 +94,8 @@ const toMillis = (value: any) => {
 
 const toMatchroomDateMs = (room: ZoneMatchroomListItem) => {
     if (room.scheduledDate && room.scheduledTime) {
-        const parsed = new Date(`${room.scheduledDate}T${room.scheduledTime}`);
-        if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+        const parsed = combineKarachiDateTime(room.scheduledDate, room.scheduledTime);
+        if (parsed !== null) return parsed;
     }
     return toMillis(room.createdAt);
 };

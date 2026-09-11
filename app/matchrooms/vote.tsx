@@ -15,7 +15,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitParticipantVote } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
-import styles from './vote.styles';
+import styles from '../../app-shared/matchrooms/vote.styles';
 
 interface VoteData {
     id: string;

@@ -22,7 +22,7 @@ import {
 } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
-import styles from "./challenges.styles";
+import styles from "../../app-shared/teams/challenges.styles";
 
 const toMillis = (value: any) => {
     if (!value) return 0;
@@ -33,23 +33,31 @@ const toMillis = (value: any) => {
     return 0;
 };
 
-type ChallengeTab = "pending" | "history";
+type ChallengeTab = "active" | "history";
 
-const isPendingChallenge = (item: TeamMatchChallenge) => {
+const ACTIVE_CHALLENGE_STATUSES = new Set([
+    "pending",
+    "accepted",
+    "venue_proposed",
+    "venue_confirmed",
+    "admin_pending",
+]);
+
+const isActiveChallenge = (item: TeamMatchChallenge) => {
     const status = String(item.status || "pending");
-    return status === "pending" || status === "venue_proposed";
+    return ACTIVE_CHALLENGE_STATUSES.has(status);
 };
 
 const getEmptyCopy = (tab: ChallengeTab) => {
-    if (tab === "pending") {
+    if (tab === "active") {
         return {
-            title: "No pending challenges",
-            text: "Requested challenges and captain responses waiting for action will show here.",
+            title: "No active challenges",
+            text: "Requests, venue decisions, payments, and admin approvals in progress will show here.",
         };
     }
     return {
         title: "No challenge history",
-        text: "Confirmed, completed, rejected, failed, or expired challenges will show here.",
+        text: "Completed, rejected, failed, or expired challenges will show here.",
     };
 };
 
@@ -59,7 +67,7 @@ export default function TeamChallengesScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [rows, setRows] = useState<TeamMatchChallenge[]>([]);
-    const [activeTab, setActiveTab] = useState<ChallengeTab>("pending");
+    const [activeTab, setActiveTab] = useState<ChallengeTab>("active");
     const [now, setNow] = useState(() => Date.now());
 
     const fetchRows = useCallback(async () => {
@@ -93,9 +101,9 @@ export default function TeamChallengesScreen() {
         return () => clearInterval(id);
     }, []);
 
-    const pendingRows = useMemo(() => rows.filter(isPendingChallenge), [rows]);
-    const historyRows = useMemo(() => rows.filter((item) => !isPendingChallenge(item)), [rows]);
-    const visibleRows = activeTab === "pending" ? pendingRows : historyRows;
+    const activeRows = useMemo(() => rows.filter(isActiveChallenge), [rows]);
+    const historyRows = useMemo(() => rows.filter((item) => !isActiveChallenge(item)), [rows]);
+    const visibleRows = activeTab === "active" ? activeRows : historyRows;
     const emptyCopy = getEmptyCopy(activeTab);
 
     const formatCountdown = (ms: number) => {
@@ -129,7 +137,7 @@ export default function TeamChallengesScreen() {
                     value={activeTab}
                     onChange={setActiveTab}
                     items={[
-                        { key: "pending", label: "Pending", badge: pendingRows.length || undefined },
+                        { key: "active", label: "Active", badge: activeRows.length || undefined },
                         { key: "history", label: "History", badge: historyRows.length || undefined },
                     ]}
                     compact
@@ -167,7 +175,7 @@ export default function TeamChallengesScreen() {
                                         Price: PKR {item.pricePerPlayer}/player{item.zoneRateLabel ? ` | ${item.zoneRateLabel}` : ""}
                                     </Text>
                                 ) : null}
-                                {activeTab === "pending" ? (() => {
+                                {activeTab === "active" ? (() => {
                                     const scheduledAtMs = toMillis((item as any).scheduledAt) || (() => {
                                         const parsed = parseScheduledDateTime(item.scheduledDate || "", item.scheduledTime || "");
                                         return parsed ? parsed.getTime() : 0;

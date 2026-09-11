@@ -25,7 +25,7 @@ import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
 import { isPhoneAvailable, isUsernameAvailable } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
-import styles from "../../(player)/profile/edit.styles";
+import styles from "../../../app-shared/(player)/profile/edit.styles";
 
 const formatPakistaniPhone = (value: string) => {
     const numeric = value.replace(/\D/g, "");
@@ -208,7 +208,7 @@ export default function ZoneEditProfile() {
         return emailRegex.test(trimmedNew) && trimmedNew !== email;
     }, [newEmail, email]);
 
-    const isEmailVerified = user?.kycVerificationStatus === "verified" && !pendingEmail;
+    const isEmailVerified = Boolean(user?.emailVerifiedAt) && !pendingEmail;
 
     const getSessionToken = async () => {
         const sessionResult = await authClient.getSession();

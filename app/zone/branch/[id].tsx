@@ -22,8 +22,8 @@ import {
     KARACHI_AREAS,
     normalizeKarachiAreaLabel,
 } from "../../../constants/profileOptions";
-import RegistrationFieldLabel from "../../auth/components/RegistrationFieldLabel";
-import registerStyles from "../../auth/register.styles";
+import RegistrationFieldLabel from "../../../app-shared/auth/components/RegistrationFieldLabel";
+import registerStyles from "../../../app-shared/auth/register.styles";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
@@ -40,8 +40,13 @@ import BranchInventoryPricingForm, {
     normalizeBranchInventory,
     sanitizeBranchInventory,
     validateBranchInventory,
-} from "./components/BranchInventoryPricingForm";
-import styles from "./branch.styles";
+} from "../../../app-shared/zone/branch/components/BranchInventoryPricingForm";
+import styles from "../../../app-shared/zone/branch/branch.styles";
+import BranchOperatingHoursEditor from "../../../app-shared/zone/branch/components/BranchOperatingHoursEditor";
+import {
+    type BranchOperatingHours,
+    validateBranchOperatingHours,
+} from "../../../constants/branchOperatingHours";
 
 type LocationSearchResult = {
     display_name: string;
@@ -108,6 +113,7 @@ export default function BranchDetails() {
     const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [inventory, setInventory] = useState(createEmptyBranchInventory);
+    const [operatingHours, setOperatingHours] = useState<BranchOperatingHours | null>(null);
     const hydratedBranchKeyRef = useRef("");
 
     const branches = useMemo(() => {
@@ -224,7 +230,7 @@ export default function BranchDetails() {
                 .sort()
                 .join("|")
             : "pending";
-        const hydrateKey = `${activeBranchId}:${resourcesSignature}`;
+        const hydrateKey = `${activeBranchId}:${resourcesSignature}:${JSON.stringify(branch.operatingHours || null)}`;
         if (hydratedBranchKeyRef.current === hydrateKey) return;
         if (branchResources === undefined) return;
         hydratedBranchKeyRef.current = hydrateKey;
@@ -239,6 +245,7 @@ export default function BranchDetails() {
         setSearchQuery(address || name);
         setSearchResults([]);
         setInventory(normalizeBranchInventory(branch, resources));
+        setOperatingHours(branch.operatingHours || null);
     }, [activeBranchId, branchMatch.branch, branchResources]);
 
     const handleSearchChange = (text: string) => {
@@ -302,6 +309,11 @@ export default function BranchDetails() {
             });
             return;
         }
+        const operatingHoursError = operatingHours ? validateBranchOperatingHours(operatingHours) : null;
+        if (operatingHoursError) {
+            showToast({ type: "error", title: "Check operating hours", message: operatingHoursError });
+            return;
+        }
 
         let finalPhone: string | undefined;
         if (contactPhone.trim()) {
@@ -334,6 +346,7 @@ export default function BranchDetails() {
             contactPhone: finalPhone,
             ...sanitizedInventory,
             pricing: sanitizedInventory.pricing || {},
+            ...(operatingHours ? { operatingHours } : {}),
         };
 
         setSaving(true);
@@ -599,6 +612,8 @@ export default function BranchDetails() {
                             </View>
                         </View>
                     ) : null}
+
+                    <BranchOperatingHoursEditor value={operatingHours} onChange={setOperatingHours} />
 
                     <BranchInventoryPricingForm
                         value={inventory}

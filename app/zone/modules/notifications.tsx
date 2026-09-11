@@ -33,7 +33,7 @@ import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
 import { getNotificationCategoryIcon, getNotificationCategoryLabel } from "../../../src/utils/notificationCategories";
-import styles from "./notifications.styles";
+import styles from "../../../app-shared/zone/modules/notifications.styles";
 
 type AdminNotification = {
     id: string;

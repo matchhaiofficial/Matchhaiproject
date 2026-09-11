@@ -27,7 +27,7 @@ import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
 import { formatPlayerProfileShare } from "../../../src/utils/shareContent";
-import styles from "./profile.styles";
+import styles from "../../../app-shared/(player)/profile/profile.styles";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 

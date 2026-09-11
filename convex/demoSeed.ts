@@ -1,12 +1,15 @@
 import { v } from "convex/values";
 import { action, internalMutation, mutation, query } from "./_generated/server";
-import { api, components } from "./_generated/api";
+import { api, components, internal } from "./_generated/api";
 import { hashPassword } from "better-auth/crypto";
 import type { Doc, Id } from "./_generated/dataModel";
+import { createDefaultBranchOperatingHours } from "../constants/branchOperatingHours";
+import { refreshBranchResourceCapacitySnapshot } from "./resourceCapacity";
 
 const DEMO_DOMAIN = "@matchhai.demo";
 const DEMO_PASSWORD = "MatchHaiDemo123!";
 const KARACHI_REALISTIC_SEED_SOURCE = "karachi_realistic_demo_2026";
+const DEMO_SEED_SOURCE = "legacy_demo_seed";
 const KARACHI_REALISTIC_PASSWORD = "Demo@123456";
 const KARACHI_REALISTIC_EMAIL_DOMAIN = "@matchhai.demo";
 const DEFAULT_CURRENCY = "PKR";
@@ -437,8 +440,9 @@ function buildZoneBranch(i: number, branchIndex: number, city: string, profile: 
   const supportsPadel = profile === "sports" ? rand() < 0.35 : profile === "hybrid" ? rand() < 0.25 : rand() < 0.08;
   const supportsPickleball = profile === "sports" ? rand() < 0.35 : profile === "hybrid" ? rand() < 0.25 : rand() < 0.08;
 
-  // Keep resource counts intentionally small so seeding stays fast while still looking realistic.
-  const pcRegularCount = supportsCs2 ? String(Math.floor(rand() * 5) + 6) : "0";
+  // Team CS/Valorant matchrooms require ten same-tier PCs. Keep at least one
+  // demo tier internally consistent with the bookings it is meant to test.
+  const pcRegularCount = supportsCs2 ? String(Math.floor(rand() * 3) + 10) : "0";
   const pcPremiumCount = supportsCs2 ? String(Math.floor(rand() * 3) + 2) : "0";
   const pcEliteCount = supportsCs2 ? String(Math.floor(rand() * 2) + 1) : "0";
   const regularPrice = String(Math.floor(rand() * 150) + 250);
@@ -499,6 +503,7 @@ function buildZoneBranch(i: number, branchIndex: number, city: string, profile: 
     source: "manual",
     isActive: true,
     resourceModelVersion: 0,
+    operatingHours: createDefaultBranchOperatingHours(),
   };
 }
 
@@ -515,6 +520,115 @@ function zoneGameArrayFromBranches(branches: any[]) {
   }
   if (games.size === 0) games.add("cs2");
   return Array.from(games);
+}
+
+function buildZoneCapacity(branches: any[]) {
+  const sum = (selector: (pricing: any) => unknown) => branches.reduce((total, branch) => {
+    const value = Number(selector(branch.pricing || {}) || 0);
+    return total + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
+  return {
+    pcSeats: sum((pricing) =>
+      Number(pricing.pc?.regular?.count || 0)
+      + Number(pricing.pc?.premium?.count || 0)
+      + Number(pricing.pc?.elite?.count || 0)),
+    consoleSeats: sum((pricing) => pricing.console?.ps5?.count),
+    consolePlatform: "ps5",
+    futsalCourts: sum((pricing) => pricing.futsal?.standard?.count),
+    indoorCricketNets: sum((pricing) => pricing.indoor_cricket?.standard?.count),
+    padelCourts: sum((pricing) => pricing.padel?.standard?.count),
+    pickleballCourts: sum((pricing) => pricing.pickleball?.standard?.count),
+  };
+}
+
+type DemoResourceSpec = {
+  assetType: string;
+  capacity: number;
+  count: number;
+  hourlyRate: number;
+  kind: "seat" | "court";
+  namePrefix: string;
+  roomLabel?: string;
+  surface?: string;
+  tier?: string;
+};
+
+function positiveCount(value: unknown) {
+  const count = Math.floor(Number(value || 0));
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+function positiveRate(...values: unknown[]) {
+  for (const value of values) {
+    const rate = Number(value || 0);
+    if (Number.isFinite(rate) && rate > 0) return rate;
+  }
+  return 0;
+}
+
+function buildDemoResourceSpecs(branch: any): DemoResourceSpec[] {
+  const pricing = branch?.pricing || {};
+  const specs: DemoResourceSpec[] = [];
+  for (const tier of ["regular", "premium", "elite"]) {
+    const config = pricing.pc?.[tier];
+    const count = positiveCount(config?.count);
+    const hourlyRate = positiveRate(config?.price);
+    if (count && hourlyRate) {
+      specs.push({
+        assetType: "pc",
+        capacity: 1,
+        count,
+        hourlyRate,
+        kind: "seat",
+        namePrefix: `PC ${tier.toUpperCase()}`,
+        roomLabel: "PC Hall",
+        surface: "pc",
+        tier,
+      });
+    }
+  }
+
+  for (const tier of ["regular", "premium", "elite", "ps5", "xbox"]) {
+    const config = pricing.console?.[tier];
+    const count = positiveCount(config?.count);
+    const hourlyRate = positiveRate(config?.price1v1, config?.price2v2, config?.price);
+    if (count && hourlyRate) {
+      specs.push({
+        assetType: "console",
+        capacity: 2,
+        count,
+        hourlyRate,
+        kind: "seat",
+        namePrefix: tier.toUpperCase(),
+        roomLabel: "Console Room",
+        surface: tier,
+        tier,
+      });
+    }
+  }
+
+  const sportConfigs = [
+    ["futsal", pricing.futsal?.standard, "Futsal Court", 10],
+    ["indoor_cricket", pricing.indoor_cricket?.standard || pricing.indoorCricket?.standard, "Cricket Net", 12],
+    ["padel", pricing.padel?.standard, "Padel Court", 4],
+    ["pickleball", pricing.pickleball?.standard, "Pickleball Court", 4],
+  ] as const;
+  for (const [assetType, config, namePrefix, capacity] of sportConfigs) {
+    const count = positiveCount(config?.count);
+    const hourlyRate = positiveRate(config?.price);
+    if (count && hourlyRate) {
+      specs.push({
+        assetType,
+        capacity,
+        count,
+        hourlyRate,
+        kind: "court",
+        namePrefix,
+        surface: "standard",
+      });
+    }
+  }
+  return specs;
 }
 
 function buildZoneName(i: number, city: string, profile: DemoZoneProfile) {
@@ -1422,6 +1536,43 @@ export const seedDemoPlayerByIndex = internalMutation({
   },
 });
 
+// Creates an isolated development fixture for exercising the resumable account
+// deletion workflow. It has no wallet funds, teams, bookings, or matchrooms.
+export const seedAccountDeletionQaUser = mutation({
+  args: { seedKey: v.string() },
+  returns: v.object({ userId: v.string(), email: v.string() }),
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const email = "qa.account-deletion@matchhai.demo";
+    const fullName = "Account Deletion QA";
+    const username = "account_deletion_qa";
+    const auth = await ensureBetterAuthUser(ctx, {
+      email,
+      name: fullName,
+      username,
+      phone: "+923000009999",
+    });
+    const userId = await ensureConvexUser(ctx, {
+      authId: auth.authUserId,
+      email,
+      fullName,
+      username: auth.username,
+      phone: "+923000009999",
+      accountType: "player",
+      city: "Karachi",
+      areasPreferred: ["Gulshan-e-Iqbal"],
+    });
+    await ctx.db.patch(userId, {
+      walletBalance: 0,
+      walletHeldBalance: 0,
+      isDemo: true,
+      seedSource: "account_deletion_qa",
+      updatedAt: Date.now(),
+    });
+    return { userId: String(userId), email };
+  },
+});
+
 export const seedDemoZoneByIndex = internalMutation({
   args: { seedKey: v.string(), i: v.number() },
   handler: async (ctx, args) => {
@@ -1460,7 +1611,9 @@ export const seedDemoZoneByIndex = internalMutation({
     const games = zoneGameArrayFromBranches(branches);
     const venueBrandName = buildZoneName(i, city, profile);
 
-    const zoneId = (await ctx.runMutation(api.zones.create, {
+    const now = Date.now();
+    const firstBranch = branches[0];
+    const zoneId = await ctx.db.insert("zones", {
       ownerUid: adminId as any,
       ownerUsername: auth.username,
       ownerFullName: fullName,
@@ -1475,10 +1628,25 @@ export const seedDemoZoneByIndex = internalMutation({
       phone,
       games,
       branches,
+      capacity: buildZoneCapacity(branches),
+      primaryBranch: firstBranch
+        ? {
+            branchDisplayName: firstBranch.branchDisplayName,
+            city: firstBranch.city,
+            areaLabel: firstBranch.areaLabel,
+            addressLine1: firstBranch.addressLine1,
+            googleMapsUrl: firstBranch.googleMapsUrl,
+          }
+        : undefined,
+      pricing: firstBranch?.pricing,
       defaultPricing: { hourlyRate: 350, currency: DEFAULT_CURRENCY },
-    })) as any;
-
-    await ctx.runMutation(api.zones.approve, { zoneId: zoneId as any });
+      status: "active",
+      approvedAt: now,
+      isDemo: true,
+      seedSource: DEMO_SEED_SOURCE,
+      createdAt: now,
+      updatedAt: now,
+    });
 
     for (const branch of branches) {
       const branchId = String(branch.id);
@@ -1497,9 +1665,8 @@ export const seedDemoZoneByIndex = internalMutation({
       }
 
       for (const t of tiers) {
-        const cap = t.tier === "regular" ? 3 : t.tier === "premium" ? 2 : 1;
-        for (let seat = 1; seat <= Math.min(Math.max(0, t.count), cap); seat += 1) {
-          await ctx.runMutation(api.zones.createResource, {
+        for (let seat = 1; seat <= Math.max(0, t.count); seat += 1) {
+          await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,
             kind: "seat",
@@ -1510,6 +1677,12 @@ export const seedDemoZoneByIndex = internalMutation({
             roomLabel: "PC Hall",
             capacity: 1,
             hourlyRate: t.price,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
           });
         }
       }
@@ -1518,8 +1691,8 @@ export const seedDemoZoneByIndex = internalMutation({
       if (ps5?.count && ps5?.price1v1) {
         const count = Number(ps5.count);
         const rate = Number(ps5.price1v1);
-        for (let idx = 1; idx <= Math.min(Math.max(0, count), 1); idx += 1) {
-          await ctx.runMutation(api.zones.createResource, {
+        for (let idx = 1; idx <= Math.max(0, count); idx += 1) {
+          await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,
             kind: "seat",
@@ -1530,6 +1703,12 @@ export const seedDemoZoneByIndex = internalMutation({
             roomLabel: "Console Room",
             capacity: 2,
             hourlyRate: rate,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
           });
         }
       }
@@ -1568,11 +1747,9 @@ export const seedDemoZoneByIndex = internalMutation({
         });
       }
 
-      let courtCreated = false;
       for (const c of courts) {
-        if (courtCreated) break;
-        for (let idx = 1; idx <= Math.min(Math.max(0, c.count), 1); idx += 1) {
-          await ctx.runMutation(api.zones.createResource, {
+        for (let idx = 1; idx <= Math.max(0, c.count); idx += 1) {
+          await ctx.db.insert("zoneResources", {
             zoneId: zoneId as any,
             branchId,
             kind: "court",
@@ -1581,11 +1758,16 @@ export const seedDemoZoneByIndex = internalMutation({
             tier: undefined,
             surface: "standard",
             roomLabel: undefined,
-            capacity: c.assetType === "indoor_cricket" ? 12 : 10,
+            capacity: c.assetType === "indoor_cricket" ? 12 : c.assetType === "futsal" ? 10 : 4,
             hourlyRate: c.price,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
           });
         }
-        courtCreated = true;
       }
 
       const ruleAssetType =
@@ -1597,7 +1779,7 @@ export const seedDemoZoneByIndex = internalMutation({
               ? String(courts[0]!.assetType)
               : "pc";
 
-      await ctx.runMutation(api.zones.createPricingRule, {
+      await ctx.db.insert("pricingRules", {
         zoneId: zoneId as any,
         branchId,
         assetType: ruleAssetType,
@@ -1614,10 +1796,123 @@ export const seedDemoZoneByIndex = internalMutation({
             ? "Peak hours rate adjustment for evening sessions."
             : "Weekend pricing offer for demo venue testing.",
         createdByUid: String(adminId),
+        createdAt: now,
+        updatedAt: now,
       });
     }
 
     return { ok: true, adminId: String(adminId), zoneId: String(zoneId) };
+  },
+});
+
+// Repairs only legacy demo fixtures whose advertised branch counts predate the
+// resource-capacity guard. This intentionally refuses real venue data.
+export const reconcileLegacyDemoZoneInventory = mutation({
+  args: {
+    seedKey: v.string(),
+    zoneId: v.id("zones"),
+  },
+  returns: v.object({
+    addedResources: v.number(),
+    updatedBranches: v.number(),
+    zoneId: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Demo zone not found.");
+    if (zone.isDemo !== true || zone.seedSource !== DEMO_SEED_SOURCE) {
+      throw new Error("Refusing to reconcile a non-legacy-demo zone.");
+    }
+
+    const branches = (Array.isArray(zone.branches) ? zone.branches : []).map((branch: any) => {
+      let nextBranch = branch?.operatingHours
+        ? branch
+        : { ...branch, operatingHours: createDefaultBranchOperatingHours() };
+      const regular = branch?.pricing?.pc?.regular;
+      if (!branch?.supportsCs2 || !positiveRate(regular?.price)) return nextBranch;
+      const requiredCount = Math.max(10, positiveCount(regular?.count));
+      if (positiveCount(regular?.count) === requiredCount) return nextBranch;
+      nextBranch = {
+        ...nextBranch,
+        pricing: {
+          ...nextBranch.pricing,
+          pc: {
+            ...nextBranch.pricing.pc,
+            regular: { ...regular, count: String(requiredCount) },
+          },
+        },
+      };
+      return nextBranch;
+    });
+    const updatedBranches = branches.filter(
+      (branch: any, index: number) => branch !== (zone.branches as any[])?.[index],
+    ).length;
+    const now = Date.now();
+    if (updatedBranches > 0 || !zone.capacity) {
+      await ctx.db.patch(args.zoneId, {
+        branches,
+        capacity: buildZoneCapacity(branches),
+        pricing: branches[0]?.pricing,
+        updatedAt: now,
+      });
+    }
+
+    const existing = await ctx.db
+      .query("zoneResources")
+      .withIndex("by_zoneId", (q: any) => q.eq("zoneId", args.zoneId))
+      .take(501);
+    if (existing.length > 500) {
+      throw new Error("Demo zone has too many resources for bounded reconciliation.");
+    }
+
+    let addedResources = 0;
+    for (const branch of branches) {
+      const branchId = String(branch?.id || "").trim();
+      if (!branchId) continue;
+      for (const spec of buildDemoResourceSpecs(branch)) {
+        const matching = existing.filter((resource: any) =>
+          String(resource.branchId || "") === branchId &&
+          String(resource.assetType || "") === spec.assetType &&
+          String(resource.tier || "") === String(spec.tier || "") &&
+          String(resource.surface || "") === String(spec.surface || ""),
+        );
+        const names = new Set(matching.map((resource: any) => String(resource.name || "")));
+        let suffix = 1;
+        for (let missing = matching.length; missing < spec.count; missing += 1) {
+          while (names.has(`${spec.namePrefix}-${suffix}`)) suffix += 1;
+          const name = `${spec.namePrefix}-${suffix}`;
+          names.add(name);
+          suffix += 1;
+          await ctx.db.insert("zoneResources", {
+            zoneId: args.zoneId,
+            branchId,
+            kind: spec.kind,
+            name,
+            assetType: spec.assetType,
+            tier: spec.tier,
+            surface: spec.surface,
+            roomLabel: spec.roomLabel,
+            capacity: spec.capacity,
+            hourlyRate: spec.hourlyRate,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: DEMO_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
+          });
+          addedResources += 1;
+        }
+      }
+      await refreshBranchResourceCapacitySnapshot(ctx, {
+        zoneId: args.zoneId,
+        branchId,
+        now,
+      });
+    }
+
+    return { addedResources, updatedBranches, zoneId: String(args.zoneId) };
   },
 });
 
@@ -1697,14 +1992,37 @@ export const seedDemoTeamByIndex = internalMutation({
     const already = existingTeams.find((t: any) => t.game === game && t.nameLower === name.toLowerCase());
     let teamId: any = already?._id;
     if (!teamId) {
-      teamId = await ctx.runMutation(api.teams.create, {
+      const isFivePlayerGame = game === "cs2" || game === "cs16" || game === "valorant";
+      const isDuelGame = game === "fc25" || game === "fc26" || game === "tekken8";
+      const mainRosterSize = isFivePlayerGame ? 5 : isDuelGame ? 2 : 5;
+      const maxSubstitutes = isFivePlayerGame ? 2 : isDuelGame ? 1 : 0;
+      const now = Date.now();
+      teamId = await ctx.db.insert("teams", {
         name,
+        nameLower: name.toLowerCase(),
         tag,
         game,
         captainUid: captain._id,
         captainUsername: captain.username,
-        maxMembers: 10,
+        memberUids: [String(captain._id)],
+        memberCount: 1,
+        maxMembers: mainRosterSize + maxSubstitutes,
+        mainRosterSize,
+        maxSubstitutes,
         description: `Community roster for ${game}. Seeded for demo testing.`,
+        stats: { wins: 0, losses: 0, matchesPlayed: 0 },
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("teamMembers", {
+        teamId,
+        odxerId: captain._id,
+        username: captain.username,
+        role: "captain",
+        rosterRole: "main",
+        rosterOrder: 0,
+        joinedAt: now,
       });
     }
 
@@ -1719,16 +2037,27 @@ export const seedDemoTeamByIndex = internalMutation({
         .unique()) as Doc<"users"> | null;
       if (!candidate) continue;
       if (!doesUserPlayGameFromRecord(candidate, game)) continue;
-      try {
-        await ctx.runMutation(api.teams.addMember, {
-          teamId: teamId as any,
-          userId: candidate._id,
-          username: candidate.username,
-        });
-        added += 1;
-      } catch {
-        // Ignore duplicates / not eligible.
-      }
+      const team: any = await ctx.db.get(teamId);
+      if (!team || team.memberUids.map(String).includes(String(candidate._id))) continue;
+      const capacity = Number(team.mainRosterSize || 5) + Number(team.maxSubstitutes || 0);
+      if (Number(team.memberCount || 0) >= capacity) break;
+      const now = Date.now();
+      const rosterOrder = Number(team.memberCount || 0);
+      await ctx.db.patch(teamId, {
+        memberUids: [...team.memberUids, String(candidate._id)],
+        memberCount: rosterOrder + 1,
+        updatedAt: now,
+      });
+      await ctx.db.insert("teamMembers", {
+        teamId,
+        odxerId: candidate._id,
+        username: candidate.username,
+        role: "member",
+        rosterRole: rosterOrder < Number(team.mainRosterSize || 5) ? "main" : "substitute",
+        rosterOrder,
+        joinedAt: now,
+      });
+      added += 1;
     }
 
     return { ok: true, teamId: String(teamId) };
@@ -1818,7 +2147,17 @@ export const seedDemoMatchroomByIndex = internalMutation({
       return Number.isFinite(n) && n > 0 ? Math.round(n / maxPlayers) : 500;
     })();
 
-    const matchroomId: any = await ctx.runMutation(api.matchrooms.create, {
+    const resourceProfile = (() => {
+      if (["cs2", "cs16", "valorant"].includes(game)) {
+        return { assetType: "pc", tier: "regular", surface: undefined, rateKey: "pc:regular" };
+      }
+      if (["fc25", "fc26", "tekken8"].includes(game)) {
+        return { assetType: "console", tier: "ps5", surface: "1v1", rateKey: "console:ps5" };
+      }
+      const ratePrefix = game === "indoor_cricket" ? "cricket" : game;
+      return { assetType: game, tier: undefined, surface: "standard", rateKey: `${ratePrefix}:standard` };
+    })();
+    const matchroomId: any = await ctx.runMutation((internal as any).matchrooms.createSeededDemo, {
       hostUid: String(host._id),
       hostName: host.username,
       game,
@@ -1846,12 +2185,18 @@ export const seedDemoMatchroomByIndex = internalMutation({
       expiresAt: startAt - 24 * 60 * 60 * 1000,
       durationMinutes: 60,
       pricing: { perPlayer, currency: DEFAULT_CURRENCY },
+      branchId: String((zone as any).primaryBranch?.id || "") || undefined,
+      requestedResourceAssetType: resourceProfile.assetType,
+      requestedResourceSurface: resourceProfile.surface,
+      requestedResourceTier: resourceProfile.tier,
+      selectedZoneRateKey: resourceProfile.rateKey,
       slotsA,
       slotsB,
       captainUidA: String(host._id),
       skillLevel: "Any",
       hostRole: "Player",
       bookingSource: "seed",
+      clientCreateRequestId: `legacy-demo-matchroom-${i}`,
       isPrivate: false,
       paymentStatus: "unpaid",
       zoneAdminApproved: true,
@@ -2648,7 +2993,14 @@ export const removeDemoData = action({
 async function listBetterAuthUsersByDomain(ctx: any, domainSuffix: string) {
   const results: any[] = [];
   let cursor: string | null = null;
+  const seenCursors = new Set<string>();
   while (true) {
+    const cursorKey = cursor ?? "__initial__";
+    if (seenCursors.has(cursorKey)) {
+      throw new Error("Better Auth pagination made no progress while listing demo users.");
+    }
+    seenCursors.add(cursorKey);
+
     const batch: any = await ctx.runQuery(components.betterAuth.adapter.findMany, {
       model: "user",
       where: [{ field: "email", operator: "ends_with", value: domainSuffix }],
@@ -2665,6 +3017,9 @@ async function listBetterAuthUsersByDomain(ctx: any, domainSuffix: string) {
 
     const next: any = (batch as any)?.continueCursor ?? (batch as any)?.nextCursor ?? null;
     if (!next || items.length === 0) break;
+    if (String(next) === cursorKey) {
+      throw new Error("Better Auth pagination cursor did not advance while listing demo users.");
+    }
     cursor = next;
   }
   return results;
@@ -2831,6 +3186,7 @@ async function ensureKarachiRealisticUser(ctx: any, input: {
       emailVerifiedAt: now,
       phone: input.phone,
       fullName: input.fullName || existing.fullName,
+      ...(input.accountType === "player" ? { walletBalance: 5000 } : {}),
       updatedAt: now,
     } as any);
 
@@ -2894,6 +3250,7 @@ async function ensureKarachiRealisticUser(ctx: any, input: {
   };
 
   if (input.accountType === "player") {
+    base.walletBalance = 5000;
     const game = input.playerGameKey || null;
     base.playsCs2 = game === "cs2";
     base.playsCs16 = game === "cs16";
@@ -3218,7 +3575,8 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
       zoneId = await ctx.db.insert("zones", zoneDoc);
     }
 
-    // Seed a small number of resources per branch (idempotent by name per branch).
+    // Materialize the advertised inventory exactly; booking capacity is backed
+    // by zoneResources, so partial fixtures would make valid demo prices unusable.
     const createdResources: string[] = [];
     for (const b of branches) {
       const branchId = String(b.id);
@@ -3237,7 +3595,7 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
       ].filter((t) => t.count > 0 && t.price > 0);
 
       for (const t of pcTiers) {
-        for (let seat = 1; seat <= Math.min(t.count, 2); seat += 1) {
+        for (let seat = 1; seat <= t.count; seat += 1) {
           const name = `PC ${t.tier.toUpperCase()}-${seat}`;
           if (existingNames.has(name)) continue;
           await ctx.db.insert("zoneResources", {
@@ -3270,7 +3628,7 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
       ].filter((t) => t.count > 0 && t.price1v1 > 0);
 
       for (const t of cTiers) {
-        for (let unit = 1; unit <= Math.min(t.count, 1); unit += 1) {
+        for (let unit = 1; unit <= t.count; unit += 1) {
           const name = `CONSOLE ${t.tier.toUpperCase()}-${unit}`;
           if (existingNames.has(name)) continue;
           await ctx.db.insert("zoneResources", {
@@ -3295,6 +3653,7 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
           createdResources.push(name);
         }
       }
+      await refreshBranchResourceCapacitySnapshot(ctx, { zoneId, branchId, now });
     }
 
     return {

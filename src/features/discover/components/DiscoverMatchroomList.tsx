@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, View } from "react-native";
 
 import { api } from "../../../../convex/_generated/api";
-import MatchroomCard from "../../../../app/matchrooms/components/MatchroomCard";
+import MatchroomCard from "../../../../app-shared/matchrooms/components/MatchroomCard";
 import { convex } from "../../../../src/lib/convex";
 import { useAuth } from "../../../../src/context/AuthContext";
 import { useMyActiveMatchroomRoomStates } from "../../../../src/hooks/useMatchroomData";

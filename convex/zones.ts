@@ -1,18 +1,103 @@
 import { internalMutation, query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
+import { requireOwnedZone, requireSelf, requireSuperAdmin } from "./authz";
+import { validateBranchOperatingHours } from "../constants/branchOperatingHours";
+import { refreshBranchResourceCapacitySnapshot } from "./resourceCapacity";
+import { findActiveBranchAssignment, findActiveResourceAssignment } from "./bookingConflicts";
 
 const ZONE_LIVE_NEARBY_NOTIFICATION_TYPE = "zone.live_nearby";
+
+function assertValidBranchOperatingHours(branches: any[]) {
+  for (const branch of branches) {
+    if (!branch?.operatingHours) continue;
+    const error = validateBranchOperatingHours(branch.operatingHours);
+    if (error) {
+      const label = String(branch?.branchDisplayName || branch?.name || "Branch");
+      throw new Error(`${label}: ${error}`);
+    }
+  }
+}
 const ZONE_LIVE_NEARBY_NOTIFICATION_BATCH_SIZE = 75;
 
 function toPositiveNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getNewBranchResourceConfigs(pricing: any) {
+  const count = (value: unknown) => {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    if (parsed > 200) throw new Error("A single resource category cannot exceed 200 units.");
+    return parsed;
+  };
+  return [
+    { assetType: "pc", tier: "regular", count: count(pricing?.pc?.regular?.count) },
+    { assetType: "pc", tier: "premium", count: count(pricing?.pc?.premium?.count) },
+    { assetType: "pc", tier: "elite", count: count(pricing?.pc?.elite?.count) },
+    { assetType: "console", tier: "regular", count: count(pricing?.console?.regular?.count) },
+    { assetType: "console", tier: "premium", count: count(pricing?.console?.premium?.count) },
+    { assetType: "console", tier: "elite", count: count(pricing?.console?.elite?.count) },
+    { assetType: "console", tier: "ps5", count: count(pricing?.console?.ps5?.count) },
+    { assetType: "console", tier: "xbox", count: count(pricing?.console?.xbox?.count) },
+  ];
+}
+
+async function createResourcesForNewBranch(ctx: any, input: {
+  zoneId: Id<"zones">;
+  branchId: string;
+  pricing: any;
+  now: number;
+}) {
+  const configs = getNewBranchResourceConfigs(input.pricing);
+  const total = configs.reduce((sum, config) => sum + config.count, 0);
+  if (total > 500) throw new Error("A branch cannot contain more than 500 managed resources.");
+  for (const config of configs) {
+    const tierLabel = config.tier === "ps5" ? "PS5" : config.tier === "xbox"
+      ? "Xbox"
+      : `${config.tier.charAt(0).toUpperCase()}${config.tier.slice(1)} ${config.assetType === "pc" ? "PC" : "Console"}`;
+    for (let index = 1; index <= config.count; index += 1) {
+      await ctx.db.insert("zoneResources", {
+        zoneId: input.zoneId,
+        branchId: input.branchId,
+        kind: "seat",
+        name: `${tierLabel} ${index}`,
+        assetType: config.assetType,
+        tier: config.tier,
+        roomLabel: config.assetType === "pc"
+          ? `${tierLabel}s Room ${Math.floor((index - 1) / 5) + 1}`
+          : `${tierLabel} Bay ${Math.floor((index - 1) / 2) + 1}`,
+        lifecycleStatus: "available",
+        isActive: true,
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+    }
+  }
+  await refreshBranchResourceCapacitySnapshot(ctx, {
+    zoneId: input.zoneId,
+    branchId: input.branchId,
+    now: input.now,
+  });
+}
+
+async function requireKycOwnedZone(
+  ctx: any,
+  zoneId: Id<"zones">,
+): Promise<{ profile: Doc<"users">; zone: Doc<"zones"> }> {
+  const { profile } = await requireKycVerified(ctx);
+  const zone = await ctx.db.get(zoneId);
+  if (!profile || !zone || String(zone.ownerUid) !== String(profile._id)) {
+    throw new Error("Not authorized for this zone");
+  }
+  return { profile, zone };
 }
 
 function buildPrimaryBranch(branch: any, fallbackCity?: string) {
@@ -110,7 +195,7 @@ function shouldNotifyUserForLiveZone(user: any, input: {
 }) {
   if (!user) return false;
   if (isUserHiddenFromPublic(user)) return false;
-  if (String(user.accountStatus || "").toLowerCase() === "suspended") return false;
+  if (isAccountSuspensionActive(user)) return false;
   if (user.onboardingCompleted !== true) return false;
 
   const userCityKey = normalizeAudienceToken(user.city);
@@ -173,7 +258,7 @@ function buildAggregateCapacity(branches: any[]) {
 // those over the wire. Customer-facing pricing and intentionally-public
 // contact details (contactPhone/contactEmail) are retained.
 function buildPublicZoneView(zone: any): any {
-  if (!zone) return null;
+  if (!zone || String(zone.status || "") !== "active") return null;
   const {
     ownerUid: _ownerUid,
     ownerUsername: _ownerUsername,
@@ -233,10 +318,58 @@ export const getPublicVenueByIdString = query({
   },
 });
 
+// Aggregate public inventory only; resource identifiers, names, booking links,
+// and maintenance details remain private. The client uses this snapshot to
+// avoid offering a priced category that cannot satisfy a game's minimum team
+// size. Slot-specific contention is still checked by matchrooms before create.
+export const getPublicResourceCapacity = query({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.optional(v.string()),
+  },
+  returns: v.union(
+    v.null(),
+    v.object({
+      capacityByKey: v.record(v.string(), v.number()),
+      complete: v.boolean(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone || String(zone.status || "") !== "active") return null;
+
+    if (args.branchId) {
+      const snapshot = await ctx.db.query("zoneResourceCapacitySnapshots")
+        .withIndex("by_zoneId_and_branchId", (q) =>
+          q.eq("zoneId", args.zoneId).eq("branchId", args.branchId!),
+        )
+        .unique();
+      return snapshot
+        ? { capacityByKey: snapshot.capacityByKey, complete: snapshot.complete }
+        : { capacityByKey: {}, complete: false };
+    }
+
+    const snapshots = await ctx.db.query("zoneResourceCapacitySnapshots")
+      .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
+      .take(101);
+    const capacityByKey: Record<string, number> = {};
+    for (const snapshot of snapshots.slice(0, 100)) {
+      for (const [key, count] of Object.entries(snapshot.capacityByKey)) {
+        capacityByKey[key] = (capacityByKey[key] || 0) + count;
+      }
+    }
+    return {
+      capacityByKey,
+      complete: snapshots.length <= 100 && snapshots.every((snapshot) => snapshot.complete),
+    };
+  },
+});
+
 // Get zone by owner
 export const getByOwner = query({
   args: { ownerUid: v.id("users") },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.ownerUid);
     return await ctx.db
       .query("zones")
       .withIndex("by_ownerUid", (q) => q.eq("ownerUid", args.ownerUid))
@@ -248,11 +381,12 @@ export const getByOwner = query({
 export const listActive = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const rows = await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "active"))
       .order("desc")
       .take(args.limit || 50);
+    return rows.map(buildPublicZoneView);
   },
 });
 
@@ -260,6 +394,7 @@ export const listActive = query({
 export const listPendingReview = query({
   args: {},
   handler: async (ctx) => {
+    await requireSuperAdmin(ctx);
     return await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "pending-review"))
@@ -333,6 +468,9 @@ export const notifyZoneLiveNearbyPlayersBatch = internalMutation({
     }
 
     if (!page.isDone) {
+      if (!page.continueCursor || page.continueCursor === args.cursor) {
+        throw new Error("Zone-live notification pagination made no progress.");
+      }
       await ctx.scheduler.runAfter(0, internal.zones.notifyZoneLiveNearbyPlayersBatch, {
         zoneId: args.zoneId,
         cursor: page.continueCursor,
@@ -372,7 +510,12 @@ export const create = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const { profile } = await requireKycVerified(ctx);
+    if (!profile || String(profile._id) !== String(args.ownerUid)) {
+      throw new Error("You can only register a zone for your own account");
+    }
     const now = Date.now();
+    assertValidBranchOperatingHours(args.branches);
     const primaryBranch = buildPrimaryBranch(args.branches[0], args.city);
     const capacity = buildAggregateCapacity(args.branches);
     const firstBranchPricing = args.branches[0]?.pricing;
@@ -475,7 +618,7 @@ export const update = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireKycOwnedZone(ctx, args.zoneId);
     const { zoneId, ...updates } = args;
 
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
@@ -487,6 +630,7 @@ export const update = mutation({
     if (updates.phone !== undefined) updateData.phone = updates.phone;
     if (updates.games !== undefined) updateData.games = updates.games;
     if (updates.branches !== undefined) {
+      assertValidBranchOperatingHours(updates.branches);
       updateData.branches = updates.branches;
       if (updates.primaryBranch === undefined) {
         updateData.primaryBranch = buildPrimaryBranch(updates.branches[0], updates.city);
@@ -521,16 +665,22 @@ export const addBranch = mutation({
     branch: v.any(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found");
+    const { zone } = await requireKycOwnedZone(ctx, args.zoneId);
 
     const branch = {
       ...args.branch,
       id: args.branch?.id || Math.random().toString(36).slice(2, 10),
     };
     const branches = [...(zone.branches || []), branch];
+    assertValidBranchOperatingHours(branches);
 
+    const now = Date.now();
+    await createResourcesForNewBranch(ctx, {
+      zoneId: args.zoneId,
+      branchId: branch.id,
+      pricing: branch.pricing || {},
+      now,
+    });
     await ctx.db.patch(args.zoneId, {
       branches,
       primaryBranch: zone.primaryBranch || {
@@ -542,7 +692,7 @@ export const addBranch = mutation({
       },
       capacity: buildAggregateCapacity(branches),
       pricing: (branches[0] as any)?.pricing,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
     return branch.id;
@@ -556,13 +706,12 @@ export const updateBranch = mutation({
     updates: v.any(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found");
+    const { zone } = await requireKycOwnedZone(ctx, args.zoneId);
 
     const branches = (zone.branches || []).map((branch: any) =>
       branch.id === args.branchId ? { ...branch, ...args.updates, id: branch.id } : branch
     );
+    assertValidBranchOperatingHours(branches);
 
     const primary = branches[0];
 
@@ -592,12 +741,47 @@ export const deleteBranch = mutation({
     branchId: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found");
+    const { zone } = await requireKycOwnedZone(ctx, args.zoneId);
+
+    if (!(zone.branches || []).some((branch: any) => String(branch.id || "") === args.branchId)) {
+      throw new Error("Branch not found.");
+    }
+    if (await findActiveBranchAssignment(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+    })) {
+      throw new Error("This branch cannot be deleted while it has active bookings, walk-ins, or venue offers.");
+    }
+    const resources = await ctx.db.query("zoneResources")
+      .withIndex("by_zoneId_and_branchId", (q) =>
+        q.eq("zoneId", args.zoneId).eq("branchId", args.branchId),
+      )
+      .take(501);
+    if (resources.length > 500) {
+      throw new Error("This branch has too many resources to delete safely.");
+    }
+    for (const resource of resources) {
+      if (await findActiveResourceAssignment(ctx, {
+        zoneId: String(args.zoneId),
+        resourceId: resource._id,
+      })) {
+        throw new Error("This branch cannot be deleted while it has active bookings or venue offers.");
+      }
+    }
 
     const branches = (zone.branches || []).filter((branch: any) => branch.id !== args.branchId);
     const primary = branches[0];
+
+    const now = Date.now();
+    for (const resource of resources) {
+      await ctx.db.patch(resource._id, { isActive: false, updatedAt: now });
+    }
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      now,
+    });
 
     await ctx.db.patch(args.zoneId, {
       branches,
@@ -612,7 +796,7 @@ export const deleteBranch = mutation({
         : undefined,
       capacity: buildAggregateCapacity(branches),
       pricing: (branches[0] as any)?.pricing,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
     return true;
@@ -623,7 +807,7 @@ export const deleteBranch = mutation({
 export const approve = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireSuperAdmin(ctx);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) throw new Error("Zone not found");
     await ctx.db.patch(args.zoneId, {
@@ -631,6 +815,11 @@ export const approve = mutation({
       approvedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    if (Number(zone.scheduleIndexVersion || 0) < 1) {
+      await ctx.scheduler.runAfter(0, (internal as any).scheduleIndexMigration.prepareZoneScheduleIndex, {
+        zoneId: args.zoneId,
+      });
+    }
     if (["pending-review", "approved_pending_migration"].includes(String(zone.status || ""))) {
       await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
     }
@@ -645,7 +834,7 @@ export const reject = mutation({
     rejectionReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireSuperAdmin(ctx);
     await ctx.db.patch(args.zoneId, {
       status: "rejected",
       rejectedAt: Date.now(),
@@ -660,7 +849,7 @@ export const reject = mutation({
 export const suspend = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireSuperAdmin(ctx);
     await ctx.db.patch(args.zoneId, {
       status: "suspended",
       updatedAt: Date.now(),
@@ -677,6 +866,7 @@ export const suspend = mutation({
 export const listPricingRules = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
+    await requireOwnedZone(ctx, args.zoneId);
     return await ctx.db
       .query("pricingRules")
       .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
@@ -708,11 +898,12 @@ export const createPricingRule = mutation({
     createdByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const { profile } = await requireKycOwnedZone(ctx, args.zoneId);
     const now = Date.now();
 
     const ruleId = await ctx.db.insert("pricingRules", {
       ...args,
+      createdByUid: String(profile._id),
       createdAt: now,
       updatedAt: now,
     });
@@ -721,7 +912,7 @@ export const createPricingRule = mutation({
       zoneId: String(args.zoneId),
       module: "pricing",
       action: "create_pricing_rule",
-      actorUid: args.createdByUid || null,
+      actorUid: String(profile._id),
       targetType: "pricing_rule",
       targetId: String(ruleId),
       summary: `Created pricing rule "${args.name || "Untitled rule"}".`,
@@ -769,12 +960,12 @@ export const updatePricingRule = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const { ruleId, ...updates } = args;
+    const { ruleId, updatedByUid: _updatedByUid, ...updates } = args;
     const existingRule = await ctx.db.get(ruleId);
     if (!existingRule) {
       throw new Error("Pricing rule not found.");
     }
+    const { profile } = await requireKycOwnedZone(ctx, existingRule.zoneId);
 
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
     Object.entries(updates).forEach(([key, value]) => {
@@ -789,7 +980,7 @@ export const updatePricingRule = mutation({
       zoneId: String(existingRule.zoneId),
       module: "pricing",
       action: "update_pricing_rule",
-      actorUid: args.updatedByUid || existingRule.createdByUid || null,
+      actorUid: String(profile._id),
       targetType: "pricing_rule",
       targetId: String(ruleId),
       summary: `Updated pricing rule "${existingRule.name || "Untitled rule"}".`,
@@ -822,11 +1013,11 @@ export const deletePricingRule = mutation({
     deletedByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
     const existingRule = await ctx.db.get(args.ruleId);
     if (!existingRule) {
       throw new Error("Pricing rule not found.");
     }
+    const { profile } = await requireKycOwnedZone(ctx, existingRule.zoneId);
 
     await ctx.db.delete(args.ruleId);
 
@@ -834,7 +1025,7 @@ export const deletePricingRule = mutation({
       zoneId: String(existingRule.zoneId),
       module: "pricing",
       action: "delete_pricing_rule",
-      actorUid: args.deletedByUid || existingRule.createdByUid || null,
+      actorUid: String(profile._id),
       targetType: "pricing_rule",
       targetId: String(args.ruleId),
       summary: `Deleted pricing rule "${existingRule.name || "Untitled rule"}".`,
@@ -860,6 +1051,7 @@ export const listResources = query({
     branchId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireOwnedZone(ctx, args.zoneId);
     if (args.branchId) {
       return await ctx.db
         .query("zoneResources")
@@ -890,7 +1082,10 @@ export const createResource = mutation({
     hourlyRate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const { zone } = await requireKycOwnedZone(ctx, args.zoneId);
+    if (!(zone.branches || []).some((branch: any) => String(branch.id || "") === args.branchId)) {
+      throw new Error("Branch not found.");
+    }
     const now = Date.now();
 
     const resourceId = await ctx.db.insert("zoneResources", {
@@ -899,6 +1094,11 @@ export const createResource = mutation({
       isActive: true,
       createdAt: now,
       updatedAt: now,
+    });
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      now,
     });
 
     return resourceId;
@@ -917,10 +1117,33 @@ export const updateResourceStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) throw new Error("Resource not found");
+    const { zone } = await requireKycOwnedZone(ctx, resource.zoneId);
+    if (["held", "booked"].includes(args.lifecycleStatus)) {
+      throw new Error("Held and booked statuses are managed through dated booking or walk-in allocation.");
+    }
+    const exactAssignment = await findActiveResourceAssignment(ctx, {
+        zoneId: String(resource.zoneId),
+        resourceId: resource._id,
+      });
+    const branchAssignment = args.lifecycleStatus === "maintenance"
+      ? await findActiveBranchAssignment(ctx, {
+        zoneId: String(resource.zoneId),
+        branchId: resource.branchId,
+        primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+      })
+      : null;
+    if (exactAssignment || branchAssignment) {
+      throw new Error("This resource status cannot be changed while it has an active booking or venue offer.");
+    }
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
       updatedAt: Date.now(),
+    });
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: resource.zoneId,
+      branchId: resource.branchId,
     });
     return true;
   },
@@ -930,8 +1153,26 @@ export const updateResourceStatus = mutation({
 export const deleteResource = mutation({
   args: { resourceId: v.id("zoneResources") },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) throw new Error("Resource not found");
+    const { zone } = await requireKycOwnedZone(ctx, resource.zoneId);
+    const exactAssignment = await findActiveResourceAssignment(ctx, {
+      zoneId: String(resource.zoneId),
+      resourceId: resource._id,
+    });
+    const branchAssignment = await findActiveBranchAssignment(ctx, {
+      zoneId: String(resource.zoneId),
+      branchId: resource.branchId,
+      primaryBranchId: String((zone.branches || [])[0]?.id || ""),
+    });
+    if (exactAssignment || branchAssignment) {
+      throw new Error("This resource cannot be deleted while it has an active booking or venue offer.");
+    }
     await ctx.db.delete(args.resourceId);
+    await refreshBranchResourceCapacitySnapshot(ctx, {
+      zoneId: resource.zoneId,
+      branchId: resource.branchId,
+    });
     return true;
   },
 });

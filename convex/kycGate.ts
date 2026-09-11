@@ -1,6 +1,8 @@
 import { api } from "./_generated/api";
 import { ActionCtx, MutationCtx } from "./_generated/server";
+import { Doc } from "./_generated/dataModel";
 import { authComponent } from "./auth";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
 
 export const KYC_VERIFICATION_REQUIRED_MESSAGE =
   "Please complete CNIC & face verification to unlock MatchHai features.";
@@ -9,19 +11,21 @@ export const KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL =
   "Please complete CNIC & face verification before requesting withdrawal.";
 
 export function isKycVerificationBypassEnabled(): boolean {
-  return (
-    String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1" ||
-    String(process.env.SKIP_PHONE_OTP || "").trim() === "1"
+  const environment = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
+  const isExplicitDevelopment = ["development", "dev", "local", "test"].includes(environment);
+  return isExplicitDevelopment && (
+    String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1"
   );
 }
 
+export function isPhoneOtpBypassEnabled(): boolean {
+  const environment = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
+  return ["development", "dev", "local", "test"].includes(environment)
+    && String(process.env.SKIP_PHONE_OTP || "").trim() === "1";
+}
+
 export function isKycAccessAllowed(status?: string | null): boolean {
-  return (
-    status === "verified" ||
-    status === "pending" ||
-    status === "in_progress" ||
-    status === "in_review"
-  );
+  return status === "verified";
 }
 
 export function assertKycAccessAllowed(
@@ -36,12 +40,8 @@ export function assertKycAccessAllowed(
     throw new Error("User profile not found.");
   }
 
-  if (profile.accountStatus === "suspended") {
-    const suspendedUntil =
-      typeof profile.suspendedUntil === "number" ? profile.suspendedUntil : null;
-    if (!suspendedUntil || suspendedUntil > Date.now()) {
-      throw new Error("Your MatchHai account is suspended. Please contact support.");
-    }
+  if (isAccountSuspensionActive(profile)) {
+    throw new Error("Your MatchHai account is suspended. Please contact support.");
   }
 
   // Safe dev/demo bypass; never bypass suspension checks.
@@ -52,10 +52,25 @@ export function assertKycAccessAllowed(
   }
 }
 
+export function assertKycFullyVerified(
+  profile?: {
+    kycVerificationStatus?: string | null;
+    accountStatus?: string | null;
+    suspendedUntil?: number | null;
+  } | null,
+  message = KYC_VERIFICATION_REQUIRED_MESSAGE,
+) {
+  assertKycAccessAllowed(profile, message);
+  if (isKycVerificationBypassEnabled()) return;
+  if (profile?.kycVerificationStatus !== "verified") {
+    throw new Error(message);
+  }
+}
+
 export async function requireKycVerified(
   ctx: ActionCtx | MutationCtx,
   message = KYC_VERIFICATION_REQUIRED_MESSAGE,
-) {
+): Promise<{ authUser: any; profile: Doc<"users"> }> {
   let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
   try {
     authUser = await authComponent.getAuthUser(ctx);
@@ -91,7 +106,7 @@ export async function requireKycVerified(
     throw new Error("Please sign in to continue.");
   }
 
-  let profile: Awaited<ReturnType<typeof getProfileByAuthId>> = null;
+  let profile: Doc<"users"> | null = null;
   for (const authId of candidateAuthIds) {
     profile = await getProfileByAuthId(ctx, authId);
     if (profile) break;
@@ -99,14 +114,17 @@ export async function requireKycVerified(
 
   assertKycAccessAllowed(profile as any, message);
 
-  return { authUser, profile };
+  return { authUser, profile: profile! };
 }
 
-async function getProfileByAuthId(ctx: ActionCtx | MutationCtx, authId: string) {
-  return "db" in ctx
+async function getProfileByAuthId(
+  ctx: ActionCtx | MutationCtx,
+  authId: string,
+): Promise<Doc<"users"> | null> {
+  return ("db" in ctx
     ? await ctx.db
         .query("users")
         .withIndex("by_authId", (q) => q.eq("authId", authId))
         .unique()
-    : await ctx.runQuery(api.users.getByAuthId, { authId });
+    : await ctx.runQuery(api.users.getByAuthId, { authId })) as Doc<"users"> | null;
 }

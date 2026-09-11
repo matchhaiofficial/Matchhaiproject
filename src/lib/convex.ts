@@ -1,6 +1,10 @@
 import { ConvexReactClient } from "convex/react";
 
 const CONVEX_URL = process.env.EXPO_PUBLIC_CONVEX_URL;
+const APP_ENV = String(process.env.EXPO_PUBLIC_ENV || "development").trim().toLowerCase();
+
+const DEVELOPMENT_DEPLOYMENT = "acrobatic-bison-271";
+const PRODUCTION_DEPLOYMENT = "nautical-ibex-721";
 
 // Fail clearly instead of silently constructing a client against an empty or
 // placeholder backend URL (CR-04). A build/QA run with missing or unreplaced
@@ -10,6 +14,18 @@ function assertConvexUrl(url: string | undefined): asserts url is string {
     throw new Error(
       "[convex] EXPO_PUBLIC_CONVEX_URL is not configured for this build profile. " +
         "Set the correct Convex deployment URL (see eas.json env per profile).",
+    );
+  }
+
+  const isProductionBuild = APP_ENV === "production" || APP_ENV === "prod";
+  if (isProductionBuild && !url.includes(PRODUCTION_DEPLOYMENT)) {
+    throw new Error(
+      `[convex] Production builds must use ${PRODUCTION_DEPLOYMENT}; received an unexpected deployment URL.`,
+    );
+  }
+  if (!isProductionBuild && !url.includes(DEVELOPMENT_DEPLOYMENT)) {
+    throw new Error(
+      `[convex] Non-production builds must use ${DEVELOPMENT_DEPLOYMENT}; refusing to connect to another deployment.`,
     );
   }
 }

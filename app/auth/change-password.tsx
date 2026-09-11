@@ -20,8 +20,8 @@ import { convex } from "../../src/lib/convex";
 import { api } from "../../convex/_generated/api";
 import { getDefaultSignedInRoute } from "../../src/utils/accountRouting";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
-import registerStyles from "./register.styles";
-import styles from "./login.styles";
+import registerStyles from "../../app-shared/auth/register.styles";
+import styles from "../../app-shared/auth/login.styles";
 
 type FocusField = "current" | "password" | "confirm" | null;
 
