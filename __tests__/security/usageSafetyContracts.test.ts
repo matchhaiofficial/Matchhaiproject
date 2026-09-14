@@ -92,4 +92,62 @@ describe("Convex usage-safety contracts", () => {
       expect(source).not.toMatch(/export const (?:runLifecycleSweep|expireStaleChallenges|expireStaleBookingRequests|expireEndedPilots)[\s\S]{0,5000}\.collect\(\)/);
     }
   });
+
+  it("cancels superseded lifecycle jobs before scheduling a new deadline", () => {
+    const migrations = read("convex/migrations.ts");
+    const challenges = read("convex/teamChallenges.ts");
+    const matchrooms = read("convex/matchrooms.ts");
+    const zoneBooking = read("convex/zoneAdminBooking.ts");
+    for (const source of [migrations, challenges, matchrooms, zoneBooking]) {
+      expect(source).toContain("scheduler.cancel");
+      expect(source).toContain("expectedDueAt");
+    }
+    for (const source of [migrations, challenges]) expect(source).toContain("getSafeScheduleAt");
+    for (const source of [matchrooms, zoneBooking]) expect(source).toContain("getLifecycleScheduleAt");
+  });
+
+  it("makes pilot expiry scheduling one-shot and clears the marker on termination", () => {
+    const schema = read("convex/schema.ts");
+    const pilot = read("convex/zonePilot.ts");
+    expect(schema).toContain("pilotExpiryScheduledAt: v.optional(v.number())");
+    expect(schema).toContain("pilotExpiryScheduledFnId: v.optional(v.string())");
+    expect(pilot).toContain("Number(zone.pilotExpiryScheduledAt || 0) === endsAt");
+    expect(pilot).toContain("scheduler.cancel");
+    expect(pilot).toContain("pilotExpiryScheduledAt: undefined");
+    expect(pilot).toContain("pilotExpiryScheduledFnId: undefined");
+  });
+
+  it("requires an explicit push-delivery flag before scheduling notification actions", () => {
+    const notifications = read("convex/notifications.ts");
+    const pushPolicy = read("convex/pushDeliveryPolicy.ts");
+    const envExample = read("env/convex.env.example");
+    expect(pushPolicy).toContain('isRuntimeFlagEnabled("MATCHHAI_ENABLE_PUSH_DELIVERY")');
+    expect(notifications).toMatch(
+      /if \(!shouldSchedule \|\| !isPushDeliveryEnabled\(\)\) return false;/,
+    );
+    for (const file of ["convex/chat.ts", "convex/friendChat.ts", "convex/teamChallengeChat.ts"]) {
+      expect(read(file)).toContain("filterActivePushRecipients");
+    }
+    expect(envExample).toContain("MATCHHAI_ENABLE_PUSH_DELIVERY=0");
+  });
+
+  it("bounds merged current-client wallet history reads without disabling the legacy endpoint", () => {
+    const wallet = read("convex/wallet.ts");
+    expect(wallet).toContain("const WALLET_HISTORY_SCAN_LIMIT = 500");
+    expect(wallet).toContain(".take(WALLET_HISTORY_SCAN_LIMIT + 1)");
+    expect(wallet).toContain("truncated,");
+    expect(wallet).toMatch(/export const listHistory = query\([\s\S]*?\.collect\(\)/);
+  });
+
+  it("caps EasyPaisa's per-payment self-scheduled retry chain", () => {
+    const easypaisa = read("convex/easypaisa.ts");
+    const start = easypaisa.indexOf("export const reconcilePaymentByOrderRef");
+    const end = easypaisa.indexOf("export const reconcileStalePayments", start);
+    const worker = easypaisa.slice(start, end);
+    expect(easypaisa).toContain("const MAX_SCHEDULED_RECONCILE_RETRIES = 6");
+    expect(worker).toContain("attempt: v.optional(v.number())");
+    expect(worker).toContain("attempt < MAX_SCHEDULED_RECONCILE_RETRIES");
+    expect(worker).toContain("attempt: attempt + 1");
+    expect(worker).toContain("retryExhausted");
+  });
 });

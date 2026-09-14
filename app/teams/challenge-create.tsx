@@ -297,6 +297,8 @@ export default function TeamChallengeCreateScreen() {
     const { showToast } = useToast();
     const startCheckout = useAction((api as any).easypaisa.startCheckout);
     const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
+    const easypaisaCapability = useQuery(api.easypaisa.getCapability, {});
+    const easypaisaAvailable = easypaisaCapability?.available === true;
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -714,6 +716,14 @@ export default function TeamChallengeCreateScreen() {
 
     const handleStartEasypaisaTopup = async () => {
         if (!user?._id || !pendingCreateAfterPayment) return;
+        if (!easypaisaAvailable) {
+            showToast({
+                type: "warning",
+                title: "Easypaisa unavailable",
+                message: easypaisaCapability?.reason || "Easypaisa is unavailable. Use your existing MatchHai Wallet balance instead.",
+            });
+            return;
+        }
         const amount = Math.max(0, Math.ceil(Number(pendingCreateAfterPayment.captainPaymentAmount || 0)));
         if (amount <= 0) return;
         if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {

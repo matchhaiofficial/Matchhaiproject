@@ -932,6 +932,9 @@ async function ensureConvexUser(ctx: any, input: {
   };
 
   if (input.accountType === "player") {
+    // QA/demo players must be immediately usable across paid booking flows.
+    // This helper is only reachable through the explicitly gated demo seed.
+    base.walletBalance = 5000;
     base.hideAreasPublicly = false;
     base.hidePlatformsPublicly = false;
     base.restrictInvitesToFriends = false;
@@ -2128,12 +2131,33 @@ export const seedDemoMatchroomByIndex = internalMutation({
     const maxPlayers = matchroomMaxPlayers(game);
     const { slotsA, slotsB } = buildSlots(maxPlayers);
     const title = generateMatchroomTitle(i, String((zone as any).city || CITIES[(i - 1) % CITIES.length]), game);
+    const resourceProfile = (() => {
+      if (["cs2", "cs16", "valorant"].includes(game)) {
+        return { assetType: "pc", tier: "regular", surface: undefined, rateKey: "pc:regular" };
+      }
+      if (["fc25", "fc26", "tekken8"].includes(game)) {
+        return { assetType: "console", tier: "ps5", surface: "1v1", rateKey: "console:ps5" };
+      }
+      const ratePrefix = game === "indoor_cricket" ? "cricket" : game;
+      return { assetType: game, tier: undefined, surface: "standard", rateKey: `${ratePrefix}:standard` };
+    })();
+    const branches = Array.isArray((zone as any).branches) ? (zone as any).branches : [];
+    const branch = branches.find((candidate: any) => {
+      const pricing = candidate?.pricing;
+      if (resourceProfile.assetType === "pc") {
+        return Number(pricing?.pc?.regular?.count || 0) >= maxPlayers;
+      }
+      if (resourceProfile.assetType === "console") {
+        return Number(pricing?.console?.ps5?.count || 0) * 2 >= maxPlayers;
+      }
+      return Number(pricing?.[game]?.standard?.count || 0) > 0;
+    });
+    if (!branch?.id) return { ok: true, skipped: true, reason: "no_capacity_compatible_branch" };
     const location = `${(zone as any).venueBrandName || (zone as any).name} - ${
-      (zone as any).primaryBranch?.areaLabel || (zone as any).city || ""
+      branch.areaLabel || (zone as any).city || ""
     }`;
 
     const perPlayer = (() => {
-      const branch = Array.isArray((zone as any).branches) ? (zone as any).branches[0] : null;
       const pricing = branch?.pricing;
       if (game === "cs2" || game === "valorant") {
         const n = Number(pricing?.pc?.regular?.price);
@@ -2147,16 +2171,6 @@ export const seedDemoMatchroomByIndex = internalMutation({
       return Number.isFinite(n) && n > 0 ? Math.round(n / maxPlayers) : 500;
     })();
 
-    const resourceProfile = (() => {
-      if (["cs2", "cs16", "valorant"].includes(game)) {
-        return { assetType: "pc", tier: "regular", surface: undefined, rateKey: "pc:regular" };
-      }
-      if (["fc25", "fc26", "tekken8"].includes(game)) {
-        return { assetType: "console", tier: "ps5", surface: "1v1", rateKey: "console:ps5" };
-      }
-      const ratePrefix = game === "indoor_cricket" ? "cricket" : game;
-      return { assetType: game, tier: undefined, surface: "standard", rateKey: `${ratePrefix}:standard` };
-    })();
     const matchroomId: any = await ctx.runMutation((internal as any).matchrooms.createSeededDemo, {
       hostUid: String(host._id),
       hostName: host.username,
@@ -2185,7 +2199,7 @@ export const seedDemoMatchroomByIndex = internalMutation({
       expiresAt: startAt - 24 * 60 * 60 * 1000,
       durationMinutes: 60,
       pricing: { perPlayer, currency: DEFAULT_CURRENCY },
-      branchId: String((zone as any).primaryBranch?.id || "") || undefined,
+      branchId: String(branch.id),
       requestedResourceAssetType: resourceProfile.assetType,
       requestedResourceSurface: resourceProfile.surface,
       requestedResourceTier: resourceProfile.tier,

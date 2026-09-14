@@ -5,6 +5,8 @@ import { Id } from "./_generated/dataModel";
 import { notifySuperAdminsWithdrawalReviewNeeded, notifyZoneAdminWithdrawalRequested } from "./withdrawalNotifications";
 import { requireCurrentUser, requireSelf } from "./authz";
 
+const WALLET_HISTORY_SCAN_LIMIT = 500;
+
 async function getWalletUserRecord(
   ctx: any,
   userId?: Id<"users">,
@@ -316,14 +318,18 @@ export const listHistoryPage = query({
         .query("walletTransactions")
         .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
         .order("desc")
-        .collect(),
+        .take(WALLET_HISTORY_SCAN_LIMIT + 1),
       ctx.db
         .query("paymentTransactions")
         .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", user._id))
         .order("desc")
-        .collect(),
+        .take(WALLET_HISTORY_SCAN_LIMIT + 1),
     ]);
-    const rows = buildWalletHistoryRows(walletRows, paymentRows)
+    const truncated = walletRows.length > WALLET_HISTORY_SCAN_LIMIT || paymentRows.length > WALLET_HISTORY_SCAN_LIMIT;
+    const rows = buildWalletHistoryRows(
+      walletRows.slice(0, WALLET_HISTORY_SCAN_LIMIT),
+      paymentRows.slice(0, WALLET_HISTORY_SCAN_LIMIT),
+    )
       .filter((row) => matchesWalletHistoryFilters(row, args.filters));
     const page = rows.slice(offset, offset + limit);
     const nextOffset = offset + page.length;
@@ -332,7 +338,10 @@ export const listHistoryPage = query({
       isDone: nextOffset >= rows.length,
       continueCursor: nextOffset >= rows.length ? null : String(nextOffset),
       total: rows.length,
-      limitation: "walletTransactions and paymentTransactions are merged after user-scoped reads to preserve existing transaction semantics.",
+      truncated,
+      limitation: truncated
+        ? `History is limited to the most recent ${WALLET_HISTORY_SCAN_LIMIT} records per source.`
+        : "walletTransactions and paymentTransactions are merged after user-scoped reads to preserve existing transaction semantics.",
     };
   },
 });
@@ -570,7 +579,7 @@ export const addFunds = internalMutation({
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", reference))
-      .collect();
+      .take(1);
     if (existing.length > 0) {
       // Idempotent no-op: this credit was already applied under the same reference.
       return { newBalance: user.walletBalance ?? 0 };
@@ -618,7 +627,7 @@ export const holdFunds = internalMutation({
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
-      .collect();
+      .take(1);
     if (existing.length > 0) {
       return {
         newBalance: Number(user.walletBalance || 0),
@@ -675,7 +684,7 @@ export const releaseHeldFunds = internalMutation({
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
-      .collect();
+      .take(1);
     if (existing.length > 0) {
       return {
         newBalance: Number(user.walletBalance || 0),
@@ -737,7 +746,7 @@ export const captureHeldFunds = internalMutation({
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
-      .collect();
+      .take(1);
     if (existing.length > 0) {
       return {
         newBalance: Number(user.walletBalance || 0),
@@ -795,7 +804,7 @@ export const refundFunds = internalMutation({
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
-      .collect();
+      .take(1);
     if (existing.length > 0) {
       return {
         newBalance: Number(user.walletBalance || 0),
@@ -861,7 +870,7 @@ export async function deductWalletFunds(
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q: any) => q.eq("reference", reference))
-      .collect();
+      .take(1);
     if (existing.length > 0) {
       return { newBalance: user.walletBalance ?? 0 };
     }

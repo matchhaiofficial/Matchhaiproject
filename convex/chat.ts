@@ -1,11 +1,18 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { filterActivePushRecipients } from "./pushDeliveryPolicy";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys } from "./chatIdentity";
 import { markUserPresent } from "./presence";
 import { assertKycAccessAllowed } from "./kycGate";
+import {
+  CHAT_LIST_LIMIT,
+  MAX_CHATROOM_MEMBER_ROWS,
+  assertChatroomMemberRowsBounded,
+  createParticipantProfileCache,
+} from "./chatListHelpers";
 
 type UserIdString = string;
 
@@ -205,10 +212,10 @@ async function ensureChatroomMember(ctx: any, chatroomId: any, userId: UserIdStr
 
 async function syncChatroomMembers(ctx: any, chatroomId: any, participantUids: UserIdString[], now: number) {
   const normalized = normalizeChatUserKeys(participantUids || []);
-  const existingMembers = await ctx.db
+  const existingMembers = assertChatroomMemberRowsBounded(await ctx.db
     .query("chatroomMembers")
     .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroomId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   const existingByUserId = new Map(existingMembers.map((member: any) => [String(member.userId), member]));
   for (const userId of normalized) {
@@ -231,11 +238,16 @@ async function syncChatroomMembers(ctx: any, chatroomId: any, participantUids: U
   }
 }
 
-async function updateUnreadCounts(ctx: any, chatroomId: any, senderUid: UserIdString, now: number) {
-  const members = await ctx.db
+async function updateUnreadCounts(
+  ctx: any,
+  chatroomId: any,
+  senderUid: UserIdString,
+  now: number,
+) {
+  const members = assertChatroomMemberRowsBounded(await ctx.db
     .query("chatroomMembers")
     .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroomId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   for (const member of members) {
     if (String(member.userId) === String(senderUid)) {
@@ -361,10 +373,16 @@ export const listForUser = query({
   handler: async (ctx) => {
     const actorId = await getMatchroomActorUserId(ctx);
 
-    const memberships = await ctx.db
+    const recentMemberships = await ctx.db
       .query("chatroomMembers")
-      .withIndex("by_userId", (q) => q.eq("userId", String(actorId)))
-      .collect();
+      .withIndex("by_userId_and_updatedAt", (q) => q.eq("userId", String(actorId)))
+      .order("desc")
+      .take(CHAT_LIST_LIMIT);
+    const memberships = Array.from(
+      new Map(recentMemberships.map((membership: any) => [String(membership.chatroomId), membership])).values(),
+    );
+
+    const loadParticipantProfiles = createParticipantProfileCache(ctx);
 
     return await Promise.all(
       memberships.map(async (membership: any) => {
@@ -374,6 +392,8 @@ export const listForUser = query({
         if (chatroom.type === "dm" || !chatroom.matchroomId) return null;
 
         const matchroom = (await ctx.db.get(chatroom.matchroomId)) as any;
+        const participantProfiles = await loadParticipantProfiles(chatroom.participantUids || [], "Player");
+        const participants = participantProfiles;
         return {
           id: chatroom._id,
           kind: "matchroom" as const,
@@ -381,12 +401,14 @@ export const listForUser = query({
           title: matchroom?.title || "Matchroom chat",
           subtitle: matchroom?.location || matchroom?.game || "Match chat",
           participantUids: chatroom.participantUids,
+          participants,
+          avatarURL: participants.find((participant: any) => participant.uid !== String(actorId))?.photoURL || null,
           lastMessage: chatroom.lastMessage || null,
           updatedAt: chatroom.updatedAt || chatroom.createdAt,
           unreadCount: Number(membership.unreadCount || 0),
         };
       })
-    ).then((rows) => rows.filter(Boolean));
+    ).then((rows) => rows.filter(Boolean).sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
   },
 });
 
@@ -516,9 +538,9 @@ export const sendMessage = mutation({
     await updateUnreadCounts(ctx, args.chatroomId, String(userId), now);
 
     // Schedule push notification to other participants
-    const recipientIds = (chatroom.participantUids || [])
+    const recipientIds = await filterActivePushRecipients(ctx, (chatroom.participantUids || [])
       .filter((uid: string) => String(uid) !== String(userId))
-      .map((uid: string) => uid as Id<"users">);
+      .map((uid: string) => uid as Id<"users">));
     if (recipientIds.length > 0) {
       await ctx.scheduler.runAfter(0, (internal as any).pushNotificationsActions.sendChatPush, {
         senderName,
@@ -604,14 +626,14 @@ export const sendMessageToMatchroom = mutation({
       updatedAt: now,
     });
 
+    const participantUids = getMatchroomParticipantUids(matchroom);
     await ensureChatroomMember(ctx, chatroom._id, String(userId), now);
     await updateUnreadCounts(ctx, chatroom._id, String(userId), now);
 
     // Schedule push notification to other participants
-    const participantUids = getMatchroomParticipantUids(matchroom);
-    const recipientIds = participantUids
+    const recipientIds = await filterActivePushRecipients(ctx, participantUids
       .filter((uid) => String(uid) !== String(userId))
-      .map((uid) => uid as Id<"users">);
+      .map((uid) => uid as Id<"users">));
     if (recipientIds.length > 0) {
       await ctx.scheduler.runAfter(0, (internal as any).pushNotificationsActions.sendChatPush, {
         senderName,

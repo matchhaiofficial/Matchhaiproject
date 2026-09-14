@@ -124,10 +124,11 @@ There are **three** independent seeding mechanisms. Know which one you need.
 
 ## 3. Seeding staging
 
-> Confirm `CONVEX_DEPLOYMENT=dev:acrobatic-bison-271` (development) first. See checklist.
+> Confirm `CONVEX_DEPLOYMENT=dev:striped-dog-623` (QA) first. See checklist.
 
-Set the staging deployment env once (Convex dashboard → staging deployment):
-`DEMO_SEED_ENABLED=true` and `DEMO_SEED_KEY=<secret>`. Load local env from
+Keep `DEMO_SEED_KEY=<secret>` on the QA deployment. Set
+`DEMO_SEED_ENABLED=true` only for the duration of a seed command and restore it
+to `false` immediately afterward. Load local env from
 `.env.test` (or `.env.local`) so `EXPO_PUBLIC_CONVEX_URL` / `CONVEX_DEPLOYMENT`
 resolve.
 
@@ -260,11 +261,11 @@ field names — keep this list in mind when writing E2E assertions.
 
 Before running ANY seed or cleanup command:
 
-- [ ] `echo $env:CONVEX_DEPLOYMENT` (PowerShell) shows the **staging** value
-      (`dev:acrobatic-bison-271`), never a `prod:` deployment.
-- [ ] `EXPO_PUBLIC_CONVEX_URL` points at `https://acrobatic-bison-271.convex.cloud`.
-- [ ] `DEMO_SEED_ENABLED=true` and `DEMO_SEED_KEY` are set on the **staging**
-      Convex deployment (not production).
+- [ ] `echo $env:CONVEX_DEPLOYMENT` (PowerShell) shows the **QA** value
+      (`dev:striped-dog-623`), never a `prod:` deployment.
+- [ ] `EXPO_PUBLIC_CONVEX_URL` points at `https://striped-dog-623.convex.cloud`.
+- [ ] `DEMO_SEED_KEY` is set on QA, and `DEMO_SEED_ENABLED=true` is enabled only
+      around the seed command and restored to `false` afterward.
 - [ ] No real secrets are written to any committed file — only `.env.test`
       (git-ignored) holds filled values.
 - [ ] For full wipes, you intend to destroy ALL data on the target deployment

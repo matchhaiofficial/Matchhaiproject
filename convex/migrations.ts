@@ -14,6 +14,16 @@ export const migrations = new Migrations(components.migrations, {
   defaultBatchSize: 50,
 });
 
+async function cancelPriorSchedule(ctx: any, scheduledFnId: unknown) {
+  if (!scheduledFnId) return;
+  try {
+    await ctx.scheduler.cancel(scheduledFnId as any);
+  } catch (_error) {
+    // A legacy row may already be running or completed. The new callback
+    // still carries the expected deadline and will reject stale work.
+  }
+}
+
 export const backfillMatchroomLifecycleDueAt = migrations.define({
   table: "matchrooms",
   migrateOne: (_ctx, room) => {
@@ -78,6 +88,7 @@ export const scheduleExistingMatchroomLifecycles: any = migrations.define({
       return room.lifecycleDueAt === computedDueAt ? undefined : { lifecycleDueAt: computedDueAt };
     }
     if (room.lifecycleScheduledAt === lifecycleDueAt && room.lifecycleScheduledFnId) return;
+    await cancelPriorSchedule(ctx, room.lifecycleScheduledFnId);
     const scheduledId: any = await ctx.scheduler.runAt(
       getLifecycleScheduleAt(lifecycleDueAt)!,
       (internal as any).matchrooms.processScheduledLifecycle,
@@ -104,6 +115,7 @@ export const scheduleExistingTeamChallengeLifecycles: any = migrations.define({
       return challenge.lifecycleDueAt === computedDueAt ? undefined : { lifecycleDueAt: computedDueAt };
     }
     if (challenge.lifecycleScheduledAt === lifecycleDueAt && challenge.lifecycleScheduledFnId) return;
+    await cancelPriorSchedule(ctx, challenge.lifecycleScheduledFnId);
     const scheduledId: any = await ctx.scheduler.runAt(
       getSafeScheduleAt(lifecycleDueAt)!,
       (internal as any).teamChallenges.processScheduledExpiry,
@@ -130,6 +142,7 @@ export const reschedulePendingTeamChallengeAcceptDeadlines: any = migrations.def
     const lifecycleDueAt = Number(getTeamChallengeLifecycleDueAt(challenge) || 0);
     if (!Number.isFinite(lifecycleDueAt) || lifecycleDueAt <= 0 || lifecycleDueAt === Number.MAX_SAFE_INTEGER) return;
     if (challenge.lifecycleScheduledAt === lifecycleDueAt && challenge.lifecycleScheduledFnId) return;
+    await cancelPriorSchedule(ctx, challenge.lifecycleScheduledFnId);
     const scheduledId: any = await ctx.scheduler.runAt(
       getSafeScheduleAt(lifecycleDueAt)!,
       (internal as any).teamChallenges.processScheduledExpiry,
@@ -154,6 +167,7 @@ export const scheduleExistingZoneOfferExpiries = migrations.define({
     const expiresAt = Number(offer.expiresAt || offer.responseExpiresAt || 0);
     if (!Number.isFinite(expiresAt) || expiresAt <= 0) return;
     if (Number(offer.expiryScheduledAt || 0) === expiresAt && offer.expiryScheduledFnId) return;
+    await cancelPriorSchedule(ctx, offer.expiryScheduledFnId);
     const expiryScheduledFnId: any = await ctx.scheduler.runAt(
       getSafeScheduleAt(expiresAt)!,
       offer.requestKind === "broadcast_fanout"

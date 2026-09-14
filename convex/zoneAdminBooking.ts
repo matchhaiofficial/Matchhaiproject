@@ -703,8 +703,29 @@ function getCanonicalZoneBranch(zone: any, branchId: string) {
 async function scheduleMatchroomLifecycle(ctx: any, matchroomId: any) {
   const room = await ctx.db.get(matchroomId);
   const dueAt = Number(room?.lifecycleDueAt || 0);
-  if (!room || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
+  if (!room) return;
+  if (!Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) {
+    if (room.lifecycleScheduledFnId) {
+      try {
+        await ctx.scheduler.cancel(room.lifecycleScheduledFnId as any);
+      } catch (_error) {
+        // A completed/running callback cannot be cancelled.
+      }
+      await ctx.db.patch(room._id, {
+        lifecycleScheduledAt: undefined,
+        lifecycleScheduledFnId: undefined,
+      });
+    }
+    return;
+  }
   if (Number(room.lifecycleScheduledAt || 0) === dueAt && room.lifecycleScheduledFnId) return;
+  if (room.lifecycleScheduledFnId) {
+    try {
+      await ctx.scheduler.cancel(room.lifecycleScheduledFnId as any);
+    } catch (_error) {
+      // A completed/running callback cannot be cancelled; expectedDueAt makes it a safe no-op.
+    }
+  }
   const scheduledId = await ctx.scheduler.runAt(
     getLifecycleScheduleAt(dueAt)!,
     internal.matchrooms.processScheduledLifecycle,

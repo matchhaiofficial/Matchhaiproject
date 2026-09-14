@@ -1399,6 +1399,7 @@ export default defineSchema({
   })
     .index("by_chatId", ["chatId"])
     .index("by_userId", ["userId"])
+    .index("by_userId_and_updatedAt", ["userId", "updatedAt"])
     .index("by_chatId_and_userId", ["chatId", "userId"]),
 
   // ============================================
@@ -1509,6 +1510,11 @@ export default defineSchema({
     pilotStartedAt: v.optional(v.number()),
     pilotEndsAt: v.optional(v.number()),
     pilotEndedAt: v.optional(v.number()),
+    // Idempotency marker for the one-shot pilot expiry job. Keeping the
+    // deadline and scheduler id on the zone prevents recovery/backfill runs
+    // from enqueueing duplicate jobs for the same pilot.
+    pilotExpiryScheduledAt: v.optional(v.number()),
+    pilotExpiryScheduledFnId: v.optional(v.string()),
     pilotPayoutRate: v.optional(v.number()),
     normalPayoutRate: v.optional(v.number()),
     migration: v.optional(v.object({
@@ -1863,6 +1869,7 @@ export default defineSchema({
   })
     .index("by_chatroomId", ["chatroomId"])
     .index("by_userId", ["userId"])
+    .index("by_userId_and_updatedAt", ["userId", "updatedAt"])
     .index("by_chatroomId_and_userId", ["chatroomId", "userId"]),
 
   // ============================================

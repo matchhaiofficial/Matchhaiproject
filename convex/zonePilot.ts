@@ -17,6 +17,8 @@ async function endPilotIfDue(ctx: any, zone: any, expectedEndsAt: number, now = 
   await ctx.db.patch(zone._id, {
     pilotStatus: "ended",
     pilotEndedAt: now,
+    pilotExpiryScheduledAt: undefined,
+    pilotExpiryScheduledFnId: undefined,
     updatedAt: now,
   });
   if (zone.ownerUid) {
@@ -55,6 +57,42 @@ export const processScheduledPilotExpiry = internalMutation({
   },
 });
 
+async function schedulePilotExpiry(ctx: any, zone: any) {
+  const endsAt = Number(zone?.pilotEndsAt || 0);
+  if (!zone?._id || zone.pilotStatus !== "active" || !Number.isFinite(endsAt) || endsAt <= 0) {
+    return false;
+  }
+  if (
+    Number(zone.pilotExpiryScheduledAt || 0) === endsAt
+    && zone.pilotExpiryScheduledFnId
+  ) {
+    return false;
+  }
+
+  // A changed pilot deadline supersedes the old one. Cancellation is best
+  // effort because a previously-fired/completed scheduler row cannot be
+  // cancelled; the expected deadline guard makes such a stale callback a
+  // harmless no-op.
+  if (zone.pilotExpiryScheduledFnId) {
+    try {
+      await ctx.scheduler.cancel(zone.pilotExpiryScheduledFnId as any);
+    } catch (_error) {
+      // The old job may already be running or completed.
+    }
+  }
+
+  const scheduledId = await ctx.scheduler.runAt(
+    getSafeScheduleAt(endsAt)!,
+    internal.zonePilot.processScheduledPilotExpiry,
+    { zoneId: zone._id, expectedEndsAt: endsAt },
+  );
+  await ctx.db.patch(zone._id, {
+    pilotExpiryScheduledAt: endsAt,
+    pilotExpiryScheduledFnId: String(scheduledId),
+  });
+  return true;
+}
+
 export const scheduleActivePilotExpiries = internalMutation({
   args: {
     batchSize: v.optional(v.number()),
@@ -70,11 +108,7 @@ export const scheduleActivePilotExpiries = internalMutation({
       });
     for (const zone of page.page) {
       if (typeof zone.pilotEndsAt !== "number") continue;
-      await ctx.scheduler.runAt(
-        getSafeScheduleAt(zone.pilotEndsAt)!,
-        internal.zonePilot.processScheduledPilotExpiry,
-        { zoneId: zone._id, expectedEndsAt: zone.pilotEndsAt },
-      );
+      await schedulePilotExpiry(ctx, zone);
     }
     if (!page.isDone) {
       if (!page.continueCursor || page.continueCursor === args.cursor) {

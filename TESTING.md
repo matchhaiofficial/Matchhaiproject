@@ -50,17 +50,18 @@ npm run e2e:maestro            # all flows in .maestro/
 npm run e2e:maestro:android
 npm run e2e:maestro:ios
 ```
-Requires Maestro installed + an EAS **development**/**preview** build (staging
-Convex). Seed staging first (see TEST_DATA.md). Credentials come from a
-gitignored `.maestro/.env.e2e` (copy `.maestro/.env.e2e.example`).
+Requires Maestro installed plus a native test build, which is currently
+deferred. QA is performed through Expo Go against the local QA Convex
+configuration; the repository currently exposes only the production EAS
+profile. Seed staging first (see TEST_DATA.md). Credentials come from a
+gitignored `.maestro/.env.e2e` (copy `.maestro/.env.e2e.example`) when native
+E2E testing is re-enabled.
 
-### Build for E2E (staging only)
-```bash
-eas build --profile development --platform android   # or ios
-# or preview (apk, internal):
-eas build --profile preview --platform android
-```
-Do **not** build the `production` profile here.
+### Build for E2E (deferred)
+
+No development or preview EAS profile is active. Do not build the `production`
+profile for staging E2E. Re-enable a reviewed native QA profile before using
+Maestro against staging.
 
 ## Load testing (k6)
 ```bash

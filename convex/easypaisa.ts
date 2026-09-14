@@ -25,14 +25,17 @@ import {
 } from "./maintenanceDue";
 import { isMaintenanceJobEnabled } from "./runtimeEnv";
 import { captureServerAnalytics } from "./posthog";
+import { resolveEasypaisaCapability } from "./easypaisaConfig";
 
-const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging")
+const EASYPAISA_CAPABILITY = resolveEasypaisaCapability(process.env);
+const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "")
   .trim()
   .toLowerCase();
 const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest")
   .trim()
   .toLowerCase();
-const EASYPAISA_HOSTED_FALLBACK_ENABLED = String(process.env.EASYPAISA_HOSTED_FALLBACK_ENABLED || "1").trim() !== "0";
+const EASYPAISA_HOSTED_FALLBACK_ENABLED = EASYPAISA_CAPABILITY.hostedFallbackEnabled;
+const MAX_SCHEDULED_RECONCILE_RETRIES = 6;
 const EASYPAISA_INDEX_URL =
   process.env.EASYPAISA_INDEX_URL ||
   (EASYPAISA_ENV === "production"
@@ -175,6 +178,7 @@ function getEmailDomain(email?: string | null) {
 }
 
 function ensurePaymentConfig() {
+  ensureEasypaisaAvailable();
   if (!CONVEX_SITE_URL) {
     throw new Error("Payment callbacks are not configured. Set EXPO_PUBLIC_CONVEX_SITE_URL first.");
   }
@@ -182,6 +186,23 @@ function ensurePaymentConfig() {
     throw new Error("Easypaisa store ID is not configured.");
   }
 }
+
+function ensureEasypaisaAvailable() {
+  if (!EASYPAISA_CAPABILITY.available) {
+    throw new Error(EASYPAISA_CAPABILITY.reason);
+  }
+}
+
+export const getCapability = query({
+  args: {},
+  returns: v.object({
+    available: v.boolean(),
+    environment: v.union(v.literal("production"), v.literal("staging"), v.literal("unconfigured")),
+    hostedFallbackEnabled: v.boolean(),
+    reason: v.string(),
+  }),
+  handler: async () => EASYPAISA_CAPABILITY,
+});
 
 function normalizePhoneForGateway(raw?: string | null) {
   const digits = String(raw || "").replace(/\D/g, "");
@@ -1974,6 +1995,7 @@ export const startCheckout = action({
 // the client-driven sync action and the stale-payment reconciler cron so both
 // go through the identical, audited safe path.
 async function performProviderInquiryAndApply(ctx: any, row: any) {
+  ensureEasypaisaAvailable();
   const inquiryResult: any = await ctx.runAction((internal as any).easypaisaNode.inquireRestTransaction, {
     orderId: row.orderRefNum,
     storeId: EASYPAISA_STORE_ID,
@@ -2127,29 +2149,45 @@ export const claimPaymentForReconciliation = internalMutation({
 });
 
 export const reconcilePaymentByOrderRef = internalAction({
-  args: { orderRefNum: v.string() },
+  args: {
+    orderRefNum: v.string(),
+    attempt: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
+    if (!EASYPAISA_CAPABILITY.available) {
+      return { ok: true, skipped: true, reason: "provider_disabled" };
+    }
+    const attempt = Math.max(0, Math.floor(Number(args.attempt || 0)));
     const row: any = await ctx.runMutation((internal as any).easypaisa.claimPaymentForReconciliation, {
       orderRefNum: args.orderRefNum,
     });
     if (!row) return { ok: true, skipped: true };
     try {
       const result: any = await performProviderInquiryAndApply(ctx, row);
-      if (result?.shouldRetry) {
+      if (result?.shouldRetry && attempt < MAX_SCHEDULED_RECONCILE_RETRIES) {
         await ctx.scheduler.runAfter(
           STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
           internal.easypaisa.reconcilePaymentByOrderRef,
-          { orderRefNum: args.orderRefNum },
+          { orderRefNum: args.orderRefNum, attempt: attempt + 1 },
         );
       }
-      return { ok: true, status: result?.status || null };
+      return {
+        ok: true,
+        status: result?.status || null,
+        retryExhausted: Boolean(result?.shouldRetry) && attempt >= MAX_SCHEDULED_RECONCILE_RETRIES,
+      };
     } catch (error) {
-      await ctx.scheduler.runAfter(STALE_PAYMENT_RECONCILE_COOLDOWN_MS, internal.easypaisa.reconcilePaymentByOrderRef, {
-        orderRefNum: args.orderRefNum,
-      });
+      if (attempt < MAX_SCHEDULED_RECONCILE_RETRIES) {
+        await ctx.scheduler.runAfter(
+          STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
+          internal.easypaisa.reconcilePaymentByOrderRef,
+          { orderRefNum: args.orderRefNum, attempt: attempt + 1 },
+        );
+      }
       return {
         ok: false,
         reason: error instanceof Error ? error.message : String(error),
+        retryExhausted: attempt >= MAX_SCHEDULED_RECONCILE_RETRIES,
       };
     }
   },
@@ -3142,6 +3180,9 @@ export const applyProviderUpdate = internalMutation({
 });
 
 export const easypaisaCheckoutPage = httpAction(async (ctx, request) => {
+  if (!EASYPAISA_CAPABILITY.available || !EASYPAISA_HOSTED_FALLBACK_ENABLED) {
+    return new Response("Easypaisa hosted checkout is unavailable.", { status: 410 });
+  }
   const url = new URL(request.url);
   const token = url.searchParams.get("token") || "";
   const session: any = await ctx.runQuery(internal.easypaisa.getCheckoutSessionByToken, { token });
@@ -3225,6 +3266,9 @@ export const easypaisaCheckoutPage = httpAction(async (ctx, request) => {
 });
 
 export const easypaisaTokenHandler = httpAction(async (ctx, request) => {
+  if (!EASYPAISA_CAPABILITY.available || !EASYPAISA_HOSTED_FALLBACK_ENABLED) {
+    return new Response("Easypaisa hosted checkout is unavailable.", { status: 410 });
+  }
   const url = new URL(request.url);
   const token = url.searchParams.get("token") || "";
   const authToken = url.searchParams.get("auth_token") || "";
@@ -3266,6 +3310,9 @@ export const easypaisaTokenHandler = httpAction(async (ctx, request) => {
 });
 
 export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
+  if (!EASYPAISA_CAPABILITY.available || !EASYPAISA_HOSTED_FALLBACK_ENABLED) {
+    return new Response("Easypaisa hosted checkout is unavailable.", { status: 410 });
+  }
   const url = new URL(request.url);
   const token = url.searchParams.get("token") || "";
   const formData: any = request.method === "POST" ? await request.formData() : null;
@@ -3414,6 +3461,9 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
 });
 
 export const easypaisaIpnHandler = httpAction(async (ctx, request) => {
+  if (!EASYPAISA_CAPABILITY.available) {
+    return new Response("Easypaisa is unavailable.", { status: 410 });
+  }
   const url = new URL(request.url);
   const ipnUrl = url.searchParams.get("url") || "";
   const token = url.searchParams.get("token") || "";

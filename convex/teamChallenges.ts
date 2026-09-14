@@ -56,6 +56,16 @@ async function scheduleNextTeamChallengeLifecycle(ctx: any, challenge: any) {
   const dueAt = Number(challenge?.lifecycleDueAt || 0);
   if (!challenge?._id || !Number.isFinite(dueAt) || dueAt <= 0 || dueAt === Number.MAX_SAFE_INTEGER) return;
   if (Number(challenge.lifecycleScheduledAt || 0) === dueAt && challenge.lifecycleScheduledFnId) return;
+  if (challenge.lifecycleScheduledFnId) {
+    // A changed deadline supersedes the previous one. It may already have
+    // completed, so cancellation is deliberately best effort; the callback's
+    // expectedDueAt check remains the correctness guard for stale jobs.
+    try {
+      await ctx.scheduler.cancel(challenge.lifecycleScheduledFnId as any);
+    } catch (_error) {
+      // Convex rejects cancellation of a completed/running scheduled row.
+    }
+  }
   const scheduledId = await ctx.scheduler.runAt(
     getSafeScheduleAt(dueAt)!,
     internal.teamChallenges.processScheduledExpiry,
@@ -2110,6 +2120,9 @@ export const processScheduledExpiry = internalMutation({
     }
     await ctx.db.patch(challenge._id, { lifecycleScheduledAt: undefined, lifecycleScheduledFnId: undefined });
     if (challenge.matchroomId || ["admin_pending", "completed", "rejected", "expired"].includes(challenge.status)) {
+      if (challenge.lifecycleDueAt !== undefined) {
+        await ctx.db.patch(challenge._id, { lifecycleDueAt: undefined });
+      }
       return { changed: false, terminal: true };
     }
     const now = Date.now();

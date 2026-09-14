@@ -27,6 +27,13 @@ alarm must either change state, move to a future time, or stop.
   jobs.
 - Notification dedupe reads are newest-first and bounded. Better Auth seed
   pagination aborts if its cursor stops advancing.
+- Native push delivery now requires `MATCHHAI_ENABLE_PUSH_DELIVERY=1` and an
+  active recipient device before a scheduled action is created. QA keeps the
+  flag off.
+- EasyPaisa's per-payment self-scheduled chain stops after six retries; later
+  manual or explicitly enabled recovery-cron reconciliation stays idempotent.
+- When a matchroom deadline changes, both scheduling entry points cancel the
+  superseded pending job before storing the replacement.
 - The always-mounted notification bridge no longer subscribes to the broad home
   dashboard query. Friend presence was split from that query; heartbeats run
   every 90 seconds and duplicate writes inside 30 seconds are ignored.
@@ -39,9 +46,9 @@ alarm must either change state, move to a future time, or stop.
 | Team-challenge expiry | One job per deadline | Terminal status or recomputed future deadline |
 | Zone offer / broadcast expiry | One job per offer/window | Status or generation/deadline check; migration marker prevents duplicates |
 | Zone pilot expiry | One terminal job | Active pilot becomes ended; recovery cron is gated and batched |
-| Payment reconciliation | Delayed retry | 30-minute cooldown, seven-day maximum age, gated batch cron |
+| Payment reconciliation | Delayed retry | At most six self-scheduled retries at a 30-minute cooldown; seven-day recovery eligibility; batch cron separately gated |
 | Account deletion / index backfills | Explicit batch worker | Paginated, capped batches with cursor/progress checks |
-| Push fan-out | User/domain event | Recipient batches are capped; no self-running idle poller |
+| Push fan-out | User/domain event | Explicit environment flag, active-device preflight, capped recipient batches; no idle poller |
 | Presence | Foreground client heartbeat | 90-second client interval plus server write throttle |
 
 No other infinite server-side loop was found. Broad admin/reporting queries and
@@ -56,13 +63,17 @@ Run `npm run validate`. It includes Jest contracts/unit/UI tests and the
 in memory, advances fake time, and verifies one due job becomes exactly one
 future job.
 
-The cloud development deployment is quota-stopped, so live scheduler, multi-user,
+Fresh QA deployment `striped-dog-623` is healthy and has zero cron jobs. After
+seeding it contained 197 scheduler rows: 157 completed push attempts from the
+pre-circuit-breaker seed, 32 completed area-notification batches, and eight
+legitimate future matchroom lifecycle jobs (one per room). A later observation
+showed the same total and pending set, so no idle chain was running. Multi-user,
 provider, and device verification remains outstanding. Do not deploy production
-or run scheduling migrations until development capacity is restored (or a local
-Convex backend is used), the full QA matrix passes, and usage is observed during
-a small canary. Never enable all recovery jobs simultaneously.
+until the full QA matrix and active usage canary pass. Never enable all recovery
+jobs simultaneously.
 
-Development circuit breakers configured on 2026-09-11:
+Circuit breakers recorded for the former development deployment on 2026-09-11
+must not be assumed to apply to the fresh QA project:
 
 - function calls: disable at 15,000 per day;
 - database I/O: disable at 1 GB per day (the CLI only accepts whole native
@@ -73,9 +84,7 @@ monitor the dashboard during canaries instead of relying on warning email.
 
 ## Recovery
 
-The code fix cannot restore consumed quota. Options are the monthly reset,
-upgrading temporarily, or asking Convex support for assistance. When access
-returns: deploy only to `acrobatic-bison-271`, cancel obsolete pending lifecycle
-jobs if present, run a one-record canary, confirm function-call and database-I/O
-rates remain flat, then expand gradually. Production `nautical-ibex-721` remains
-untouched.
+The code fix cannot restore consumed quota. Continue deploying only to
+`striped-dog-623` during QA. Run a one-record active canary, confirm function-call
+and database-I/O rates remain flat, then expand gradually. The old production
+deployment `nautical-ibex-721` remains untouched.

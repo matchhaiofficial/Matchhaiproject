@@ -184,8 +184,11 @@ export default StyleSheet.create({
     justifyContent: "space-between",
     gap: SPACING.sm,
   },
-  transactionFilterSummary: {
+  transactionFilterCopy: {
     flex: 1,
+    gap: 2,
+  },
+  transactionFilterSummary: {
     color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: 12,

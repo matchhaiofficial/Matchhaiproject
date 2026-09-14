@@ -92,6 +92,10 @@ export default StyleSheet.create({
         borderColor: COLORS.accent,
         backgroundColor: COLORS.accent + '12',
     },
+    methodOptionDisabled: {
+        opacity: 0.58,
+        borderColor: COLORS.inputBorder,
+    },
     methodIcon: {
         width: 44,
         height: 44,

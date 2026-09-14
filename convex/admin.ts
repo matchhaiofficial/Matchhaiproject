@@ -14,6 +14,8 @@ import {
   isAccountSuspensionActive,
 } from "./accountStatusPolicy";
 import { interruptAccountDeletionForIncomingFunds } from "./wallet";
+import { getSafeScheduleAt } from "./schedulingSafety";
+import { assertCanManuallyVerifyKyc } from "./adminKycPolicy";
 import {
   SUPER_ADMIN_ROLE,
   LEGACY_SUPER_ADMIN_ROLE,
@@ -1118,6 +1120,7 @@ export const manuallyVerifyIdentityVerification = mutation({
     if (!verification) throw new Error("Identity verification not found.");
     const user = await ctx.db.get(verification.userId);
     if (!user) throw new Error("User profile not found.");
+    assertCanManuallyVerifyKyc(String(admin.profile._id), String(verification.userId));
 
     const now = Date.now();
     const safeReason = reason.slice(0, 240);
@@ -2983,11 +2986,15 @@ export const setZoneStatus = mutation({
 
     await ctx.db.patch(args.zoneId, patch);
     if (shouldStartPilot && typeof patch.pilotEndsAt === "number") {
-      await ctx.scheduler.runAt(
-        patch.pilotEndsAt,
+      const pilotExpiryScheduledFnId = await ctx.scheduler.runAt(
+        getSafeScheduleAt(patch.pilotEndsAt)!,
         internal.zonePilot.processScheduledPilotExpiry,
         { zoneId: args.zoneId, expectedEndsAt: patch.pilotEndsAt },
       );
+      await ctx.db.patch(args.zoneId, {
+        pilotExpiryScheduledAt: patch.pilotEndsAt,
+        pilotExpiryScheduledFnId: String(pilotExpiryScheduledFnId),
+      });
     }
     const nextStatus = String((patch.status || zone.status) || "pending-review");
     if (nextStatus === "active" && Number(zone.scheduleIndexVersion || 0) < 1) {
@@ -3127,11 +3134,15 @@ export const retryZoneMigration = mutation({
       updatedAt: now,
     });
     if (shouldStartPilot && typeof pilotEndsAt === "number") {
-      await ctx.scheduler.runAt(
-        pilotEndsAt,
+      const pilotExpiryScheduledFnId = await ctx.scheduler.runAt(
+        getSafeScheduleAt(pilotEndsAt)!,
         internal.zonePilot.processScheduledPilotExpiry,
         { zoneId: args.zoneId, expectedEndsAt: pilotEndsAt },
       );
+      await ctx.db.patch(args.zoneId, {
+        pilotExpiryScheduledAt: pilotEndsAt,
+        pilotExpiryScheduledFnId: String(pilotExpiryScheduledFnId),
+      });
       if (zone.ownerUid) {
         await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
           type: "zone.pilot_started",
