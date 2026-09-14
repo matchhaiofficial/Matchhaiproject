@@ -3537,6 +3537,7 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
         isDemo: true,
         seedSource: KARACHI_REALISTIC_SEED_SOURCE,
         resourceModelVersion: 0,
+        operatingHours: createDefaultBranchOperatingHours(),
       };
     });
 
@@ -3761,6 +3762,43 @@ export const seedKarachiRealisticDemo = action({
       password: KARACHI_REALISTIC_PASSWORD,
       seedSource: KARACHI_REALISTIC_SEED_SOURCE,
     };
+  },
+});
+
+export const repairKarachiRealisticOperatingHours = mutation({
+  args: { seedKey: v.string() },
+  returns: v.object({
+    scannedZones: v.number(),
+    updatedZones: v.number(),
+    updatedBranches: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const runtime = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
+    if (!["qa", "development", "dev", "local", "test"].includes(runtime)) {
+      throw new Error("Operating-hours seed repair is restricted to QA/development runtimes.");
+    }
+    const zones = await ctx.db
+      .query("zones")
+      .withIndex("by_seedSource", (q) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+      .take(100);
+
+    let updatedZones = 0;
+    let updatedBranches = 0;
+    for (const zone of zones) {
+      let changed = false;
+      const branches = (zone.branches || []).map((branch: any) => {
+        if (branch?.operatingHours) return branch;
+        changed = true;
+        updatedBranches += 1;
+        return { ...branch, operatingHours: createDefaultBranchOperatingHours() };
+      });
+      if (!changed) continue;
+      await ctx.db.patch(zone._id, { branches, updatedAt: Date.now() });
+      updatedZones += 1;
+    }
+
+    return { scannedZones: zones.length, updatedZones, updatedBranches };
   },
 });
 

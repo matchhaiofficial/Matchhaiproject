@@ -60,6 +60,7 @@ import type * as psnTokenCache from "../psnTokenCache.js";
 import type * as pushDeliveryPolicy from "../pushDeliveryPolicy.js";
 import type * as pushNotifications from "../pushNotifications.js";
 import type * as pushNotificationsActions from "../pushNotificationsActions.js";
+import type * as qaControlSeed from "../qaControlSeed.js";
 import type * as ratingEngine from "../ratingEngine.js";
 import type * as reports from "../reports.js";
 import type * as resourceCapacity from "../resourceCapacity.js";
@@ -150,6 +151,7 @@ declare const fullApi: ApiFromModules<{
   pushDeliveryPolicy: typeof pushDeliveryPolicy;
   pushNotifications: typeof pushNotifications;
   pushNotificationsActions: typeof pushNotificationsActions;
+  qaControlSeed: typeof qaControlSeed;
   ratingEngine: typeof ratingEngine;
   reports: typeof reports;
   resourceCapacity: typeof resourceCapacity;
