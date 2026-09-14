@@ -13,6 +13,7 @@
     "test:ui": "jest __tests__/ui",
     "test:security": "jest __tests__/security",
     "test:convex": "vitest run",
+    "qa:convex:usage": "node scripts/convex-qa-usage-snapshot.mjs",
     "test:coverage": "jest --coverage",
     "typecheck": "tsc --noEmit --pretty false",
     "validate": "npm run typecheck && npm test -- --runInBand && npm run test:convex && npm audit --omit=dev --audit-level=critical",

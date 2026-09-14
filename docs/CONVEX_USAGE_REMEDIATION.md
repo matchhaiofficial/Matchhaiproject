@@ -63,6 +63,10 @@ Run `npm run validate`. It includes Jest contracts/unit/UI tests and the
 in memory, advances fake time, and verifies one due job becomes exactly one
 future job.
 
+For a repeatable read-only QA check during an active or idle canary, use
+[`CONVEX_QA_USAGE_SNAPSHOT.md`](./CONVEX_QA_USAGE_SNAPSHOT.md). It is fixed to
+`shakir-yasin:matchhai-qa / striped-dog-623` and refuses other deployments.
+
 Fresh QA deployment `striped-dog-623` is healthy and has zero cron jobs. After
 seeding it contained 197 scheduler rows: 157 completed push attempts from the
 pre-circuit-breaker seed, 32 completed area-notification batches, and eight

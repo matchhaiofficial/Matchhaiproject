@@ -31,6 +31,11 @@ jobs. Only the 8 legitimate future matchroom lifecycle jobs remained pending;
 there were no pending push jobs. This explains the observed one-time seed burst
 without indicating another idle loop.
 
+After the QA pagination deploy, a fixed-target five-minute idle snapshot kept
+all 197 scheduler rows and 8 pending jobs unchanged, with 0 overdue jobs. The
+daily function-call counter increased by 4 (the read-only checks themselves)
+and Database I/O did not increase.
+
 ## On-demand query findings
 
 Current chat lists and player wallet history use bounded recent reads. Wallet

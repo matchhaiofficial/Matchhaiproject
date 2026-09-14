@@ -1,4 +1,5 @@
 import { internalMutation, query, mutation } from "./_generated/server";
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
@@ -1701,6 +1702,149 @@ export const listBookingHistoryForZone = query({
             }
           : null,
       }));
+  },
+});
+
+// Canonical history reader for the zone bookings UI. The legacy
+// listBookingHistoryForZone contract above intentionally remains an array
+// endpoint for older clients. This reader paginates the authoritative
+// bookingRequests index and loads only the offers/matchroom rows belonging to
+// the current page, so history does not depend on a platform-wide or
+// zone-wide scan window.
+export const listBookingHistoryPageForZone = query({
+  args: {
+    zoneId: v.string(),
+    paginationOpts: paginationOptsValidator,
+    filters: v.optional(v.object({
+      gameKey: v.optional(v.string()),
+      status: v.optional(v.string()),
+    })),
+  },
+  returns: paginationResultValidator(v.any()),
+  handler: async (ctx, args) => {
+    const { zone } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const filters = args.filters || {};
+    const requestedGame = String(filters.gameKey || "all").trim().toLowerCase();
+    const requestedStatus = String(filters.status || "all").trim().toLowerCase();
+    const pageSize = Math.max(1, Math.min(50, Math.floor(Number(args.paginationOpts.numItems || 20))));
+    // Convex permits one paginate() call per function execution. The cursor
+    // therefore advances over source requests one-to-one; terminal-history
+    // filtering can make a page shorter, and the UI can continue from the
+    // returned cursor without ever falling back to an unbounded read.
+    const sourcePage = await ctx.db
+      .query("bookingRequests")
+      .withIndex("by_zoneId_and_requestKind_and_updatedAt", (q: any) =>
+        q.eq("zoneId", zone._id).eq("requestKind", "broadcast_fanout"),
+      )
+      .order("desc")
+      .paginate({ cursor: args.paginationOpts.cursor, numItems: pageSize });
+    const pageRows = await Promise.all(sourcePage.page.map(async (request: any) => {
+        const offers = await ctx.db
+        .query("zoneOffers")
+        .withIndex("by_requestId", (q: any) => q.eq("requestId", request._id))
+        .order("desc")
+        .take(50);
+      const offer = [...offers].sort((left, right) => {
+        const statusPriority: Record<string, number> = { accepted: 4, rejected: 3, expired: 2, pending: 1 };
+        const leftPriority = statusPriority[String(left.status || "")] || 0;
+        const rightPriority = statusPriority[String(right.status || "")] || 0;
+        if (leftPriority !== rightPriority) return rightPriority - leftPriority;
+        return Number(right.updatedAt || right.createdAt || 0) - Number(left.updatedAt || left.createdAt || 0);
+      })[0] || null;
+      const matchroom: any = request.matchroomId
+        ? await ctx.db.get(request.matchroomId).catch(() => null)
+        : null;
+      const requestStatus = String(request.status || "").toLowerCase();
+      const lifecycleStatus = String(request.lifecycleStatus || "").toLowerCase();
+      const closedReason = String(request.closedReason || "");
+      const offerStatus = String(offer?.status || "").toLowerCase();
+      const broadcastStatus = String(matchroom?.broadcastRequestStatus || "").toLowerCase();
+      const confirmedThisZone =
+        broadcastStatus === "zone_confirmed" &&
+        String(matchroom?.confirmedZoneId || matchroom?.zoneId || "") === String(zone._id);
+      const isHistory =
+        requestStatus === "expired" ||
+        requestStatus === "cancelled" ||
+        Boolean(closedReason) ||
+        lifecycleStatus === "zone_confirmed" ||
+        lifecycleStatus.includes("expired") ||
+        lifecycleStatus.includes("rejected") ||
+        lifecycleStatus.includes("closed") ||
+        confirmedThisZone ||
+        ["accepted", "rejected", "expired"].includes(offerStatus) ||
+        ["expired", "failed", "cancelled", "zone_confirmed"].includes(broadcastStatus);
+      if (!isHistory) return null;
+      if (requestedGame !== "all" && normalizeGameKey(request.gameKey) !== normalizeGameKey(requestedGame)) return null;
+      if (requestedStatus !== "all" && requestStatus !== requestedStatus) return null;
+
+        return {
+        id: String(request._id),
+        requestId: String(request._id),
+        matchroomId: request.matchroomId ? String(request.matchroomId) : null,
+        zoneId: String(zone._id),
+        userId: request.userId ? String(request.userId) : null,
+        userName: request.userName || "Player",
+        title: request.title || `Broadcast request for ${normalizeGameKey(request.gameKey).toUpperCase()}`,
+        gameKey: normalizeGameKey(request.gameKey),
+        status: request.status || null,
+        lifecycleStatus: request.lifecycleStatus || null,
+        closedReason: request.closedReason || null,
+        requestKind: request.requestKind || null,
+        preferredDate: request.preferredDate || null,
+        preferredTime: request.preferredTime || null,
+        targetAreaLabel: request.targetAreaLabel || null,
+        preferredAreas: Array.isArray(request.preferredAreas) ? request.preferredAreas : [],
+        budgetPerPlayer: Number(request.budgetPerPlayer || 0) || null,
+        currency: request.currency || "PKR",
+        allocatedBranchId: request.allocatedBranchId || null,
+        allocatedResourceIds: Array.isArray(request.allocatedResourceIds)
+          ? request.allocatedResourceIds.map((resourceId: any) => String(resourceId))
+          : [],
+        allocatedAt: request.allocatedAt || null,
+        createdAt: request.createdAt || null,
+        updatedAt: request.updatedAt || request.createdAt || null,
+        offer: offer
+          ? {
+              id: String(offer._id),
+              offerId: String(offer._id),
+              status: offer.status || null,
+              offerType: offer.offerType || null,
+              requestKind: offer.requestKind || null,
+              proposedPrice: Number(offer.proposedPrice || 0) || null,
+              proposedDate: offer.proposedDate || null,
+              proposedTime: offer.proposedTime || null,
+              scheduleOptions: Array.isArray(offer.scheduleOptions) ? offer.scheduleOptions : [],
+              expiresAt: offer.expiresAt || offer.responseExpiresAt || null,
+              responseExpiresAt: offer.responseExpiresAt || offer.expiresAt || null,
+              zoneName: offer.zoneName || null,
+              branchId: offer.branchId || null,
+              branchName: offer.branchName || null,
+              selectedOptionIndex: offer.selectedOptionIndex ?? null,
+              resolvedMatchroomId: offer.resolvedMatchroomId ? String(offer.resolvedMatchroomId) : null,
+              createdAt: offer.createdAt || null,
+              updatedAt: offer.updatedAt || offer.createdAt || null,
+            }
+          : null,
+        matchroom: matchroom
+          ? {
+              id: String(matchroom._id),
+              status: matchroom.status || null,
+              locationMode: matchroom.locationMode || null,
+              broadcastRequestStatus: matchroom.broadcastRequestStatus || null,
+              confirmedZoneId: matchroom.confirmedZoneId || matchroom.zoneId || null,
+              confirmedBranchId: matchroom.confirmedBranchId || matchroom.branchId || null,
+              venueConfirmedAt: matchroom.venueConfirmedAt || null,
+              location: matchroom.location || null,
+            }
+          : null,
+        };
+    }));
+
+    return {
+      page: pageRows.filter(Boolean),
+      isDone: sourcePage.isDone,
+      continueCursor: sourcePage.continueCursor,
+    };
   },
 });
 

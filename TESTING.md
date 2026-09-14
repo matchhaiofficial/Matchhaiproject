@@ -4,6 +4,7 @@ Master index for the testing & load-testing foundation. Detailed docs:
 - Load testing → [`load-tests/README.md`](./load-tests/README.md)
 - E2E (Maestro) → [`.maestro/README.md`](./.maestro/README.md)
 - Monitoring → [`docs/MONITORING.md`](./docs/MONITORING.md)
+- Convex QA usage snapshot → [`docs/CONVEX_QA_USAGE_SNAPSHOT.md`](./docs/CONVEX_QA_USAGE_SNAPSHOT.md)
 - Test data / seeding → [`docs/TEST_DATA.md`](./docs/TEST_DATA.md)
 - Security / race / abuse → [`docs/SECURITY_TESTS.md`](./docs/SECURITY_TESTS.md)
 - Page coverage map → [`docs/PAGE_COVERAGE.md`](./docs/PAGE_COVERAGE.md)
@@ -30,6 +31,7 @@ npm run test:unit       # __tests__/unit  (pure logic / services)
 npm run test:ui         # __tests__/ui    (component render)
 npm run test:security   # __tests__/security
 npm run test:convex     # in-memory Convex functions and scheduled jobs
+npm run qa:convex:usage # read-only QA scheduler/usage snapshot (fixed QA target)
 npm run test:watch      # watch mode
 npm run test:coverage   # coverage report -> ./coverage
 ```

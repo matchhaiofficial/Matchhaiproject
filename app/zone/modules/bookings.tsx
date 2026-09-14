@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Text,
@@ -72,7 +72,6 @@ type BookingFilterGroup = {
 };
 
 const HISTORY_PAGE_SIZE = 20;
-const HISTORY_MAX_LIMIT = 100;
 
 const MATCHROOM_STATUS_OPTIONS: FilterOption[] = [
     { key: "all", label: "All" },
@@ -528,8 +527,6 @@ export default function ZoneBookingsModule() {
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
     const [loadingWalkIns, setLoadingWalkIns] = useState(true);
-    const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
-    const [loadingHistoryMore, setLoadingHistoryMore] = useState(false);
     const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | null>(null);
     const [errorText, setErrorText] = useState<string | null>(null);
     const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
@@ -568,32 +565,22 @@ export default function ZoneBookingsModule() {
         api.bookings.listOffersByZone,
         zone?.id ? { zoneId: zone.id as Id<"zones"> } : "skip",
     );
-    const historyRows = useQuery(
-        api.zoneAdminBooking.listBookingHistoryForZone,
-        zone?.id && segment === "history" ? { zoneId: zone.id, limit: historyLimit } : "skip",
+    const {
+        results: historyRows,
+        status: historyStatus,
+        loadMore: loadHistoryPage,
+    } = usePaginatedQuery(
+        api.zoneAdminBooking.listBookingHistoryPageForZone,
+        zone?.id && segment === "history" ? { zoneId: zone.id } : "skip",
+        { initialNumItems: HISTORY_PAGE_SIZE },
     );
-    const historyHasMore = Boolean(
-        Array.isArray(historyRows) &&
-        historyRows.length >= historyLimit &&
-        historyLimit < HISTORY_MAX_LIMIT,
-    );
-
-    useEffect(() => {
-        setHistoryLimit(HISTORY_PAGE_SIZE);
-        setLoadingHistoryMore(false);
-    }, [segment, zone?.id]);
-
-    useEffect(() => {
-        if (historyRows !== undefined) {
-            setLoadingHistoryMore(false);
-        }
-    }, [historyRows]);
-
+    const historyLoading = segment === "history" && historyStatus === "LoadingFirstPage";
+    const historyHasMore = segment === "history" && historyStatus === "CanLoadMore";
+    const loadingHistoryMore = historyStatus === "LoadingMore";
     const loadHistoryMore = useCallback(() => {
-        if (loadingHistoryMore || !historyHasMore) return;
-        setLoadingHistoryMore(true);
-        setHistoryLimit((current) => Math.min(current + HISTORY_PAGE_SIZE, HISTORY_MAX_LIMIT));
-    }, [historyHasMore, loadingHistoryMore]);
+        if (!historyHasMore) return;
+        loadHistoryPage(HISTORY_PAGE_SIZE);
+    }, [historyHasMore, loadHistoryPage]);
 
     const pageBranchAreas = useMemo(() => {
         const allAreas = new Set<string>();
@@ -1588,7 +1575,7 @@ export default function ZoneBookingsModule() {
 
             {segment === "history" ? (
                 <ZoneBookingsHistorySection
-                    loading={historyRows === undefined}
+                    loading={historyLoading}
                     loadingMore={loadingHistoryMore}
                     onLoadMore={loadHistoryMore}
                     rows={(historyRows || []) as any[]}
