@@ -108,7 +108,7 @@
     "jest-expo": "~54.0.18",
     "react-test-renderer": "19.1.0",
     "typescript": "~5.9.2",
-    "vitest": "^3.2.4",
+    "vitest": "^3.2.7",
     "xlsx": "^0.18.5",
     "yaml": "^2.9.0"
   },

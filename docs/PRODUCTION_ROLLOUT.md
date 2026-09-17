@@ -9,12 +9,13 @@
 | QA branch | `remediation/production-readiness-2026-09-08` |
 | Merge target | `product-ready` |
 | Pull request | [#71](https://github.com/matchhaiofficial/Matchhaiproject/pull/71) |
-| Handoff commit before this document | `dfa1ee71386769e09d9eec677a9f0c412e65f091` |
+| Current EAS configuration commit | `9c2642025fbbca4b925f42f662af4d296ec969b5` |
 | Convex QA deployment | `striped-dog-623` under `shakir-yasin:matchhai-qa` |
 | Convex production deployment | **Not configured; supply the approved URL through EAS production environment** |
 | PostHog QA | Disabled; QA does not send analytics |
 | PostHog production | Reconfigure the existing approved project for production before release |
-| EAS owner / project | `matchhai` / `162a78ae-e223-4fe8-93d3-31665f16a590` |
+| EAS owner / project | `matchhai` / `cc63aac8-7e68-4dbc-9e95-c59e145fb7b4` |
+| Store identity | `com.ovaisto.matchhai`; App Store Connect ID `6800853996` |
 
 The existing approved PostHog project is reserved for production. Keep its token absent from local QA and configure it in EAS/Convex only at the approved production rollout.
 
@@ -41,7 +42,7 @@ npx expo-doctor
 npx expo export --platform android --output-dir /tmp/matchhai-android-export
 ```
 
-Run Expo Go for testers with `npx expo start --go --tunnel --clear`. Confirm the terminal reports the development Convex URL before distributing the QR code. A dedicated development/preview EAS profile is intentionally deferred.
+For remote Android QA, use the Expo-hosted APK built with the `preview` profile. It remains available while the developer laptop is off and is locked to QA Convex through the managed EAS preview environment. It uses the same Android package ID and may replace the store-installed app on the device. Expo Go remains available for local testing with `npx expo start --go --tunnel --clear`.
 
 Complete and record manual tests for both player and zone-admin accounts:
 
@@ -105,9 +106,43 @@ npx convex env set --prod APP_ENV production
 
 The first command prompts securely when the value is omitted.
 
-## Backup, Convex Deploy, and Data Migration
+## Clean Production Convex Deployment
 
-Immediately before the approved maintenance window, export production outside the repository and store the archive securely:
+The approved target is a new, empty production deployment under the
+`ovais-mukati-2dae3` team. Do not modify or reuse `nautical-ibex-721`. Create
+the target only after Ovais's release approval, and record its cloud/site URLs.
+
+Before deployment, configure production-only Convex variables. In addition to
+provider secrets, set `MATCHHAI_ENV=production`, `SUPER_ADMIN_EMAIL` to
+`ovais@matchhai.com`, and a server-side allowlist containing the six approved
+admins. Keep all reset/recovery flags, demo seed flags, bypasses, maintenance
+jobs, push delivery, and EasyPaisa disabled initially.
+
+Deploy the exact approved merge commit after reviewing a dry run:
+
+```bash
+npx convex deploy --dry-run
+npx convex deploy --message 'approved production launch'
+```
+
+Because the target database is empty, do **not** run historical backfills,
+schedule migrations, zone-index preparation, capacity refreshes, imports, or
+demo seeders. New records are created with current fields and event-driven
+scheduling. The migration commands below apply only if release owners later
+choose to migrate an existing populated deployment.
+
+Bootstrap `ovais@matchhai.com` as the primary canonical `super_admin` using a
+one-time password that is never committed or pasted into chat, then rotate it
+immediately. From that authenticated admin account, run the guarded partner
+bootstrap for `ehteshan@matchhai.com`, `zeerak@matchhai.com`,
+`saad@matchhai.com`, `mubeen@matchhai.com`, and
+`shakir.yasin18@gmail.com`. Verify each result and the forced-password-change
+gate. Do not create `junaid@matchhai.com`; the approved production list is the
+six addresses above.
+
+## Existing-Deployment Migration Reference (Not for the Clean Launch)
+
+If an existing populated deployment is ever migrated, export it outside the repository first:
 
 ```bash
 npx convex export --prod --include-file-storage --path ../matchhai-production-pre-rollout-YYYY-MM-DD.zip
@@ -139,7 +174,7 @@ production canary procedure with an explicit stop condition. Existing records
 remain covered by the individually enabled, bounded recovery jobs during a
 controlled rollout.
 
-Next, obtain the real active production zone and branch IDs with read-only queries. For each existing zone, run `scheduleIndexMigration:prepareZoneScheduleIndex` once; for each branch, run `resourceCapacity:refreshBranchSnapshot`. Both are internal operations helpers and require deployment-admin access. Use the Convex dashboard or CLI only after confirming the exact IDs—never invent or reuse development IDs. New/edited zones schedule these updates automatically.
+For a populated migration only, obtain the real active production zone and branch IDs with read-only queries. For each existing zone, run `scheduleIndexMigration:prepareZoneScheduleIndex` once; for each branch, run `resourceCapacity:refreshBranchSnapshot`. Never invent or reuse development IDs. New/edited zones schedule these updates automatically.
 
 Enable `MATCHHAI_ENABLE_PUSH_DELIVERY=1` only after Firebase/Expo push credentials and a real production device have been verified. It must remain `0` in local/QA while native push testing is deferred; otherwise every in-app notification can spawn a scheduled delivery action that has no device to reach.
 
@@ -147,17 +182,17 @@ Finally, enable the maintenance master flag and required job flags deliberately:
 
 ## App Build and Staged Release
 
-Authenticate as the configured EAS owner and confirm the remote version/environment before building:
+Authenticate as the configured EAS owner and confirm the remote version/environment before building. The recovered EAS-managed Android key already matches Play's upload certificate, so no key reset is required:
 
 ```bash
 eas whoami
 eas env:list --environment production
-eas build --platform android --profile production
+eas build --platform all --profile production
 ```
 
 Install the signed artifact through an internal/closed testing track. Repeat the critical smoke tests against production with designated test accounts and small-value payment transactions. Confirm PostHog events appear only in **MatchHai Production** with `environment=production`.
 
-After sign-off, submit and use a staged Play Store rollout rather than 100% immediately:
+The EAS project does not currently contain a Google Play submission service account. Either upload the signed AAB manually in Play Console or configure a service account before using `eas submit`. Apple requires Ovais to authorize EAS or provide a valid App Store Connect API key for a fresh build/submission. After sign-off, use staged store rollouts rather than 100% immediately:
 
 ```bash
 eas submit --platform android --profile production

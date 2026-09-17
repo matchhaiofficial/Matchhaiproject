@@ -45,9 +45,9 @@
 
 ### EAS preparation
 
-- [x] Prepare the repository to use `@matchhai/matchhai` (`162a78ae-e223-4fe8-93d3-31665f16a590`).
+- [x] Link the repository to the transferred `@matchhai/matchhai` project (`cc63aac8-7e68-4dbc-9e95-c59e145fb7b4`).
 - [x] Preserve Android/iOS identifier `com.ovaisto.matchhai`.
-- [x] Prepare one production build profile and remove old Convex URLs from committed EAS configuration.
+- [x] Prepare production plus an internal Android preview profile; keep Convex URLs in managed EAS environments.
 - [x] Prepare, but do not apply, the production environment-variable inventory.
 - [x] Do not generate or submit a store build.
 
@@ -64,13 +64,13 @@
 - [ ] Test superadmin user, KYC, payment, report, refund, venue, and support workflows.
 - [ ] Run active and idle Convex usage soak tests; fix failures and repeat affected journeys.
 
-## Workstream C — Waiting for Basim
+## Workstream C — Transferred EAS Project
 
-- [ ] Obtain access to `@baaasim` project `cda2020c-8a2a-43d6-bd46-ffdbbf8de273`.
-- [ ] Obtain access to `@basimmmmm` project `cc63aac8-7e68-4dbc-9e95-c59e145fb7b4`.
-- [ ] Locate the Android keystore matching Play upload SHA-1 `FA:5D:E9:13:B7:53:DF:94:9E:E1:3E:9B:EF:9E:AD:C9:3C:10:2D:CE`.
-- [ ] Inspect store-build history, iOS distribution credentials, provisioning profiles, push keys, and App Store Connect keys.
-- [ ] Securely import valid recovered credentials into `@matchhai/matchhai`.
+- [x] Receive the original project in the `matchhai` organization and relink the repository.
+- [x] Locate the EAS-managed Android keystore; its SHA-1 exactly matches Play's upload certificate.
+- [x] Inspect recent successful Android/iOS build and iOS submission history.
+- [ ] Have Ovais authorize a fresh Apple credential check and confirm the current distribution profile/key.
+- [ ] Configure FCM V1 and optional Google Play/App Store cloud-submission credentials.
 
 ## Workstream D — Waiting for EasyPaisa
 
@@ -84,7 +84,7 @@ Until then, QA must expose an explicit “EasyPaisa unavailable in QA” state w
 
 ### Android
 
-- [ ] Reuse the recovered matching key; otherwise generate a secure upload key and request a Play upload-key reset.
+- [x] Reuse the recovered matching Play upload key; no reset is required.
 - [ ] Configure Play submission and Firebase FCM V1 service accounts.
 - [ ] Verify the final `.aab` signature against the registered upload certificate.
 
@@ -108,7 +108,6 @@ Proceed only after QA, usage testing, and explicit approval:
 
 ## Explicitly Deferred
 
-- Dedicated QA/development-client EAS build
 - Firebase push-notification QA
 - EAS Update and OTA channels
 - Production deployment, live callback switching, and store submission
@@ -119,10 +118,17 @@ Proceed only after QA, usage testing, and explicit approval:
 - QA data: 335 users, 64 zones, 3,260 resources, 8 teams, and 8 capacity-valid seeded matchrooms. The realistic 250-player dataset has Rs 5,000 wallets.
 - Usage state after seeding: zero cron jobs; eight pending one-shot `processScheduledLifecycle` jobs, exactly one per seeded matchroom; demo seeding, maintenance crons, EasyPaisa, and PostHog remain disabled.
 - Automated verification: TypeScript passed; 78 Jest suites with 411 passing tests; 4 Convex test files with 6 passing tests; Android Expo export and Expo Doctor (18/18) succeeded.
-- Dependency audit: no critical advisories; 12 high and 23 moderate transitive advisories remain for review because proposed bulk fixes include breaking Expo upgrades.
+- Dependency audit: no critical advisories after updating the test-only Vitest toolchain; 13 high and 21 moderate transitive advisories remain for review because proposed bulk fixes include breaking Expo upgrades.
 - Reconciliation details: `docs/ISSUE_RECONCILIATION.md`. Production variable inventory: `docs/EAS_PRODUCTION_CONFIG.md`.
 - Runtime follow-up found and fixed two additional usage risks: push actions now require an explicit environment flag plus an active recipient device, and EasyPaisa self-scheduled retries stop after six retries. Matchroom deadline changes now cancel superseded jobs in both scheduling entry points.
 - QA idle observation: over a formal five-minute window the scheduler table stayed at 197 historical rows with exactly 8 legitimate future matchroom jobs pending and zero overdue jobs; function calls increased by 4 (the snapshot checks) and Database I/O did not increase. Full active-journey usage testing is still open.
 - Added a fixed-target, read-only `npm run qa:convex:usage` tripwire and deployed the backward-compatible zone booking-history pagination endpoint only to QA. Current UI uses the paginated endpoint; the legacy array endpoint remains available.
 - Added Convex integration coverage for report/block/join denial, retry-safe matchroom creation, challenge captain authorization, idempotent wallet holds/releases, team-chat unread/access behavior, and KYC status propagation. Android and web exports both pass; Expo Doctor remains 18/18.
 - Still open: manual end-to-end journeys, active usage soak measurement, counter-table/true-pagination work for the exact and legacy queries identified in `docs/CONVEX_RUNTIME_AUDIT.md`, external EasyPaisa staging, transferred store signing credentials, and all production actions.
+
+## Execution Evidence — 2026-09-18
+
+- The transferred EAS project is now `@matchhai/matchhai` / `cc63aac8-7e68-4dbc-9e95-c59e145fb7b4`.
+- The Android EAS keystore matches the Play Console upload SHA-1; the last store build used version code 27.
+- An internal Android preview profile was added for remote QA against `striped-dog-623`; it does not enable PostHog, EasyPaisa, or QA bypasses.
+- TypeScript and Expo Doctor (18/18) pass before the preview build.
