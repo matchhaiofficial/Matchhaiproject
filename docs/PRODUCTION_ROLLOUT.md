@@ -96,6 +96,26 @@ Audit Convex production variables by name without exposing their values. Require
 - `EXPO_PUBLIC_SKIP_PHONE_OTP` and `EXPO_PUBLIC_SKIP_KYC_VERIFICATION` absent from production builds
 - Maintenance master/per-job flags enabled only after migration and scheduler verification
 
+The read-only 2026-09-18 inventory of the old `nautical-ibex-721`
+deployment confirms that reusable provider credentials exist for Better Auth,
+Didit, Veevotech SMS, Resend, Firebase FCM, EasyPaisa, Steam, FACEIT, Antideo,
+PSN, and support AI. It does **not** prove the values are valid. The old
+deployment is missing the new explicit runtime boundary, Veevotech MNP
+settings, PostHog settings, push-delivery circuit breaker, and several newer
+EasyPaisa capability flags. Copy only approved provider values through a
+secure channel; generate a new Better Auth secret for the new empty deployment
+and do not copy demo, reset, recovery, or maintenance flags.
+
+Update external endpoints only after the new production site URL is known:
+
+- Didit webhook: `https://<deployment>.convex.site/kyc/didit/webhook`
+- Didit app return: `matchhai://auth/verification-required`
+- EasyPaisa IPN: `https://<deployment>.convex.site/payments/easypaisa/ipn`
+
+Veevotech, Resend, Firebase, and the gaming APIs do not require an inbound
+Convex callback change. Veevotech still needs its MNP endpoint and lookup flag
+configured so ported-number routing is exercised.
+
 After the existing PostHog project is approved for production, configure its server ingestion token without putting it in shell history:
 
 ```bash

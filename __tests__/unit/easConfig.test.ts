@@ -14,8 +14,10 @@ type AppConfig = {
 type EasConfig = {
   build?: Record<string, {
     environment?: string;
+    distribution?: string;
     channel?: unknown;
     env?: Record<string, string>;
+    android?: { buildType?: string };
   }>;
   submit?: Record<string, unknown>;
 };
@@ -29,13 +31,17 @@ describe("EAS project and release configuration", () => {
 
   it("links the app to the shared MatchHai EAS project and keeps store identifiers stable", () => {
     expect(app.expo.owner).toBe("matchhai");
-    expect(app.expo.extra?.eas?.projectId).toBe("162a78ae-e223-4fe8-93d3-31665f16a590");
+    expect(app.expo.extra?.eas?.projectId).toBe("cc63aac8-7e68-4dbc-9e95-c59e145fb7b4");
     expect(app.expo.ios?.bundleIdentifier).toBe("com.ovaisto.matchhai");
     expect(app.expo.android?.package).toBe("com.ovaisto.matchhai");
   });
 
-  it("keeps only the production EAS profile while QA runs through Expo Go", () => {
-    expect(Object.keys(eas.build || {})).toEqual(["production"]);
+  it("keeps production isolated while remote QA uses an internal Android APK", () => {
+    expect(Object.keys(eas.build || {})).toEqual(["preview", "production"]);
+    expect(eas.build?.preview?.environment).toBe("preview");
+    expect(eas.build?.preview?.distribution).toBe("internal");
+    expect(eas.build?.preview?.android?.buildType).toBe("apk");
+    expect(eas.build?.preview?.env?.EXPO_PUBLIC_ENV).toBe("development");
     expect(eas.build?.production?.environment).toBe("production");
     expect(eas.submit?.production).toEqual({});
   });
@@ -47,6 +53,8 @@ describe("EAS project and release configuration", () => {
     expect(eas.build?.production?.env).not.toHaveProperty("EXPO_PUBLIC_CONVEX_SITE_URL");
     expect(eas.build?.production?.env).not.toHaveProperty("EXPO_PUBLIC_CONVEX_DEPLOYMENT_CLASS");
     expect(eas.build?.production?.env).not.toHaveProperty("EXPO_PUBLIC_CONVEX_ALLOWED_URLS");
+    expect(eas.build?.preview?.env).not.toHaveProperty("EXPO_PUBLIC_CONVEX_URL");
+    expect(eas.build?.preview?.env).not.toHaveProperty("EXPO_PUBLIC_CONVEX_SITE_URL");
   });
 
   it("does not opt the app into Expo Updates or an update channel", () => {
