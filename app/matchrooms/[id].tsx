@@ -291,6 +291,13 @@ export default function MatchroomDetails() {
       isJoined ||
       (isZoneAdmin && isWalkInRoom));
 
+  const openPlayerReport = useCallback((playerUid: string, playerName: string) => {
+    setReportedPlayer({ uid: playerUid, name: playerName });
+    setComplainReason("");
+    setComplainDescription("");
+    setShowComplainModal(true);
+  }, [setComplainDescription, setComplainReason, setShowComplainModal]);
+
   const {
     handleRespondToRequest: handleRespondToRequestAction,
     handleZoneAccept: handleZoneAcceptAction,
@@ -354,6 +361,7 @@ export default function MatchroomDetails() {
     captainUidBResolved,
     identityMatches,
     currentIdentityValues,
+    onReportPlayer: isJoined || isZoneAdmin ? openPlayerReport : undefined,
   });
 
   const openSlotsA = useMemo(
@@ -386,12 +394,6 @@ export default function MatchroomDetails() {
     setReportedPlayer(null);
     setShowComplainModal(true);
   }, [setShowComplainModal]);
-  const openPlayerReport = useCallback((playerUid: string, playerName: string) => {
-    setReportedPlayer({ uid: playerUid, name: playerName });
-    setComplainReason("");
-    setComplainDescription("");
-    setShowComplainModal(true);
-  }, [setComplainDescription, setComplainReason, setShowComplainModal]);
   const handleReportSubmit = useCallback(async () => {
     if (!reportedPlayer) {
       await handleComplainAction();
@@ -672,7 +674,7 @@ export default function MatchroomDetails() {
                     onBookWalkInSeat={handleBookWalkInSeatAction}
                     onRequestJoin={handleRequestJoinAction}
                     onCancelRequest={handleCancelRequestAction}
-                    onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
+                    onReportPlayer={isJoined || isZoneAdmin ? openPlayerReport : undefined}
                   />
                 </View>
                 <View
@@ -706,7 +708,7 @@ export default function MatchroomDetails() {
                     onBookWalkInSeat={handleBookWalkInSeatAction}
                     onRequestJoin={handleRequestJoinAction}
                     onCancelRequest={handleCancelRequestAction}
-                    onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
+                    onReportPlayer={isJoined || isZoneAdmin ? openPlayerReport : undefined}
                   />
                 </View>
               </View>
@@ -719,7 +721,7 @@ export default function MatchroomDetails() {
                 identityMatches={identityMatches}
                 getDisplayRole={getDisplayRole}
                 getSkillBadgeProps={getSkillBadgeProps}
-                onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
+                onReportPlayer={isJoined || isZoneAdmin ? openPlayerReport : undefined}
               />
             )}
 

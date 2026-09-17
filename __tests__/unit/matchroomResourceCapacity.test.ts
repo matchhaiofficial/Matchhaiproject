@@ -1,4 +1,5 @@
 import {
+  canAutoSelectSoleRateOption,
   getMinimumResourceCountForGame,
   getResourceCapacityKey,
   hasMinimumResourceCapacity,
@@ -30,5 +31,16 @@ describe("matchroom resource capacity", () => {
     expect(hasMinimumResourceCapacity(snapshot, "fc26", { assetType: "console", tier: "ps5" })).toBe(true);
     expect(hasMinimumResourceCapacity(undefined, "cs2", { assetType: "pc", tier: "premium" })).toBe(true);
     expect(hasMinimumResourceCapacity({ ...snapshot, complete: false }, "cs2", { assetType: "pc", tier: "premium" })).toBe(true);
+  });
+
+  it("never auto-selects a sole unavailable tier", () => {
+    expect(canAutoSelectSoleRateOption(
+      ["console:ps5"],
+      new Map([["console:ps5", { available: false }]]),
+    )).toBe(false);
+    expect(canAutoSelectSoleRateOption(
+      ["console:ps5"],
+      new Map([["console:ps5", { available: true }]]),
+    )).toBe(true);
   });
 });

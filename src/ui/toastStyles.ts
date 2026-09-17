@@ -46,6 +46,14 @@ export const toastStyles = StyleSheet.create({
         shadowRadius: 18,
         elevation: 12,
     },
+    infoContainer: {
+        borderColor: COLORS.accent,
+        shadowColor: COLORS.accent,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+        elevation: 12,
+    },
     iconContainer: {
         width: 36,
         height: 36,
@@ -62,6 +70,9 @@ export const toastStyles = StyleSheet.create({
     },
     warningIcon: {
         backgroundColor: `${COLORS.warning}20`,
+    },
+    infoIcon: {
+        backgroundColor: `${COLORS.accent}20`,
     },
     textColumn: {
         flex: 1,
@@ -82,6 +93,13 @@ export const toastStyles = StyleSheet.create({
     },
     warningTitle: {
         color: COLORS.warning,
+        fontSize: 14,
+        fontWeight: "700",
+        marginBottom: 4,
+        letterSpacing: 0.3,
+    },
+    infoTitle: {
+        color: COLORS.accent,
         fontSize: 14,
         fontWeight: "700",
         marginBottom: 4,

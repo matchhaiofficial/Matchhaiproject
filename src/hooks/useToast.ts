@@ -16,10 +16,7 @@ export function useToast() {
     ({ type = "info", title, message }: ShowToastOptions) => {
       let mappedType: string = type;
 
-      // Map app types to toastConfig keys
-      if (type === "info") {
-        mappedType = "success"; // map info to success variant
-      }
+      // App types map directly to toastConfig keys.
       if (type === "warning") {
         mappedType = "warning"; // use dedicated warning variant
       }

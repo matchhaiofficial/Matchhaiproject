@@ -36,3 +36,10 @@ export function hasMinimumResourceCapacity(
   const count = Number(snapshot.capacityByKey[key] || 0);
   return count >= getMinimumResourceCountForGame(gameKey);
 }
+
+export function canAutoSelectSoleRateOption(
+  optionKeys: string[],
+  availabilityByKey: ReadonlyMap<string, { available: boolean }>,
+) {
+  return optionKeys.length === 1 && availabilityByKey.get(optionKeys[0])?.available !== false;
+}

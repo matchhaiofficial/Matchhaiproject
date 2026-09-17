@@ -17,6 +17,7 @@ export {
 
     // Convex data functions
     getEnabledPricingRulesForZone,
+    getPublicEnabledPricingRulesForZone,
     subscribeZonePricingRules,
     createZonePricingRule,
     setZonePricingRuleEnabled,

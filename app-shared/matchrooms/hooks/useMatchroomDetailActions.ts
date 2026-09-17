@@ -83,6 +83,7 @@ type DetailActionDeps = {
     values: Array<string | null | undefined>,
   ) => boolean;
   currentIdentityValues: Array<string | null | undefined>;
+  onReportPlayer?: (playerUid: string, playerName: string) => void;
 };
 
 export function useMatchroomDetailActions({
@@ -130,6 +131,7 @@ export function useMatchroomDetailActions({
   captainUidBResolved,
   identityMatches,
   currentIdentityValues,
+  onReportPlayer,
 }: DetailActionDeps) {
   const { showToast } = useToast();
   const roomRef = useRef(room);
@@ -1054,19 +1056,30 @@ export function useMatchroomDetailActions({
         ? identityMatches(playerUid, [captainUidAResolved])
         : identityMatches(playerUid, [captainUidBResolved]);
 
+    const choices: Array<{
+      key: "make_captain" | "report";
+      text: string;
+      style?: "default" | "destructive";
+    }> = [];
+    if (!isCurrentCaptain) {
+      choices.push({ key: "make_captain", text: "Make Captain" });
+    }
+    if (onReportPlayer) {
+      choices.push({ key: "report", text: "Report Player", style: "destructive" });
+    }
+    if (!choices.length) return;
+
     const action = await choose({
       title: "Manage Player",
       message: `Choose an action for ${playerName}`,
       cancelText: "Cancel",
-      choices: !isCurrentCaptain
-        ? [{
-          key: "make_captain" as const,
-          text: "Make Captain",
-        }]
-        : [],
+      choices,
     });
     if (action === "make_captain") {
       void handleTransferCaptain(team, playerUid, playerName);
+    }
+    if (action === "report") {
+      onReportPlayer?.(playerUid, playerName);
     }
     // {
     //   text: "Kick Player",

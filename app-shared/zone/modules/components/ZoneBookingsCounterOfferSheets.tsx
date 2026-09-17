@@ -171,20 +171,13 @@ export function ZoneBookingsCounterOfferSheets({
           contentContainerStyle={styles.counterFormContent}
         >
             <View style={styles.scheduleOptionCard}>
-              <Text style={styles.formLabel}>Date</Text>
-                <Pressable
+              <Text style={styles.formLabel}>Date (adjusts automatically)</Text>
+                <View
                   style={styles.dateField}
-                  onPress={() => {
-                    setEditingOptionIndex(0);
-                    const nextDate = option.date ? new Date(`${option.date}T00:00:00`) : new Date();
-                    setDateDraft(nextDate);
-                    setMonthCursor(nextDate);
-                    setShowDatePicker(true);
-                  }}
                 >
                   <AppIcon name="calendar-month" size="sm" tone="accent" />
                   <Text style={styles.dateFieldText}>{formatDateForDisplay(option.date)}</Text>
-                </Pressable>
+                </View>
 
               <View style={styles.dateRow}>
                 <View style={styles.halfInput}>
@@ -203,17 +196,12 @@ export function ZoneBookingsCounterOfferSheets({
                 </View>
                 <View style={styles.halfInput}>
                   <Text style={styles.formLabel}>Ending booking time</Text>
-                  <Pressable
+                  <View
                     style={styles.dateField}
-                    onPress={() => {
-                      setActiveTimePicker({ optionIndex: 0, field: "end" });
-                      setTimeDraft(parseTimeToDraft(option.endTime));
-                      setShowTimePicker(true);
-                    }}
                   >
                     <AppIcon name="clock" size="sm" tone="accent" />
                     <Text style={styles.dateFieldText}>{formatTimeForDisplay(option.endTime)}</Text>
-                  </Pressable>
+                  </View>
                 </View>
               </View>
             </View>

@@ -52,4 +52,22 @@ describe("zone counter-offer allocation regression guards", () => {
     expect(resourcesModule).toContain("const deepMatchroomId");
     expect(resourcesModule).toContain("item.matchroomId === deepMatchroomId");
   });
+
+  it("derives counter-offer dates from the selected clock and keeps the date read-only", () => {
+    const bookings = read("app/zone/modules/bookings.tsx");
+    const sheet = read("app-shared/zone/modules/components/ZoneBookingsCounterOfferSheets.tsx");
+
+    expect(bookings).toContain("closestDateTimeForClock(originalStartAt, selectedTime)");
+    expect(bookings).toContain("date: nextStart ? toLocalDateString(nextStart) : option.date");
+    expect(sheet).toContain("Date (adjusts automatically)");
+    expect(sheet).not.toContain('setShowDatePicker(true)');
+  });
+
+  it("keeps resource tab badge counts independent from the active tab", () => {
+    const resources = read("app/zone/modules/resources.tsx");
+    expect(resources).toContain('const gridResources = useMemo(() => filterResources("grid")');
+    expect(resources).toContain('const allocationResources = useMemo(() => filterResources("allocation")');
+    expect(resources).toContain('badge: gridResources.length');
+    expect(resources).toContain('badge: allocationResources.length');
+  });
 });

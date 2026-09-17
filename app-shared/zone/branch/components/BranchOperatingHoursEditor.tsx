@@ -1,6 +1,6 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useState } from "react";
-import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   BRANCH_WEEKDAYS,
@@ -10,6 +10,7 @@ import {
 } from "../../../../constants/branchOperatingHours";
 import { COLORS, FONTS, RADII, SPACING } from "../../../../src/theme";
 import { AppButton } from "../../../../src/components/AppPrimitives";
+import { AppPickerSheet } from "../../../../src/components/AppModalPrimitives";
 
 type Props = {
   value: BranchOperatingHours | null;
@@ -20,6 +21,27 @@ type ActivePicker =
   | { kind: "time"; dayOfWeek: number; field: "openTime" | "closeTime" }
   | { kind: "date"; exceptionIndex: number }
   | null;
+
+type TimeDraft = { hour: number; minute: number; period: "AM" | "PM" };
+const HOURS_12 = Array.from({ length: 12 }, (_, index) => index + 1);
+const MINUTES = [0, 15, 30, 45];
+const PERIODS = ["AM", "PM"] as const;
+
+const clockToDraft = (clock: string): TimeDraft => {
+  const date = dateForClock(clock);
+  const hour24 = date.getHours();
+  return {
+    hour: hour24 % 12 || 12,
+    minute: date.getMinutes(),
+    period: hour24 >= 12 ? "PM" : "AM",
+  };
+};
+
+const draftToClock = (draft: TimeDraft) => {
+  let hour = draft.hour % 12;
+  if (draft.period === "PM") hour += 12;
+  return `${String(hour).padStart(2, "0")}:${String(draft.minute).padStart(2, "0")}`;
+};
 
 const dateForClock = (clock: string) => {
   const [hours, minutes] = String(clock || "09:00").split(":").map(Number);
@@ -56,6 +78,7 @@ function getNextKarachiDate(existingDates: Set<string>) {
 export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
   const [activePicker, setActivePicker] = useState<ActivePicker>(null);
   const [pickerValue, setPickerValue] = useState(new Date());
+  const [timeDraft, setTimeDraft] = useState<TimeDraft>({ hour: 9, minute: 0, period: "AM" });
   if (!value) {
     return (
       <View style={styles.card}>
@@ -88,7 +111,7 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
     });
   };
   const openTimePicker = (dayOfWeek: number, field: "openTime" | "closeTime", clock: string) => {
-    setPickerValue(dateForClock(clock));
+    setTimeDraft(clockToDraft(clock));
     setActivePicker({ kind: "time", dayOfWeek, field });
   };
   const openDatePicker = (exceptionIndex: number, date: string) => {
@@ -115,7 +138,7 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
 
       {value.weekly.map((day) => (
         <View key={day.dayOfWeek} style={styles.dayRow}>
-          <Text style={styles.dayLabel}>{BRANCH_WEEKDAYS[day.dayOfWeek].slice(0, 3)}</Text>
+          <Text numberOfLines={1} style={styles.dayLabel}>{BRANCH_WEEKDAYS[day.dayOfWeek].slice(0, 3)}</Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => updateDay(day.dayOfWeek, { isClosed: !day.isClosed })}
@@ -204,33 +227,71 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
 
       {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
 
-      <Modal visible={Boolean(activePicker)} transparent animationType="fade" onRequestClose={() => setActivePicker(null)}>
+      <Modal visible={activePicker?.kind === "date"} transparent animationType="fade" onRequestClose={() => setActivePicker(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setActivePicker(null)}>
           <Pressable style={styles.pickerCard} onPress={(event) => event.stopPropagation()}>
             <Text style={styles.subtitle}>{activePicker?.kind === "date" ? "Select closure date" : "Select time"}</Text>
             <DateTimePicker
               value={pickerValue}
-              mode={activePicker?.kind === "date" ? "date" : "time"}
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              minimumDate={activePicker?.kind === "date" ? new Date() : undefined}
+              mode="date"
+              display="spinner"
+              minimumDate={new Date()}
               onChange={(_event, selected) => {
-                if (!selected) {
-                  if (Platform.OS === "android") setActivePicker(null);
-                  return;
-                }
-                setPickerValue(selected);
-                if (Platform.OS === "android") commitPicker(selected);
+                if (selected) setPickerValue(selected);
               }}
             />
-            {Platform.OS === "ios" ? (
-              <View style={styles.pickerActions}>
-                <AppButton variant="secondary" onPress={() => setActivePicker(null)}>Cancel</AppButton>
-                <AppButton onPress={() => commitPicker(pickerValue)}>Done</AppButton>
-              </View>
-            ) : null}
+            <View style={styles.pickerActions}>
+              <AppButton variant="secondary" onPress={() => setActivePicker(null)}>Cancel</AppButton>
+              <AppButton onPress={() => commitPicker(pickerValue)}>Done</AppButton>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
+
+      {activePicker?.kind === "time" ? (
+      <AppPickerSheet
+        visible
+        onClose={() => setActivePicker(null)}
+      >
+        <View style={styles.customPickerHeader}>
+          <Pressable onPress={() => setActivePicker(null)}><Text style={styles.pickerAction}>Cancel</Text></Pressable>
+          <Text style={styles.subtitle}>Select time</Text>
+          <Pressable
+            onPress={() => {
+              if (activePicker?.kind === "time") {
+                updateDay(activePicker.dayOfWeek, { [activePicker.field]: draftToClock(timeDraft) });
+              }
+              setActivePicker(null);
+            }}
+          ><Text style={styles.pickerAction}>Done</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={styles.timePickerContent}>
+          <View style={styles.timePickerRow}>
+            <View style={styles.timeColumn}>
+              {HOURS_12.map((hour) => (
+                <Pressable key={hour} style={[styles.timeOption, timeDraft.hour === hour && styles.timeOptionActive]} onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}>
+                  <Text style={[styles.timeOptionText, timeDraft.hour === hour && styles.timeOptionTextActive]}>{String(hour).padStart(2, "0")}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.timeColumn}>
+              {MINUTES.map((minute) => (
+                <Pressable key={minute} style={[styles.timeOption, timeDraft.minute === minute && styles.timeOptionActive]} onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}>
+                  <Text style={[styles.timeOptionText, timeDraft.minute === minute && styles.timeOptionTextActive]}>{String(minute).padStart(2, "0")}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.timeColumn}>
+              {PERIODS.map((period) => (
+                <Pressable key={period} style={[styles.timeOption, timeDraft.period === period && styles.timeOptionActive]} onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}>
+                  <Text style={[styles.timeOptionText, timeDraft.period === period && styles.timeOptionTextActive]}>{period}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
+      </AppPickerSheet>
+      ) : null}
     </View>
   );
 }
@@ -249,7 +310,7 @@ const styles = StyleSheet.create({
   subtitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 14 },
   description: { color: COLORS.muted, fontFamily: FONTS.body, fontSize: 12, lineHeight: 18 },
   dayRow: { alignItems: "center", flexDirection: "row", gap: 8, minHeight: 42 },
-  dayLabel: { color: COLORS.text, fontFamily: FONTS.heading, width: 34 },
+  dayLabel: { color: COLORS.text, fontFamily: FONTS.heading, minWidth: 42, flexShrink: 0 },
   statusChip: { backgroundColor: COLORS.success, borderRadius: RADII.md, paddingHorizontal: 9, paddingVertical: 7, width: 62 },
   closedChip: { backgroundColor: COLORS.inputBackground },
   statusText: { color: COLORS.text, fontFamily: FONTS.body, fontSize: 12, textAlign: "center" },
@@ -268,4 +329,13 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: SPACING.lg },
   pickerCard: { backgroundColor: COLORS.cardDark, borderColor: COLORS.cardBorder, borderRadius: RADII.lg, borderWidth: 1, padding: SPACING.lg },
   pickerActions: { flexDirection: "row", justifyContent: "flex-end", gap: SPACING.sm, marginTop: SPACING.md },
+  customPickerHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingBottom: SPACING.md },
+  pickerAction: { color: COLORS.accent, fontFamily: FONTS.heading, fontSize: 14 },
+  timePickerContent: { paddingBottom: SPACING.lg },
+  timePickerRow: { flexDirection: "row", gap: SPACING.sm },
+  timeColumn: { flex: 1, gap: SPACING.xs },
+  timeOption: { alignItems: "center", borderColor: COLORS.inputBorder, borderRadius: RADII.md, borderWidth: 1, minHeight: 40, justifyContent: "center" },
+  timeOptionActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  timeOptionText: { color: COLORS.text, fontFamily: FONTS.body },
+  timeOptionTextActive: { color: "#fff", fontFamily: FONTS.heading },
 });

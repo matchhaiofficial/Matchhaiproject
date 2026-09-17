@@ -28,7 +28,7 @@ export function isAuthSessionError(error: unknown): boolean {
 }
 
 const TECHNICAL_ERROR_MARKER =
-  /\[CONVEX|\[Request ID:|Called by client|Server Error|Uncaught (?:ConvexError|Error)|at handler\b/i;
+  /\[CONVEX|\[Request ID:|Called by client|Server Error|Uncaught (?:ConvexError|Error)|at handler\b|\s+at\s+(?:async\s+)?[^\s(]+\s*\(/i;
 
 const KNOWN_PAYMENT_ERROR_MARKER =
   /ACCOUNT DOES N[O']?T? EXIST|ACCOUNT DOES NO EXIST|PAYMENT METHOD NOT ENABLED/i;
@@ -57,6 +57,10 @@ function cleanErrorTransportNoise(message: string): string {
     .replace(/\bServer Error\b/gi, "")
     .replace(/\bUncaught (?:ConvexError|Error):\s*/gi, "")
     .replace(/\bat handler\s*\([^)]*\)/gi, "")
+    // Convex development errors can append server stack frames to an otherwise
+    // useful message. Never render implementation paths/function names to users.
+    .replace(/\s+at\s+(?:async\s+)?[^\s(]+(?:\s+\[[^\]]+\])?\s*\([^)]*\)/gi, "")
+    .replace(/\s+at\s+(?:async\s+)?(?:\.\.\/|\/)[^\s]+/gi, "")
     .split("Called by client")[0]
     .trim()
     .replace(/\s+/g, " ");
@@ -84,6 +88,10 @@ export function getUserFacingErrorMessage(
 
   if (/slot is no longer available|selected slot is no longer available/i.test(raw)) {
     return SLOT_ALREADY_FILLED_PAYMENT_MESSAGE;
+  }
+
+  if (/one or more players already have a matchroom or booking request scheduled at this time/i.test(raw)) {
+    return "You already have another matchroom or booking at this time. Choose a different time.";
   }
 
   if (/PAYMENT METHOD NOT ENABLED/i.test(raw)) {

@@ -1835,7 +1835,7 @@ export default function CreateMatchroom() {
                           ]}
                           onPress={() => {
                             if (unavailable) {
-                              showToast({ type: "info", title: "Resources not available", message: opt.availabilityMessage || "This category is unavailable at the selected time." });
+                              showToast({ type: "warning", title: "Resources not available", message: opt.availabilityMessage || "This category is unavailable at the selected time." });
                               return;
                             }
                             selectZoneRateOption(opt.key, opt.price);

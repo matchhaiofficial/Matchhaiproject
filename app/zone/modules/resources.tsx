@@ -509,11 +509,11 @@ export default function ZoneResourcesModule() {
         return [{ key: "all", label: "All games" }, ...games.map((game) => ({ key: game, label: formatGameLabel(game) }))];
     }, [upcomingAllocatedMatchrooms]);
 
-    const filteredResources = useMemo(
-        () =>
+    const filterResources = useCallback(
+        (mode: "grid" | "allocation") =>
             resources.filter((item) => {
                 const allocatedMatchroom = matchroomByResourceId.get(item.id);
-                if (viewMode === "allocation") {
+                if (mode === "allocation") {
                     if (!allocatedMatchroom) return false;
                     if (
                         allocationGameFilter !== "all" &&
@@ -557,9 +557,11 @@ export default function ZoneResourcesModule() {
             resources,
             searchQuery,
             statusFilter,
-            viewMode,
         ],
     );
+    const gridResources = useMemo(() => filterResources("grid"), [filterResources]);
+    const allocationResources = useMemo(() => filterResources("allocation"), [filterResources]);
+    const filteredResources = viewMode === "allocation" ? allocationResources : gridResources;
 
     const activeFilterCount = useMemo(
         () =>
@@ -883,8 +885,8 @@ export default function ZoneResourcesModule() {
 
             <SegmentedTabs
                 items={[
-                    { key: "grid", label: "Resource Grid", badge: filteredResources.length },
-                    { key: "allocation", label: "Allocation", badge: filteredResources.length },
+                    { key: "grid", label: "Resource Grid", badge: gridResources.length },
+                    { key: "allocation", label: "Allocation", badge: allocationResources.length },
                 ]}
                 value={viewMode}
                 onChange={(value) => setViewMode(value)}

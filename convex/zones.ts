@@ -874,6 +874,49 @@ export const listPricingRules = query({
   },
 });
 
+const publicPricingRuleValidator = v.object({
+  _id: v.id("pricingRules"),
+  _creationTime: v.number(),
+  zoneId: v.id("zones"),
+  branchId: v.optional(v.string()),
+  assetType: v.string(),
+  isEnabled: v.boolean(),
+  priority: v.number(),
+  tier: v.optional(v.string()),
+  surface: v.optional(v.string()),
+  ruleType: v.optional(v.union(v.literal("percentage_discount"), v.literal("fixed_override"))),
+  value: v.optional(v.number()),
+  timeStart: v.optional(v.string()),
+  timeEnd: v.optional(v.string()),
+  daysOfWeek: v.optional(v.array(v.number())),
+  validFrom: v.optional(v.string()),
+  validTo: v.optional(v.string()),
+  priceMultiplier: v.optional(v.number()),
+  flatRate: v.optional(v.number()),
+  name: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+// Public matchroom pricing projection. Administrative metadata and disabled
+// rules remain available only through listPricingRules to the zone owner.
+export const listPublicEnabledPricingRules = query({
+  args: { zoneId: v.id("zones") },
+  returns: v.array(publicPricingRuleValidator),
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone || zone.status !== "active") return [];
+    const rules = await ctx.db
+      .query("pricingRules")
+      .withIndex("by_zoneId_and_isEnabled", (q) =>
+        q.eq("zoneId", args.zoneId).eq("isEnabled", true),
+      )
+      .take(200);
+    return rules
+      .map(({ description: _description, createdByUid: _createdByUid, ...rule }) => rule);
+  },
+});
+
 // Create pricing rule
 export const createPricingRule = mutation({
   args: {

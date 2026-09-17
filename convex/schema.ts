@@ -1602,6 +1602,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_zoneId", ["zoneId"])
+    .index("by_zoneId_and_isEnabled", ["zoneId", "isEnabled"])
     .index("by_zoneId_and_assetType", ["zoneId", "assetType"]),
 
   // ============================================

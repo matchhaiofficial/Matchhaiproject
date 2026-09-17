@@ -34,7 +34,11 @@ import {
 } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import { toLocalDateString } from "../../../src/utils/scheduleTime";
+import {
+    closestDateTimeForClock,
+    combineLocalDateTime,
+    toLocalDateString,
+} from "../../../src/utils/scheduleTime";
 import {
     ZoneBookingsAllocationSheet,
     type ZoneBookingAllocationResourceOption,
@@ -864,6 +868,10 @@ export default function ZoneBookingsModule() {
         () => toClockMinutes(selectedRequest?.preferredTime) ?? toClockMinutes(counterOptions[0]?.time) ?? 12 * 60,
         [counterOptions, selectedRequest?.preferredTime],
     );
+    const originalStartAt = useMemo(() => {
+        const date = toDateString(selectedRequest?.preferredDate) || counterOptions[0]?.date;
+        return combineLocalDateTime(date, selectedRequest?.preferredTime || counterOptions[0]?.time);
+    }, [counterOptions, selectedRequest?.preferredDate, selectedRequest?.preferredTime]);
     const originalDurationMinutes = useMemo(() => {
         const explicitMinutes = Number((selectedRequest?.raw as any)?.durationMinutes || 0);
         if (Number.isFinite(explicitMinutes) && explicitMinutes > 0) return explicitMinutes;
@@ -871,24 +879,16 @@ export default function ZoneBookingsModule() {
         if (Number.isFinite(durationHours) && durationHours > 0) return Math.round(durationHours * 60);
         return 60;
     }, [selectedRequest?.raw]);
-    const allowedStartMin = originalStartMinutes - 120;
-    const allowedStartMax = originalStartMinutes + 120;
-    const originalEndMinutes = originalStartMinutes + originalDurationMinutes;
-    const allowedEndMin = originalEndMinutes - 120;
-    const allowedEndMax = originalEndMinutes + 120;
-
     const counterValidationMessage = useMemo(() => {
         const option = counterOptions[0];
         if (!option?.date || !option?.time || !option?.endTime) return "Date, start time, and end time are required.";
-        const start = toClockMinutes(option.time);
-        const end = toClockMinutes(option.endTime);
-        if (start === null || end === null) return "Use a valid start and end time.";
-        if (end <= start) return "Ending booking time must be after the starting time.";
-        if (start < allowedStartMin || start > allowedStartMax || end < allowedEndMin || end > allowedEndMax) {
+        const startAt = combineLocalDateTime(option.date, option.time);
+        if (startAt === null || originalStartAt === null) return "Use a valid start time.";
+        if (Math.abs(startAt - originalStartAt) > 2 * 60 * 60 * 1000) {
             return "Alternative time must stay within 2 hours of the original booking window.";
         }
         return "";
-    }, [allowedEndMax, allowedEndMin, allowedStartMax, allowedStartMin, counterOptions]);
+    }, [counterOptions, originalStartAt]);
 
     const pendingOffers = useMemo(() => {
         const now = Date.now();
@@ -1013,26 +1013,29 @@ export default function ZoneBookingsModule() {
             prev.map((option, optionIndex) => {
                 if (optionIndex !== index) return option;
                 if (Object.prototype.hasOwnProperty.call(patch, "time")) {
-                    const startRaw = toClockMinutes(patch.time);
-                    const start = startRaw === null
+                    const selectedTime = patch.time || "";
+                    const nextStartAt = originalStartAt === null
                         ? null
-                        : Math.max(allowedStartMin, Math.min(allowedStartMax, startRaw));
+                        : closestDateTimeForClock(originalStartAt, selectedTime);
+                    const nextStart = nextStartAt === null ? null : new Date(nextStartAt);
+                    const nextEnd = nextStartAt === null
+                        ? null
+                        : new Date(nextStartAt + originalDurationMinutes * 60 * 1000);
                     return {
                         ...option,
-                        ...(patch.date !== undefined ? { date: patch.date } : {}),
-                        time: start === null ? patch.time || "" : fromClockMinutes(start),
-                        endTime: start === null ? option.endTime : fromClockMinutes(start + originalDurationMinutes),
+                        date: nextStart ? toLocalDateString(nextStart) : option.date,
+                        time: nextStart
+                            ? fromClockMinutes(nextStart.getHours() * 60 + nextStart.getMinutes())
+                            : selectedTime,
+                        endTime: nextEnd
+                            ? fromClockMinutes(nextEnd.getHours() * 60 + nextEnd.getMinutes())
+                            : option.endTime,
                     };
                 }
                 if (Object.prototype.hasOwnProperty.call(patch, "endTime")) {
-                    const endRaw = toClockMinutes(patch.endTime);
-                    const end = endRaw === null
-                        ? null
-                        : Math.max(allowedEndMin, Math.min(allowedEndMax, endRaw));
                     return {
                         ...option,
-                        ...(patch.date !== undefined ? { date: patch.date } : {}),
-                        endTime: end === null ? patch.endTime : fromClockMinutes(end),
+                        endTime: patch.endTime,
                     };
                 }
                 return { ...option, ...patch };

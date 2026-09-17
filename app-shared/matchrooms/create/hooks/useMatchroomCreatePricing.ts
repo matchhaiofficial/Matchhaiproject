@@ -4,11 +4,14 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import {
   applyPricingRulesToRate,
-  getEnabledPricingRulesForZone,
+  getPublicEnabledPricingRulesForZone,
   type PricingRule,
 } from "../../../../src/services/pricingRuleService";
 import type { Zone } from "../../../../src/services/convex/zoneService";
-import { hasMinimumResourceCapacity } from "../utils/matchroomResourceCapacity";
+import {
+  canAutoSelectSoleRateOption,
+  hasMinimumResourceCapacity,
+} from "../utils/matchroomResourceCapacity";
 
 export type ZoneRateOption = {
   key: string;
@@ -207,7 +210,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
         return;
       }
 
-      const rules = await getEnabledPricingRulesForZone(selectedZoneId);
+      const rules = await getPublicEnabledPricingRulesForZone(selectedZoneId);
       if (!cancelled) {
         setZonePricingRules(rules);
       }
@@ -522,7 +525,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       }
     }
 
-    if (options.length === 1) {
+    if (canAutoSelectSoleRateOption(options.map((option) => option.key), availabilityByKey)) {
       setSelectedZoneRateKey((prev) => (prev === options[0].key ? prev : options[0].key));
       setZoneRate((prev) => (prev === options[0].price ? prev : options[0].price));
       return;
@@ -540,6 +543,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
     selectedZoneRateKey,
     resourceCapacity,
     zonePricingRules,
+    availabilityByKey,
   ]);
 
   const selectZoneRateOption = (key: string, price: number) => {

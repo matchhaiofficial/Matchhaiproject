@@ -53,6 +53,13 @@ describe("cleanConvexErrorMessage", () => {
     expect(cleaned).not.toMatch(/CONVEX|Request ID|Server Error|Called by client|at handler/i);
     expect(cleaned).toContain("Slot already taken");
   });
+
+  it("removes named Convex stack frames from captured mutation errors", () => {
+    const raw = "One or more players already have a matchroom or booking request scheduled at this time. at assertNoParticipantTimeConflict (../../convex/bookingConflicts.ts:526:4) at async createMatchroomFromValidatedArgs (../../convex/matchrooms.ts:4149:34)";
+    const cleaned = cleanConvexErrorMessage(raw);
+    expect(cleaned).toBe("One or more players already have a matchroom or booking request scheduled at this time.");
+    expect(cleaned).not.toMatch(/bookingConflicts|matchrooms\.ts|assertNoParticipant/i);
+  });
 });
 
 describe("sanitizeToastMessage", () => {
@@ -65,5 +72,9 @@ describe("sanitizeToastMessage", () => {
   });
   it("returns default for blank", () => {
     expect(sanitizeToastMessage("   ")).toBe(DEFAULT_USER_FACING_ERROR);
+  });
+  it("maps participant conflicts to concise customer copy", () => {
+    const out = sanitizeToastMessage("One or more players already have a matchroom or booking request scheduled at this time. at assertNoParticipantTimeConflict (../../convex/bookingConflicts.ts:526:4)");
+    expect(out).toBe("You already have another matchroom or booking at this time. Choose a different time.");
   });
 });

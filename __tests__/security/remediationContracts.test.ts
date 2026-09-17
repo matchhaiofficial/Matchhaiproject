@@ -43,6 +43,15 @@ describe("remediation contracts", () => {
     expect(matchrooms).toContain("await assertBranchOperatingHoursAvailable(ctx");
   });
 
+  it("uses a bounded player-safe pricing projection without weakening the admin endpoint", () => {
+    const zones = read("convex/zones.ts");
+    const pricing = read("src/services/convex/pricingRuleService.ts");
+    expect(zones).toContain("export const listPublicEnabledPricingRules = query");
+    expect(zones).toContain('.take(200)');
+    expect(zones).toContain('await requireOwnedZone(ctx, args.zoneId)');
+    expect(pricing).toContain("api.zones.listPublicEnabledPricingRules");
+  });
+
   it("uses VeevoTech MNP routing with a non-blocking fallback", () => {
     const otp = read("convex/phoneOtp.ts");
     expect(otp).toContain("/v3/hrl_lookup");

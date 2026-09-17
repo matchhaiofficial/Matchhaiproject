@@ -82,3 +82,31 @@ export function combineKarachiDateTime(
   const ms = new Date(`${date}T${time}:00+05:00`).getTime();
   return Number.isFinite(ms) ? ms : null;
 }
+
+// Resolve a selected clock time to the closest calendar occurrence around an
+// existing booking. Changing Sep 20 23:00 to 00:00 therefore becomes Sep 21.
+export function closestDateTimeForClock(
+  originalStartAt: number,
+  selectedTime?: string | null,
+): number | null {
+  const minutes = clockMinutesFromString(selectedTime);
+  if (!Number.isFinite(originalStartAt) || minutes === null) return null;
+
+  const original = new Date(originalStartAt);
+  const candidates = [-1, 0, 1].map((dayOffset) =>
+    new Date(
+      original.getFullYear(),
+      original.getMonth(),
+      original.getDate() + dayOffset,
+      Math.floor(minutes / 60),
+      minutes % 60,
+      0,
+      0,
+    ).getTime(),
+  );
+  return candidates.reduce((closest, candidate) =>
+    Math.abs(candidate - originalStartAt) < Math.abs(closest - originalStartAt)
+      ? candidate
+      : closest,
+  );
+}

@@ -3536,7 +3536,7 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
         isActive: true,
         isDemo: true,
         seedSource: KARACHI_REALISTIC_SEED_SOURCE,
-        resourceModelVersion: 0,
+        resourceModelVersion: 1,
         operatingHours: createDefaultBranchOperatingHours(),
       };
     });
@@ -3570,6 +3570,13 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
       capacity: buildKarachiAggregateCapacity(branches),
       pricing: branches[0]?.pricing,
       defaultPricing: { hourlyRate: 350, currency: DEFAULT_CURRENCY },
+      migration: {
+        status: "succeeded",
+        perBranchSeatModel: true,
+        resourceModelVersion: 1,
+        migratedAt: now,
+        branchCount: branches.length,
+      },
       approvedAt: now,
       createdAt: existingZone ? existingZone.createdAt : now,
       updatedAt: now,
@@ -3799,6 +3806,54 @@ export const repairKarachiRealisticOperatingHours = mutation({
     }
 
     return { scannedZones: zones.length, updatedZones, updatedBranches };
+  },
+});
+
+export const repairKarachiRealisticMigrationMetadata = mutation({
+  args: { seedKey: v.string() },
+  returns: v.object({
+    scannedZones: v.number(),
+    updatedZones: v.number(),
+    skippedWithoutResources: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    requireSeedKey(args.seedKey);
+    const runtime = String(process.env.MATCHHAI_ENV || "").trim().toLowerCase();
+    if (!["qa", "development", "dev", "local", "test"].includes(runtime)) {
+      throw new Error("Migration-metadata seed repair is restricted to QA/development runtimes.");
+    }
+    const zones = await ctx.db
+      .query("zones")
+      .withIndex("by_seedSource", (q) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+      .take(100);
+
+    let updatedZones = 0;
+    let skippedWithoutResources = 0;
+    for (const zone of zones) {
+      const branches = Array.isArray(zone.branches) ? zone.branches : [];
+      const firstResource = await ctx.db
+        .query("zoneResources")
+        .withIndex("by_zoneId", (q) => q.eq("zoneId", zone._id))
+        .first();
+      if (!branches.length || !firstResource) {
+        skippedWithoutResources += 1;
+        continue;
+      }
+      await ctx.db.patch(zone._id, {
+        branches: branches.map((branch: any) => ({ ...branch, resourceModelVersion: 1 })),
+        migration: {
+          status: "succeeded",
+          perBranchSeatModel: true,
+          resourceModelVersion: 1,
+          migratedAt: Date.now(),
+          branchCount: branches.length,
+        },
+        updatedAt: Date.now(),
+      });
+      updatedZones += 1;
+    }
+
+    return { scannedZones: zones.length, updatedZones, skippedWithoutResources };
   },
 });
 
