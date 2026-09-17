@@ -131,4 +131,5 @@ Proceed only after QA, usage testing, and explicit approval:
 - The transferred EAS project is now `@matchhai/matchhai` / `cc63aac8-7e68-4dbc-9e95-c59e145fb7b4`.
 - The Android EAS keystore matches the Play Console upload SHA-1; the last store build used version code 27.
 - An internal Android preview profile was added for remote QA against `striped-dog-623`; it does not enable PostHog, EasyPaisa, or QA bypasses.
+- EAS internal Android build `c0721021-9502-4c69-8c96-4d2f1c545416` finished successfully as version code 29; the hosted APK expires on 2026-10-01.
 - TypeScript and Expo Doctor (18/18) pass before the preview build.
