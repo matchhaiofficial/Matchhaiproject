@@ -22,7 +22,9 @@ FCM V1 service account.
 
 The `preview` profile creates an Expo-hosted internal-distribution Android APK.
 It uses the EAS `preview` environment and QA Convex deployment
-`striped-dog-623`; PostHog, live EasyPaisa, and bypass flags are absent. Because
+`striped-dog-623`; PostHog and bypass flags are absent. EasyPaisa is controlled
+server-side and was enabled on QA on 2026-09-18 using the existing production
+merchant REST credentials for explicit real-money testing. Because
 it keeps the production package ID, installing it may replace the store app on
 the same device. Do not submit a preview artifact to either store.
 

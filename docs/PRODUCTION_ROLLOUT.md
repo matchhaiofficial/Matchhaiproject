@@ -57,7 +57,12 @@ Complete and record manual tests for both player and zone-admin accounts:
 - Wallet debit/refund, notifications, account deletion, and super-admin/zone-admin authorization work and reject unauthorized callers.
 - Existing/older client call paths remain compatible with the guarded canonical backend helpers.
 
-EasyPaisa provider testing was previously deferred. It must be completed with the intended production-like sandbox credentials, callback/IPN route, success, decline, timeout, duplicate callback, reconciliation, and refund cases before release.
+EasyPaisa staging access remains unavailable. On 2026-09-18 the release owner
+explicitly authorized production merchant credentials on QA for limited
+real-money REST testing. The hosted fallback and global payment-reconciliation
+cron remain disabled. Treat every QA attempt as a real charge and test the
+callback/IPN route, success, decline, timeout, duplicate callback,
+reconciliation, and refund behavior before release.
 
 PostHog is intentionally disabled in QA. Use local logs and Convex metrics for QA evidence, and confirm that no analytics requests are emitted. The 2026-09-14 automated baseline is 78 Jest suites, 408 passing tests, 43 intentional todos, 4 passing Convex tests, TypeScript clean, and a successful Android export; rerun it on the final QA commit.
 

@@ -30,7 +30,7 @@
 - [x] Create a fresh `matchhai-qa` project under the `shakir-yasin` Convex team.
 - [x] Configure unique QA authentication and internal signing secrets.
 - [x] Reuse approved Didit, Veevotech, Resend, Steam, FACEIT, and support credentials. Firebase QA is explicitly deferred with push testing.
-- [x] Disable PostHog and EasyPaisa in QA.
+- [x] Keep PostHog disabled in QA. EasyPaisa was initially disabled, then explicitly enabled on 2026-09-18 with production merchant credentials for controlled real-money testing.
 - [x] Disable demo bypasses and nonessential maintenance jobs.
 - [x] Deploy and validate the backend only on QA.
 - [x] Seed QA players, zone admins, a superadmin, teams, venues, branches, operating hours, resources, and matchrooms with Rs 5,000 player wallets.
@@ -41,7 +41,7 @@
 - [x] Create an ignored `.env.local` pointing exclusively to the QA Convex deployment.
 - [x] Ensure React Native Firebase messaging is safely skipped in Expo Go.
 - [ ] Start with `npx expo start --go --tunnel --clear`.
-- [ ] Test all functionality except native Firebase push delivery and live EasyPaisa processing.
+- [ ] Test all functionality except native Firebase push delivery; EasyPaisa QA attempts now use real money.
 
 ### EAS preparation
 
@@ -75,10 +75,12 @@
 ## Workstream D — Waiting for EasyPaisa
 
 - [ ] Obtain staging Store ID, API credentials, account number, test accounts, IPN configuration, and whitelist requirements.
-- [ ] Enable EasyPaisa only after staging configuration is complete.
+- [ ] Replace the temporary live-merchant QA exception with staging credentials when EasyPaisa provides them.
 - [ ] Test success, failure, expiry, cancellation, reversal, inquiry, callback authentication, and idempotency.
 
-Until then, QA must expose an explicit “EasyPaisa unavailable in QA” state without attempting provider calls.
+Staging remains pending. As a temporary exception, QA uses the live REST
+merchant configuration with hosted fallback disabled. Do not treat this as a
+sandbox and do not enable bulk or automated payment tests.
 
 ## Workstream E — Conditional Store Credentials
 
@@ -130,6 +132,6 @@ Proceed only after QA, usage testing, and explicit approval:
 
 - The transferred EAS project is now `@matchhai/matchhai` / `cc63aac8-7e68-4dbc-9e95-c59e145fb7b4`.
 - The Android EAS keystore matches the Play Console upload SHA-1; the last store build used version code 27.
-- An internal Android preview profile was added for remote QA against `striped-dog-623`; it does not enable PostHog, EasyPaisa, or QA bypasses.
+- An internal Android preview profile was added for remote QA against `striped-dog-623`; it does not enable PostHog or QA bypasses. EasyPaisa was enabled later through QA Convex server configuration, so no APK rebuild was required.
 - EAS internal Android build `c0721021-9502-4c69-8c96-4d2f1c545416` finished successfully as version code 29; the hosted APK expires on 2026-10-01.
 - TypeScript and Expo Doctor (18/18) pass before the preview build.
