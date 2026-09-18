@@ -1,6 +1,6 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import {
   BRANCH_WEEKDAYS,
@@ -10,7 +10,10 @@ import {
 } from "../../../../constants/branchOperatingHours";
 import { COLORS, FONTS, RADII, SPACING } from "../../../../src/theme";
 import { AppButton } from "../../../../src/components/AppPrimitives";
-import { AppPickerSheet } from "../../../../src/components/AppModalPrimitives";
+import {
+  AppModalBody,
+  AppPickerSheet,
+} from "../../../../src/components/AppModalPrimitives";
 
 type Props = {
   value: BranchOperatingHours | null;
@@ -76,9 +79,11 @@ function getNextKarachiDate(existingDates: Set<string>) {
 }
 
 export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
+  const { height: windowHeight } = useWindowDimensions();
   const [activePicker, setActivePicker] = useState<ActivePicker>(null);
   const [pickerValue, setPickerValue] = useState(new Date());
   const [timeDraft, setTimeDraft] = useState<TimeDraft>({ hour: 9, minute: 0, period: "AM" });
+  const timeColumnMaxHeight = Math.max(184, Math.min(420, Math.floor(windowHeight * 0.55)));
   if (!value) {
     return (
       <View style={styles.card}>
@@ -265,31 +270,46 @@ export default function BranchOperatingHoursEditor({ value, onChange }: Props) {
             }}
           ><Text style={styles.pickerAction}>Done</Text></Pressable>
         </View>
-        <ScrollView contentContainerStyle={styles.timePickerContent}>
+        <AppModalBody style={styles.timePickerContent}>
           <View style={styles.timePickerRow}>
-            <View style={styles.timeColumn}>
+            <ScrollView
+              style={[styles.timeColumn, { maxHeight: timeColumnMaxHeight }]}
+              contentContainerStyle={styles.timeColumnContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
               {HOURS_12.map((hour) => (
                 <Pressable key={hour} style={[styles.timeOption, timeDraft.hour === hour && styles.timeOptionActive]} onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}>
                   <Text style={[styles.timeOptionText, timeDraft.hour === hour && styles.timeOptionTextActive]}>{String(hour).padStart(2, "0")}</Text>
                 </Pressable>
               ))}
-            </View>
-            <View style={styles.timeColumn}>
+            </ScrollView>
+            <ScrollView
+              style={[styles.timeColumn, { maxHeight: timeColumnMaxHeight }]}
+              contentContainerStyle={styles.timeColumnContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
               {MINUTES.map((minute) => (
                 <Pressable key={minute} style={[styles.timeOption, timeDraft.minute === minute && styles.timeOptionActive]} onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}>
                   <Text style={[styles.timeOptionText, timeDraft.minute === minute && styles.timeOptionTextActive]}>{String(minute).padStart(2, "0")}</Text>
                 </Pressable>
               ))}
-            </View>
-            <View style={styles.timeColumn}>
+            </ScrollView>
+            <ScrollView
+              style={[styles.timeColumn, { maxHeight: timeColumnMaxHeight }]}
+              contentContainerStyle={styles.timeColumnContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
               {PERIODS.map((period) => (
                 <Pressable key={period} style={[styles.timeOption, timeDraft.period === period && styles.timeOptionActive]} onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}>
                   <Text style={[styles.timeOptionText, timeDraft.period === period && styles.timeOptionTextActive]}>{period}</Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           </View>
-        </ScrollView>
+        </AppModalBody>
       </AppPickerSheet>
       ) : null}
     </View>
@@ -329,13 +349,14 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: SPACING.lg },
   pickerCard: { backgroundColor: COLORS.cardDark, borderColor: COLORS.cardBorder, borderRadius: RADII.lg, borderWidth: 1, padding: SPACING.lg },
   pickerActions: { flexDirection: "row", justifyContent: "flex-end", gap: SPACING.sm, marginTop: SPACING.md },
-  customPickerHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingBottom: SPACING.md },
-  pickerAction: { color: COLORS.accent, fontFamily: FONTS.heading, fontSize: 14 },
-  timePickerContent: { paddingBottom: SPACING.lg },
-  timePickerRow: { flexDirection: "row", gap: SPACING.sm },
-  timeColumn: { flex: 1, gap: SPACING.xs },
-  timeOption: { alignItems: "center", borderColor: COLORS.inputBorder, borderRadius: RADII.md, borderWidth: 1, minHeight: 40, justifyContent: "center" },
-  timeOptionActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
-  timeOptionText: { color: COLORS.text, fontFamily: FONTS.body },
-  timeOptionTextActive: { color: "#fff", fontFamily: FONTS.heading },
+  customPickerHeader: { alignItems: "center", borderBottomColor: COLORS.overlayLight, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingBottom: SPACING.md, paddingHorizontal: SPACING.xl, paddingTop: SPACING.md },
+  pickerAction: { color: COLORS.accent, fontFamily: FONTS.body, fontSize: 14 },
+  timePickerContent: { paddingHorizontal: SPACING.xl, paddingTop: SPACING.md, paddingBottom: SPACING.lg },
+  timePickerRow: { flexDirection: "row", gap: SPACING.md, minHeight: 0 },
+  timeColumn: { flex: 1 },
+  timeColumnContent: { gap: SPACING.sm, paddingBottom: SPACING.xs },
+  timeOption: { alignItems: "center", backgroundColor: COLORS.cardBackground, borderColor: COLORS.inputBorder, borderRadius: RADII.md, borderWidth: 1, minHeight: 44, justifyContent: "center" },
+  timeOptionActive: { backgroundColor: "transparent", borderColor: COLORS.accent },
+  timeOptionText: { color: COLORS.muted, fontFamily: FONTS.body, fontSize: 12 },
+  timeOptionTextActive: { color: COLORS.text, fontFamily: FONTS.heading },
 });

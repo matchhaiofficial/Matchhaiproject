@@ -86,6 +86,17 @@ export function ZoneBookingsMatchroomsSection({
   onAllocateResources,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const listRef = React.useRef<FlatList<ZoneMatchroomListItem>>(null);
+
+  React.useEffect(() => {
+    if (loadingMatchrooms || !focusedMatchroomId) return;
+    const targetIndex = matchrooms.findIndex((item) => String(item.id) === String(focusedMatchroomId));
+    if (targetIndex < 0) return;
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index: targetIndex, animated: true, viewPosition: 0.2 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusedMatchroomId, loadingMatchrooms, matchrooms]);
 
   const header = (
     <>
@@ -170,6 +181,7 @@ export function ZoneBookingsMatchroomsSection({
 
   return (
     <FlatList
+      ref={listRef}
       data={loadingMatchrooms ? [] : matchrooms}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.content}
@@ -195,6 +207,15 @@ export function ZoneBookingsMatchroomsSection({
       }
       onEndReached={onLoadMore}
       onEndReachedThreshold={0.4}
+      onScrollToIndexFailed={({ averageItemLength, index }) => {
+        listRef.current?.scrollToOffset({
+          offset: Math.max(0, averageItemLength * index),
+          animated: true,
+        });
+        setTimeout(() => {
+          listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.2 });
+        }, 120);
+      }}
       renderItem={({ item }) => (
         <MatchroomRow
           item={item}

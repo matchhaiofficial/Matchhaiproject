@@ -380,7 +380,7 @@ export default function MockPaymentScreen() {
                     onPress={handleMockPayment}
                     disabled={payDisabled}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={payDisabled ? styles.payBtnDisabled : undefined}
+                    style={[styles.payBtn, payDisabled && styles.payBtnDisabled]}
                 >
                     {processing ? (
                         <ActivityIndicator color="#FFF" />

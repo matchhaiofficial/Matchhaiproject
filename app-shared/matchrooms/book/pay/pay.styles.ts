@@ -22,12 +22,13 @@ export default StyleSheet.create({
 
     // Footer
     payBtn: {
-        height: 56,
+        minHeight: 56,
         backgroundColor: COLORS.accent,
         borderRadius: RADII.lg,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: SPACING.xl,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
         ...SHADOWS.accentStrong,
     },
     payBtnDisabled: {

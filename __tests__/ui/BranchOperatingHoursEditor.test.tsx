@@ -7,6 +7,8 @@ jest.mock("../../src/components/AppModalPrimitives", () => {
   return {
     AppPickerSheet: ({ visible, children }: { visible: boolean; children: React.ReactNode }) =>
       visible ? React.createElement(React.Fragment, null, children) : null,
+    AppModalBody: ({ children }: { children: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
   };
 });
 

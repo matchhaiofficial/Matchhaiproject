@@ -12,7 +12,8 @@ export default StyleSheet.create({
         justifyContent: "center",
     },
     content: {
-        padding: SPACING.screenPadding,
+        paddingHorizontal: 0,
+        paddingTop: 0,
         paddingBottom: SPACING.xxl,
         gap: SPACING.md,
     },
@@ -88,4 +89,3 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
     },
 });
-
