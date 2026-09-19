@@ -25,6 +25,7 @@ import {
 import type { Zone } from "../../src/services/convex/zoneService";
 import { COLORS } from "../../src/theme";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { getUserFacingErrorMessage } from "../../src/utils/userFacingErrors";
 import { formatTeamChallengeShare } from "../../src/utils/shareContent";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import ZonePicker from "../../app-shared/matchrooms/create/components/ZonePicker";
@@ -479,7 +480,7 @@ export default function TeamMatchChallengeDetails() {
                 }, 1200);
             }
         } catch (error: any) {
-            showToast({ type: "error", title: "Payment failed", message: error?.message || "Could not start the Easypaisa payment." });
+            showToast({ type: "error", title: "Payment failed", message: getUserFacingErrorMessage(error, "Could not start the Easypaisa payment.") });
         } finally {
             setStartingEasypaisa(false);
         }

@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-nativ
 import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
 import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import { CustomSingleSelect } from "../../src/components/CustomSingleSelect";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
@@ -19,6 +20,8 @@ import {
   formatPakistaniPhone,
   isValidPakistaniPhone,
   normalizePakistaniPhone,
+  PAKISTANI_MOBILE_NETWORK_OPTIONS,
+  type PakistaniMobileNetwork,
 } from "../../src/utils/phoneUtils";
 import { Perf, PerfScope } from "../../src/utils/perfInstrumentation";
 import styles from "../../app-shared/auth/register.styles";
@@ -34,6 +37,7 @@ export default function AdminRegisterStep1() {
   const [venueBrandName, setVenueBrandName] = useState(step1.venueBrandName);
   const [contactEmail, setContactEmail] = useState(step1.contactEmail);
   const [contactPhone, setContactPhone] = useState(step1.contactPhone);
+  const [phoneCarrier, setPhoneCarrier] = useState<PakistaniMobileNetwork>(step1.phoneCarrier || "");
   const [password, setPassword] = useState(step1.password);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [focused, setFocused] = useState<FocusField>(null);
@@ -235,7 +239,7 @@ export default function AdminRegisterStep1() {
     }
     setOtpSending(true);
     setOtpMessage(null);
-    const result = await sendPhoneOtp(phoneE164);
+    const result = await sendPhoneOtp(phoneE164, phoneCarrier || undefined);
     setOtpSending(false);
     if (!result.ok) {
       setOtpMessage(result.message);
@@ -337,6 +341,7 @@ export default function AdminRegisterStep1() {
             venueBrandName: venueBrandName.trim(),
             contactEmail: contactEmail.trim(),
             contactPhone: phoneE164 || contactPhone.trim(),
+            phoneCarrier,
             phoneVerified: true,
             phoneVerifiedAt: skipPhoneOtp ? Date.now() : step1.phoneVerifiedAt,
             phoneVerifiedE164: phoneE164,
@@ -576,6 +581,21 @@ export default function AdminRegisterStep1() {
         {contactPhone.trim().length > 0 && !isPhoneFormatValid && phoneStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid Pakistani mobile number.</Text>
         ) : null}
+      </View>
+
+      <View style={styles.fieldGroup}>
+        <CustomSingleSelect
+          label={<RegistrationFieldLabel label="Mobile network" required />}
+          value={PAKISTANI_MOBILE_NETWORK_OPTIONS.find((option) => option.value === phoneCarrier)?.label || PAKISTANI_MOBILE_NETWORK_OPTIONS[0].label}
+          options={PAKISTANI_MOBILE_NETWORK_OPTIONS.map((option) => option.label)}
+          onChange={(label) => {
+            const selected = PAKISTANI_MOBILE_NETWORK_OPTIONS.find((option) => option.label === label) || PAKISTANI_MOBILE_NETWORK_OPTIONS[0];
+            setPhoneCarrier(selected.value);
+            setStep1({ phoneCarrier: selected.value });
+          }}
+          icon="sensors"
+        />
+        <Text style={[styles.helperText, { color: COLORS.muted, marginTop: 6 }]}>Choose the current network for a ported number, or leave Automatic to use MNP lookup.</Text>
       </View>
 
       <View style={styles.fieldGroup}>

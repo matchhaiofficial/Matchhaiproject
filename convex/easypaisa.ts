@@ -334,6 +334,39 @@ function isActiveCheckoutTransaction(transaction: any, now: number) {
   );
 }
 
+// A mobile-account prompt can expire at the provider before the merchant API
+// returns a terminal result.  The inquiry then commonly reports FAILED with
+// `inquiry_unverified`, which we keep pending so a late provider success can
+// still be reconciled.  It is safe to start a new attempt only when the
+// provider has already reported failure or the merchant checkout itself has
+// expired.  This keeps retries recoverable without creating two live payment
+// attempts that could both credit a wallet.
+function isRetryableStaleCheckoutTransaction(transaction: any, now: number) {
+  if (!transaction || !ACTIVE_PAYMENT_STATUSES.includes(transaction.status)) return false;
+  const checkoutExpired = Number(transaction.expiresAt || 0) > 0 && Number(transaction.expiresAt) <= now;
+  const providerFailed = /^(FAILED|0001)$/i.test(String(transaction.providerStatus || "").trim());
+  const inquiryUnverified = String(transaction.lastError || "").trim().toLowerCase() === "inquiry_unverified";
+  return checkoutExpired || (providerFailed && inquiryUnverified);
+}
+
+function safeCheckoutStartMessage(rawMessage: string, responseCode?: unknown) {
+  const message = String(rawMessage || "").toLowerCase();
+  const code = String(responseCode || "").trim();
+  if (code === "0001" || message.includes("system error")) {
+    return "Easypaisa could not start this payment. Please wait a moment and try again.";
+  }
+  if (message.includes("account does not exist") || message.includes("account do not exist")) {
+    return "This Easypaisa account was not found. Check the number and try again.";
+  }
+  if (message.includes("payment method not enabled")) {
+    return "Easypaisa is unavailable right now. Try again or use MatchHai Wallet.";
+  }
+  if (isRecoverableCheckoutStartError(rawMessage)) {
+    return "Easypaisa is taking longer than expected. Check your phone and refresh the payment status.";
+  }
+  return "Easypaisa could not start this payment. Please try again.";
+}
+
 const WALLET_TOPUP_REUSE_WINDOW_MS = 2 * 60 * 1000;
 
 function hasDomainCheckoutArgs(args: any) {
@@ -1191,6 +1224,10 @@ export const getStartCheckoutContext = internalQuery({
         activeTransaction = chooseLatestActiveTransaction(existing, now);
       }
 
+      if (args.forceNew && isRetryableStaleCheckoutTransaction(activeTransaction, now)) {
+        activeTransaction = null;
+      }
+
       return {
         userId: user._id,
         userPhone: args.phone || user.phone || null,
@@ -1308,6 +1345,10 @@ export const getStartCheckoutContext = internalQuery({
       activeTransaction = null;
     }
 
+    if (args.forceNew && isRetryableStaleCheckoutTransaction(activeTransaction, now)) {
+      activeTransaction = null;
+    }
+
     if (activeTransaction && Number(activeTransaction.amount || 0) !== amount) {
       throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
     }
@@ -1338,6 +1379,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
     appReturnUrl: v.string(),
     expiresAt: v.number(),
     flow: v.string(),
+    forceNew: v.optional(v.boolean()),
     phoneSource: v.optional(v.string()),
     checkoutPhoneMasked: v.optional(v.string()),
     matchroomCreateArgs: v.optional(v.any()),
@@ -1364,13 +1406,16 @@ export const createCheckoutTransactionWithLock = internalMutation({
         const pointedTransaction = await ctx.db.get(intent.activePaymentTransactionId);
         if (
           pointedTransaction &&
-          String(pointedTransaction.bookingIntentId || "") === String(args.bookingIntentId) &&
-          isActiveCheckoutTransaction(pointedTransaction, now)
+          String(pointedTransaction.bookingIntentId || "") === String(args.bookingIntentId)
         ) {
-          return {
-            transaction: pointedTransaction,
-            ...buildAttemptFields("reused"),
-          };
+          if (args.forceNew && isRetryableStaleCheckoutTransaction(pointedTransaction, now)) {
+            await retireCheckoutAttemptForRetry(ctx, pointedTransaction, now);
+          } else if (isActiveCheckoutTransaction(pointedTransaction, now)) {
+            return {
+              transaction: pointedTransaction,
+              ...buildAttemptFields("reused"),
+            };
+          }
         }
       }
 
@@ -1381,16 +1426,20 @@ export const createCheckoutTransactionWithLock = internalMutation({
         .take(25);
       const activeTransaction = chooseLatestActiveTransaction(existing, now);
       if (activeTransaction) {
-        await ctx.db.patch(args.bookingIntentId, {
-          activePaymentTransactionId: activeTransaction._id,
-          activePaymentOrderRefNum: activeTransaction.orderRefNum,
-          activePaymentExpiresAt: activeTransaction.expiresAt,
-          updatedAt: now,
-        });
-        return {
-          transaction: activeTransaction,
-          ...buildAttemptFields("reused"),
-        };
+        if (args.forceNew && isRetryableStaleCheckoutTransaction(activeTransaction, now)) {
+          await retireCheckoutAttemptForRetry(ctx, activeTransaction, now);
+        } else {
+          await ctx.db.patch(args.bookingIntentId, {
+            activePaymentTransactionId: activeTransaction._id,
+            activePaymentOrderRefNum: activeTransaction.orderRefNum,
+            activePaymentExpiresAt: activeTransaction.expiresAt,
+            updatedAt: now,
+          });
+          return {
+            transaction: activeTransaction,
+            ...buildAttemptFields("reused"),
+          };
+        }
       }
     } else {
       const user = await ctx.db.get(args.userId);
@@ -1403,10 +1452,16 @@ export const createCheckoutTransactionWithLock = internalMutation({
         if (
           pointedTransaction &&
           pointedTransaction.kind === "wallet_topup" &&
-          String(pointedTransaction.userId) === String(args.userId) &&
-          isActiveCheckoutTransaction(pointedTransaction, now)
+          String(pointedTransaction.userId) === String(args.userId)
         ) {
-          if (shouldIgnoreActiveWalletTopupForRequest(pointedTransaction, args, now)) {
+          if (args.forceNew && isRetryableStaleCheckoutTransaction(pointedTransaction, now)) {
+            await retireCheckoutAttemptForRetry(ctx, pointedTransaction, now);
+          } else if (!isActiveCheckoutTransaction(pointedTransaction, now)) {
+            // The pointer can outlive the checkout TTL. Leave it untouched
+            // unless this is an explicit fresh retry; the stale row is not a
+            // reusable active attempt and the new transaction will replace
+            // the pointer below.
+          } else if (shouldIgnoreActiveWalletTopupForRequest(pointedTransaction, args, now)) {
             await ctx.db.patch(args.userId, {
               activeTopupPaymentTransactionId: undefined,
               activeTopupAmount: undefined,
@@ -1440,7 +1495,9 @@ export const createCheckoutTransactionWithLock = internalMutation({
       }
       const activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
       if (activeTransaction) {
-        if (shouldIgnoreActiveWalletTopupForRequest(activeTransaction, args, now)) {
+        if (args.forceNew && isRetryableStaleCheckoutTransaction(activeTransaction, now)) {
+          await retireCheckoutAttemptForRetry(ctx, activeTransaction, now);
+        } else if (shouldIgnoreActiveWalletTopupForRequest(activeTransaction, args, now)) {
           if (String(user.activeTopupPaymentTransactionId || "") === String(activeTransaction._id)) {
             await ctx.db.patch(args.userId, {
               activeTopupPaymentTransactionId: undefined,
@@ -1566,6 +1623,24 @@ async function clearActivePaymentPointerIfMatching(ctx: any, transaction: any, n
   }
 }
 
+async function retireCheckoutAttemptForRetry(ctx: any, transaction: any, now: number) {
+  const checkoutExpired = Number(transaction.expiresAt || 0) > 0 && Number(transaction.expiresAt) <= now;
+  await ctx.db.patch(transaction._id, {
+    status: checkoutExpired ? "expired" : "cancelled",
+    lastError: undefined,
+    nextReconcileAt: undefined,
+    providerPayload: {
+      ...(transaction.providerPayload || {}),
+      retry: {
+        retiredAt: now,
+        reason: "superseded_by_retry",
+      },
+    },
+    updatedAt: now,
+  });
+  await clearActivePaymentPointerIfMatching(ctx, transaction, now);
+}
+
 export const markCheckoutFailed = internalMutation({
   args: {
     transactionId: v.id("paymentTransactions"),
@@ -1578,9 +1653,10 @@ export const markCheckoutFailed = internalMutation({
     const existing = await ctx.db.get(args.transactionId);
     if (!existing) return;
     const now = Date.now();
+    const safeMessage = safeCheckoutStartMessage(args.message);
     await ctx.db.patch(args.transactionId, {
       status: "failed",
-      lastError: args.message,
+      lastError: safeMessage,
       providerPayload: {
         ...(existing.providerPayload || {}),
         flow: args.flow,
@@ -1589,7 +1665,7 @@ export const markCheckoutFailed = internalMutation({
           initiate: {
             endpointPath: args.endpointPath,
             request: sanitizeForDebug(args.requestPayload || {}),
-            error: args.message,
+            error: safeMessage,
           },
         },
       },
@@ -1761,6 +1837,7 @@ export const startCheckout = action({
       appReturnUrl,
       expiresAt,
       flow,
+      forceNew: args.forceNew,
       phoneSource: args.phone ? "checkout_override" : "profile",
       checkoutPhoneMasked: maskPhone(userPhone),
       matchroomCreateArgs: args.matchroomCreateArgs,
@@ -1927,6 +2004,7 @@ export const startCheckout = action({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initiate Easypaisa payment.";
+      const safeMessage = safeCheckoutStartMessage(message, responseBody?.responseCode);
       logGatewayDebug("rest.initiate.error", {
         transactionId: String(transactionId),
         orderRefNum,
@@ -1940,7 +2018,7 @@ export const startCheckout = action({
           flow,
           endpointPath,
           requestPayload,
-          message,
+          message: safeMessage,
           actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",
         });
 
@@ -1966,9 +2044,9 @@ export const startCheckout = action({
         flow,
         endpointPath,
         requestPayload,
-        message,
+        message: safeMessage,
       });
-      throw error;
+      throw new Error(safeMessage);
     }
 
     return {

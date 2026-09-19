@@ -38,6 +38,11 @@ describe("getUserFacingErrorMessage", () => {
     expect(enabled).toMatch(/Easypaisa is unavailable/i);
     const noAccount = getUserFacingErrorMessage("ACCOUNT DOES NOT EXIST");
     expect(noAccount).toMatch(/account was not found/i);
+    const systemError = getUserFacingErrorMessage(
+      "[CONVEX A(easypaisa:startCheckout)] [Request ID: secret] Server Error Uncaught Error: SYSTEM ERROR at handler (../../convex/easypaisa.ts:1927:13)",
+    );
+    expect(systemError).toMatch(/could not start this payment/i);
+    expect(systemError).not.toMatch(/CONVEX|Request ID|SYSTEM ERROR|easypaisa\.ts|handler/i);
   });
 
   it("falls back to the default message for empty input", () => {

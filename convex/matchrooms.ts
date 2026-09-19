@@ -969,6 +969,10 @@ async function finalizeMatchroomResult(
   };
 
   const venuePayoutEligibleAt = now + ONE_DAY_MS;
+  // Mark venue earnings as pending as soon as the result resolves. The amount
+  // is deliberately calculated at settlement time (rather than frozen here)
+  // so a pilot-rate boundary is handled by the same backend-time rule as the
+  // eventual wallet credit.
   const venuePayoutScheduledFnId = room.zoneOwnerUid
     ? await ctx.scheduler.runAt(
         venuePayoutEligibleAt,
@@ -980,6 +984,7 @@ async function finalizeMatchroomResult(
     resultVerification: nextVerification,
     venuePayoutEligibleAt: room.zoneOwnerUid ? venuePayoutEligibleAt : undefined,
     venuePayoutScheduledFnId: venuePayoutScheduledFnId ? String(venuePayoutScheduledFnId) : undefined,
+    venuePayoutStatus: room.zoneOwnerUid ? "pending" : undefined,
     lifecycleDueAt: undefined,
     updatedAt: now,
   });
@@ -1522,9 +1527,28 @@ function getExpectedPaidPlayerCount(room: any) {
   return Math.max(1, Number(room?.maxPlayers || room?.currentPlayers || getConfirmedSlotCount(room) || 1));
 }
 
-function getMatchroomGrossAmount(room: any) {
-  const explicit = Number(room?.merchantSettlementAmount || room?.paymentAmount || 0);
-  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+async function getMatchroomGrossAmount(ctx: any, room: any) {
+  const merchantSettlementAmount = Number(room?.merchantSettlementAmount || 0);
+  const hostPaymentAmount = Number(room?.paymentAmount || 0);
+  const capturedIntents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", room._id))
+    // A matchroom's paid roster is bounded; keep the defensive cap so a
+    // malformed room cannot turn settlement into an unbounded read.
+    .take(100);
+  const capturedSeatAmount = capturedIntents.reduce((sum: number, intent: any) => {
+    if (intent?.heldStatus !== "captured") return sum;
+    const amount = Number(intent.heldAmount || intent.pricing?.totalCost || 0);
+    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
+  }, 0);
+
+  // `paymentAmount` is the host's direct create payment for player-created
+  // rooms. Joining seats are separate booking-intent holds and must be added
+  // only after capture. Team challenges and walk-ins have no booking intents;
+  // their existing room paymentAmount therefore remains the complete gross.
+  const capturedGross = (hostPaymentAmount > 0 ? hostPaymentAmount : 0) + capturedSeatAmount;
+  const explicitGross = Math.max(merchantSettlementAmount, hostPaymentAmount);
+  if (capturedGross > 0 || explicitGross > 0) return Math.max(capturedGross, explicitGross);
   const perPlayer = Number(room?.pricing?.perPlayer || 0);
   return Math.max(0, perPlayer * getExpectedPaidPlayerCount(room));
 }
@@ -1539,17 +1563,17 @@ function isFullPaidZoneRoom(room: any) {
 async function markMerchantCapturedForMatchroom(ctx: any, matchroomId: Id<"matchrooms">, roomInput?: any) {
   const room = roomInput || await ctx.db.get(matchroomId);
   if (!isFullPaidZoneRoom(room)) return null;
-  if (room.merchantSettlementStatus === "captured") {
+  const amount = await getMatchroomGrossAmount(ctx, room);
+  if (room.merchantSettlementStatus === "captured" && Number(room.merchantSettlementAmount || 0) >= amount) {
     return {
       status: "captured",
       reference: room.merchantSettlementReference || null,
-      amount: Number(room.merchantSettlementAmount || 0),
+      amount: Number(room.merchantSettlementAmount || amount),
       capturedAt: room.merchantSettlementAt || null,
     };
   }
 
   const now = Date.now();
-  const amount = getMatchroomGrossAmount(room);
   const reference = `merchant_capture:${String(matchroomId)}`;
   await ctx.db.patch(matchroomId, {
     merchantSettlementStatus: "captured",
@@ -1617,7 +1641,7 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
         "",
       ).trim() || null
     : null;
-  const grossAmount = getMatchroomGrossAmount(room);
+  const grossAmount = await getMatchroomGrossAmount(ctx, room);
   const normalPayoutRate = Number.isFinite(Number(zone?.normalPayoutRate)) ? Number(zone.normalPayoutRate) : 0.9;
   const pilotPayoutRate = Number.isFinite(Number(zone?.pilotPayoutRate)) ? Number(zone.pilotPayoutRate) : 1.0;
   // Pilot eligibility is decided at payout calculation time using backend time, not client-sent data.
@@ -1654,6 +1678,13 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
     venuePayoutAt: now,
     venuePayoutAmount: payoutAmount,
     venuePayoutReference: reference,
+    // A joiner hold can be captured after the first merchant marker was
+    // written. Reconcile the persisted gross here as metadata only; wallet
+    // movement remains protected by the deterministic venue payout reference.
+    ...(room.merchantSettlementStatus === "captured" &&
+      Number(room.merchantSettlementAmount || 0) < grossAmount
+      ? { merchantSettlementAmount: grossAmount }
+      : {}),
     updatedAt: now,
   });
   console.log("[settlement] venue_payout.completed", {
@@ -4569,7 +4600,7 @@ export const getSettlementSummary = query({
     await requireRoomActor(ctx, room, ["host", "captain", "participant", "zoneOwner"]);
     return {
       matchroomId: String(args.matchroomId),
-      grossAmount: getMatchroomGrossAmount(room),
+      grossAmount: await getMatchroomGrossAmount(ctx, room),
       currency: room.paymentCurrency || room.pricing?.currency || "PKR",
       merchantSettlementStatus: room.merchantSettlementStatus || "pending",
       merchantSettlementAt: room.merchantSettlementAt || null,

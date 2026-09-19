@@ -14,6 +14,17 @@ const DEFAULT_VEEVOTECH_MNP_URL = "https://api.veevotech.com/v3/hrl_lookup";
 const SMS_SEND_FAILURE_MESSAGE = "Could not send OTP. Please check your number and try again.";
 const SMS_PROVIDER_FAILURE_MESSAGE = "SMS service is temporarily unavailable. Please try again later.";
 
+// These are the network names VeevoTech documents/returns for Pakistan. Keep
+// this allowlist server-side so a client cannot inject an arbitrary routing
+// value into the provider request. `undefined` means automatic MNP lookup.
+const VEEVOTECH_RECEIVER_NETWORKS = [
+  "Mobilink-PK",
+  "Telenor-PK",
+  "Ufone-PK",
+  "Zong-PK",
+] as const;
+type VeevoTechReceiverNetwork = (typeof VEEVOTECH_RECEIVER_NETWORKS)[number];
+
 type NormalizedPhone = {
   phoneE164: string;
   phoneDigits: string;
@@ -24,6 +35,15 @@ type PhoneOtpFailure = { ok: false; message: string };
 
 function phoneOtpFailure(message: string): PhoneOtpFailure {
   return { ok: false, message };
+}
+
+function resolveRequestedReceiverNetwork(value: string | undefined) {
+  const requested = String(value || "").trim();
+  if (!requested) return { valid: true as const, receiverNetwork: undefined };
+  if ((VEEVOTECH_RECEIVER_NETWORKS as readonly string[]).includes(requested)) {
+    return { valid: true as const, receiverNetwork: requested as VeevoTechReceiverNetwork };
+  }
+  return { valid: false as const, receiverNetwork: undefined };
 }
 
 function normalizePakistaniPhone(value: string): NormalizedPhone {
@@ -281,7 +301,12 @@ function logSmsFailure(
 }
 
 export const sendPhoneOtp = action({
-  args: { phone: v.string() },
+  args: {
+    phone: v.string(),
+    // Optional for backwards compatibility. Omit it for automatic MNP/HRL
+    // lookup, or pass one of the allowlisted VeevoTech `*-PK` values.
+    receiverNetwork: v.optional(v.string()),
+  },
   handler: async (
     ctx,
     args,
@@ -317,6 +342,10 @@ export const sendPhoneOtp = action({
     }
 
     const { phoneE164, phoneMasked } = normalizedPhone;
+    const requestedReceiverNetwork = resolveRequestedReceiverNetwork(args.receiverNetwork);
+    if (!requestedReceiverNetwork.valid) {
+      return phoneOtpFailure("Select a supported Pakistani mobile network or Automatic.");
+    }
     const phoneHash = await sha256(phoneE164);
     const now = Date.now();
 
@@ -359,9 +388,10 @@ export const sendPhoneOtp = action({
     );
 
     try {
-      const receiverNetwork = process.env.VEEVOTECH_MNP_LOOKUP_ENABLED === "0"
-        ? undefined
-        : await lookupReceiverNetwork(apiHash, phoneE164, mnpUrl);
+      const receiverNetwork = requestedReceiverNetwork.receiverNetwork
+        || (process.env.VEEVOTECH_MNP_LOOKUP_ENABLED === "0"
+          ? undefined
+          : await lookupReceiverNetwork(apiHash, phoneE164, mnpUrl));
       const response = await fetch(smsUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },

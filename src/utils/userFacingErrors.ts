@@ -98,6 +98,10 @@ export function getUserFacingErrorMessage(
     return "Easypaisa is unavailable right now. Try again or use MatchHai Wallet.";
   }
 
+  if (/\bSYSTEM ERROR\b|\bresponse(?:\s+)?code\s*[:=]?\s*0001\b/i.test(raw)) {
+    return "Easypaisa could not start this payment. Please wait a moment and try again.";
+  }
+
   if (/ACCOUNT DOES N[O']?T? EXIST|ACCOUNT DOES NO EXIST/i.test(raw)) {
     return "This Easypaisa account was not found. Check the number and try again.";
   }

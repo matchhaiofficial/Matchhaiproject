@@ -596,9 +596,22 @@ function getExpectedPaidPlayerCount(room: any) {
   return Math.max(1, Number(room?.maxPlayers || room?.currentPlayers || getConfirmedSlotCount(room) || 1));
 }
 
-function getMatchroomGrossAmount(room: any) {
-  const explicit = Number(room?.merchantSettlementAmount || room?.paymentAmount || 0);
-  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+async function getMatchroomGrossAmount(ctx: any, room: any) {
+  const merchantSettlementAmount = Number(room?.merchantSettlementAmount || 0);
+  const hostPaymentAmount = Number(room?.paymentAmount || 0);
+  const capturedIntents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", room._id))
+    // A matchroom's paid roster is bounded; keep the defensive cap here too.
+    .take(100);
+  const capturedSeatAmount = capturedIntents.reduce((sum: number, intent: any) => {
+    if (intent?.heldStatus !== "captured") return sum;
+    const amount = Number(intent.heldAmount || intent.pricing?.totalCost || 0);
+    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
+  }, 0);
+  const capturedGross = (hostPaymentAmount > 0 ? hostPaymentAmount : 0) + capturedSeatAmount;
+  const explicitGross = Math.max(merchantSettlementAmount, hostPaymentAmount);
+  if (capturedGross > 0 || explicitGross > 0) return Math.max(capturedGross, explicitGross);
   const perPlayer = Number(room?.pricing?.perPlayer || 0);
   return Math.max(0, perPlayer * getExpectedPaidPlayerCount(room));
 }
@@ -613,9 +626,11 @@ function isFullPaidZoneRoom(room: any) {
 async function markMerchantCapturedForAcceptedMatchroom(ctx: any, matchroomId: any) {
   const room = await ctx.db.get(matchroomId);
   if (!isFullPaidZoneRoom(room)) return null;
-  if (room.merchantSettlementStatus === "captured") return room.merchantSettlementReference || null;
+  const amount = await getMatchroomGrossAmount(ctx, room);
+  if (room.merchantSettlementStatus === "captured" && Number(room.merchantSettlementAmount || 0) >= amount) {
+    return room.merchantSettlementReference || null;
+  }
   const now = Date.now();
-  const amount = getMatchroomGrossAmount(room);
   const reference = `merchant_capture:${String(matchroomId)}`;
   await ctx.db.patch(matchroomId, {
     merchantSettlementStatus: "captured",

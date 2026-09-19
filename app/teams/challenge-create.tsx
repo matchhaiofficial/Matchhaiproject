@@ -17,6 +17,7 @@ import { Team, getTeamById } from "../../src/services/convex/teamService";
 import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { getUserFacingErrorMessage } from "../../src/utils/userFacingErrors";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import { APP_ROUTES } from "../../src/navigation/routes";
@@ -780,7 +781,7 @@ export default function TeamChallengeCreateScreen() {
                 }, 1200);
             }
         } catch (error: any) {
-            showToast({ type: "error", title: "Payment failed", message: error?.message || "Could not start the Easypaisa payment." });
+            showToast({ type: "error", title: "Payment failed", message: getUserFacingErrorMessage(error, "Could not start the Easypaisa payment.") });
         } finally {
             setStartingEasypaisa(false);
         }

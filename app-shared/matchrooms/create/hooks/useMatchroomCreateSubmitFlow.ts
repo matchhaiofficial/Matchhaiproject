@@ -22,6 +22,7 @@ import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
 import { validateMatchroomScheduleWindow, validateWalkInScheduleWindow } from "../../../../src/constants/timing";
 import { useToast } from "../../../../src/hooks/useToast";
 import Logger from "../../../../src/utils/logger";
+import { getUserFacingErrorMessage } from "../../../../src/utils/userFacingErrors";
 import {
   formatPakistaniPhone,
   isValidPakistaniPhone,
@@ -308,6 +309,12 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setShowEasypaisaPhonePrompt(false);
       return;
     }
+    // A pending provider prompt can safely continue in the background. Keep
+    // the active order so the recovery banner can refresh or retry it.
+    if (!startingEasypaisaPayment && easypaisaPaymentPhase === "payment_sent") {
+      setShowEasypaisaPhonePrompt(false);
+      return;
+    }
     if (
       !startingEasypaisaPayment &&
       easypaisaPaymentPhase !== "payment_sent" &&
@@ -461,7 +468,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setEasypaisaPaymentPhase("idle");
       setActiveEasypaisaOrderRef(null);
       notify({
-        message: error?.message || "Could not start the Easypaisa payment.",
+        message: getUserFacingErrorMessage(error, "Could not start the Easypaisa payment."),
         title: "Payment failed",
         type: "error",
       });

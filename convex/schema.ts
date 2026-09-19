@@ -815,6 +815,7 @@ export default defineSchema({
     .index("by_status_and_game", ["status", "game"])
     .index("by_status_and_game_and_scheduledStartAt", ["status", "game", "scheduledStartAt"])
     .index("by_zoneId", ["zoneId"])
+    .index("by_zoneOwnerUid_and_status", ["zoneOwnerUid", "status"])
     .index("by_zoneId_and_createdAt", ["zoneId", "createdAt"])
     .index("by_zoneId_and_status_and_createdAt", ["zoneId", "status", "createdAt"])
     .index("by_zoneId_and_bookingSource_and_createdAt", ["zoneId", "bookingSource", "createdAt"])

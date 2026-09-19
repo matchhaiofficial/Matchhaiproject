@@ -4,7 +4,7 @@ import Logger from "../../utils/logger";
 import { captureAnalyticsEvent } from "../../lib/analytics/posthog";
 import { classifyAnalyticsFailure } from "../../lib/analytics/privacy";
 
-export async function sendPhoneOtp(phone: string): Promise<
+export async function sendPhoneOtp(phone: string, receiverNetwork?: string): Promise<
   | {
       ok: true;
       phoneE164: string;
@@ -14,7 +14,10 @@ export async function sendPhoneOtp(phone: string): Promise<
   | { ok: false; message: string }
 > {
   try {
-    const result = await convex.action(api.phoneOtp.sendPhoneOtp, { phone });
+    const result = await convex.action(api.phoneOtp.sendPhoneOtp, {
+      phone,
+      ...(receiverNetwork ? { receiverNetwork } : {}),
+    });
     if (!result.ok) {
       captureAnalyticsEvent("phone_otp_request_failed", {
         failure_category: classifyAnalyticsFailure(result.message),
