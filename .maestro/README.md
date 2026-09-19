@@ -1,9 +1,11 @@
 # MatchHai Maestro E2E Flows
 
 End-to-end UI flows for the MatchHai Expo / React Native app, driven by
-[Maestro](https://maestro.mobile.dev). These run against a **development or
-preview build** pointed at the **staging Convex deployment** —
-`https://quick-panda-920.convex.cloud`. Never run them against production.
+[Maestro](https://maestro.mobile.dev). These require a native test build
+pointed at the **QA Convex deployment** —
+`https://striped-dog-623.convex.cloud`. Native E2E builds are currently
+deferred; local QA uses Expo Go, and the only active EAS profile is production.
+Never run these flows against production.
 
 > All flows live in this directory and run via the existing npm scripts:
 > `npm run e2e:maestro` (alias for `maestro test .maestro`), plus
@@ -26,28 +28,11 @@ Verify: `maestro --version`.
 
 ---
 
-## 2. Build the app (development or preview)
+## 2. Build the app (deferred)
 
-Maestro drives a real installed build. Use one of the `eas.json` profiles:
-
-| Profile       | Use for                                         | Convex URL (staging)                       |
-| ------------- | ----------------------------------------------- | ------------------------------------------ |
-| `development` | Dev client + Metro; fastest iteration           | from your local env / dev client           |
-| `preview`     | Standalone internal build; closest to release   | `https://quick-panda-920.convex.cloud` (baked into the profile `env`) |
-
-The `preview` profile already pins the staging Convex URL, site URL, app
-scheme (`matchhai`), and super-admin email in `eas.json`. Prefer `preview` for
-stable, self-contained E2E runs.
-
-```bash
-# Development build (dev client)
-eas build --profile development --platform android
-eas build --profile development --platform ios
-
-# Preview build (standalone, staging Convex) — recommended for E2E
-eas build --profile preview --platform android   # produces an .apk
-eas build --profile preview --platform ios
-```
+Maestro drives a real installed build. No development or preview EAS profile
+is active, so do not use the production profile for staging E2E. Re-enable a
+reviewed native QA profile before running these flows.
 
 Install the resulting artifact on your emulator/simulator (e.g.
 `adb install <app>.apk` for Android, drag the `.app` onto the iOS simulator).
@@ -105,7 +90,7 @@ profiles. Seed scripts live in `scripts/`:
 Seeding requires `EXPO_PUBLIC_CONVEX_URL` (or `CONVEX_URL`) and, for the
 Karachi script, a **dev** deployment (`CONVEX_DEPLOYMENT` must start with
 `dev:`). For staging E2E, point `EXPO_PUBLIC_CONVEX_URL` at
-`https://quick-panda-920.convex.cloud` and follow the Phase 7 seed runbook for
+`https://acrobatic-bison-271.convex.cloud` and follow the Phase 7 seed runbook for
 the staging seed key. After seeding, set the seeded credentials in
 `.env.e2e` (below).
 

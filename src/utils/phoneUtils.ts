@@ -3,6 +3,28 @@
  */
 
 /**
+ * VeevoTech's `receivernetwork` values for Pakistani routes. The values are
+ * deliberately kept separate from the user-facing labels because VeevoTech
+ * expects the network names in this exact `*-PK` form.
+ *
+ * An empty value means automatic routing: the server performs its best-effort
+ * MNP/HRL lookup and omits `receivernetwork` when lookup is unavailable.
+ */
+export const PAKISTANI_MOBILE_NETWORK_OPTIONS = [
+    { value: "", label: "Automatic (recommended)" },
+    { value: "Mobilink-PK", label: "Jazz / Mobilink" },
+    { value: "Telenor-PK", label: "Telenor" },
+    { value: "Ufone-PK", label: "Ufone" },
+    { value: "Zong-PK", label: "Zong" },
+] as const;
+
+export type PakistaniMobileNetwork = typeof PAKISTANI_MOBILE_NETWORK_OPTIONS[number]["value"];
+
+export function isPakistaniMobileNetwork(value: string): value is PakistaniMobileNetwork {
+    return PAKISTANI_MOBILE_NETWORK_OPTIONS.some((option) => option.value === value);
+}
+
+/**
  * Normalizes any messy Pakistani phone format into E164 and digits-only.
  * 
  * Input: 03XX..., +92 3XX..., 92..., spaces/dashes

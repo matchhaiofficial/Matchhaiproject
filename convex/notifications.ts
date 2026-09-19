@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { requireCurrentUser } from "./authz";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
+import { hasActivePushDevice, isPushDeliveryEnabled } from "./pushDeliveryPolicy";
 
 const notificationStatus = v.union(
   v.literal("pending"),
@@ -383,7 +384,7 @@ function shouldQueuePushAfterActiveUpsert(
 }
 
 async function scheduleNotificationPush(ctx: any, notificationId: any, shouldSchedule: boolean) {
-  if (!shouldSchedule) return false;
+  if (!shouldSchedule || !isPushDeliveryEnabled()) return false;
   await ctx.scheduler.runAfter(
     0,
     (internal as any).pushNotificationsActions.sendForNotification,
@@ -754,10 +755,17 @@ async function listUnreadNotificationsForUser(ctx: any, userId: any, limit: numb
 
 async function findActiveNotificationByDedupeKey(ctx: any, dedupeKey?: string) {
   if (!dedupeKey) return null;
+  // There should normally be at most one active row for a key, but archived
+  // replacement versions can accumulate indefinitely. Read only the newest
+  // bounded window and preserve the previous newest-active selection rule.
+  // The write paths enforce this invariant; the bound is a safety valve for
+  // corrupted/legacy histories rather than an invitation to scan the table.
+  const DEDUPE_LOOKUP_LIMIT = 100;
   const rows = await ctx.db
     .query("notifications")
-    .withIndex("by_dedupeKey", (q: any) => q.eq("dedupeKey", dedupeKey))
-    .collect();
+    .withIndex("by_dedupeKey_and_createdAt", (q: any) => q.eq("dedupeKey", dedupeKey))
+    .order("desc")
+    .take(DEDUPE_LOOKUP_LIMIT);
   return sortByCreatedAtDesc(rows).find(isNotificationActive) || null;
 }
 
@@ -864,10 +872,15 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
           data: nextData,
           pushPolicy,
         });
-        const shouldQueuePush = shouldQueuePushAfterActiveUpsert(active, pushPolicy, payloadChanged);
+        const pushDeliveryEnabled = isPushDeliveryEnabled();
+        const pushRetryRequested = pushDeliveryEnabled
+          && shouldQueuePushAfterActiveUpsert(active, pushPolicy, payloadChanged);
+        const shouldQueuePush = pushRetryRequested
+          && await hasActivePushDevice(ctx, input.toUid);
+        const shouldMarkNoDevice = pushRetryRequested && !shouldQueuePush;
         const currentPushState = normalizePushState(active.pushState);
         const shouldSkipPendingPush =
-          pushPolicy === "none" &&
+          (!pushDeliveryEnabled || pushPolicy === "none") &&
           currentPushState !== "sent" &&
           currentPushState !== "receipt_ok";
 
@@ -885,6 +898,13 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
                 pushDeliveredAt: undefined,
                 pushError: undefined,
               }
+            : shouldMarkNoDevice
+              ? {
+                  pushState: "no_device" as const,
+                  pushAttemptedAt: now,
+                  pushDeliveredAt: undefined,
+                  pushError: "no_active_devices",
+                }
             : shouldSkipPendingPush
               ? {
                   pushState: "skipped" as const,
@@ -911,6 +931,15 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
     }
   }
 
+  const pushDeliveryEnabled = isPushDeliveryEnabled();
+  const pushRequested = pushPolicy !== "none" && pushDeliveryEnabled;
+  const pushDeviceAvailable = pushRequested && await hasActivePushDevice(ctx, input.toUid);
+  const initialPushState: PushState = !pushRequested
+    ? "skipped"
+    : pushDeviceAvailable
+      ? "queued"
+      : "no_device";
+
   const notificationId = await ctx.db.insert("notifications", {
     toUid: input.toUid,
     fromUid: input.fromUid,
@@ -926,10 +955,10 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
     route,
     dedupeKey: effectiveDedupeKey,
     pushPolicy,
-    pushState: pushPolicy === "none" ? "skipped" : "queued",
-    pushAttemptedAt: undefined,
+    pushState: initialPushState,
+    pushAttemptedAt: initialPushState === "no_device" ? now : undefined,
     pushDeliveredAt: undefined,
-    pushError: undefined,
+    pushError: initialPushState === "no_device" ? "no_active_devices" : undefined,
     entityId: input.entityId,
     teamId: input.teamId,
     teamName: input.teamName,
@@ -951,7 +980,7 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
     updatedAt: now,
   });
 
-  const scheduledPush = await scheduleNotificationPush(ctx, notificationId, pushPolicy !== "none");
+  const scheduledPush = await scheduleNotificationPush(ctx, notificationId, initialPushState === "queued");
 
   return { notificationId, created: true, scheduledPush };
 }

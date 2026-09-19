@@ -206,7 +206,7 @@ export default function SuperAdminReportDetail() {
   const openRelatedRecord = () => {
     if (!report) return;
     if ((report.type === "matchroom_complaint" || report.type === "matchroom_chat_message_report") && report.matchroomId) {
-      router.push(`/super-admin/matchroom/${report.matchroomId}`);
+      router.push(`/super-admin/matchroom/${report.matchroomId}` as any);
       return;
     }
     if (report.type === "zone_complaint" && report.zoneId) {
@@ -214,7 +214,7 @@ export default function SuperAdminReportDetail() {
       return;
     }
     if (report.type === "user_report" || report.type === "team_report" || isChatMessageReport(report)) {
-      router.push("/super-admin/users");
+      router.push("/super-admin/users" as any);
       return;
     }
     setError("There is no linked record to open for this report.");

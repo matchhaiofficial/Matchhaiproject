@@ -19,8 +19,8 @@ import { getMatchroom, Matchroom } from "../../../src/services/convex/matchServi
 import { getTeamById, getUserTeamsForGame, Team } from "../../../src/services/convex/teamService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import FriendPicker from "../components";
-import styles from "./book.styles";
+import FriendPicker from "../../../app-shared/matchrooms/components/index";
+import styles from "../../../app-shared/matchrooms/book/book.styles";
 
 export default function BookSlotsScreen() {
     const { id } = useLocalSearchParams();

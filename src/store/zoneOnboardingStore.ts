@@ -2,6 +2,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { PakistaniMobileNetwork } from "../utils/phoneUtils";
 
 // STEP 1 – account + brand
 export type ZoneStep1Data = {
@@ -9,6 +10,11 @@ export type ZoneStep1Data = {
   venueBrandName: string;
   contactEmail: string;
   contactPhone: string;
+  /** VeevoTech receiver network; empty means automatic MNP lookup. */
+  phoneCarrier: PakistaniMobileNetwork;
+  phoneVerified: boolean;
+  phoneVerifiedAt: number | null;
+  phoneVerifiedE164: string;
   password: string;
   type: 'gaming' | 'sports' | 'hybrid';
 };
@@ -133,6 +139,10 @@ const initialState: Omit<
     venueBrandName: "",
     contactEmail: "",
     contactPhone: "",
+    phoneCarrier: "",
+    phoneVerified: false,
+    phoneVerifiedAt: null,
+    phoneVerifiedE164: "",
     password: "",
     type: "gaming",
   },

@@ -1,4 +1,4 @@
-import { canInviteToMatchroomTeam } from "../../app/matchrooms/utils/matchroomLobbyState";
+import { canInviteToMatchroomTeam } from "../../app-shared/matchrooms/utils/matchroomLobbyState";
 
 const identityMatches = (
   candidate: unknown,

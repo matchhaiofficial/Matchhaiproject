@@ -11,6 +11,17 @@ interface CustomToastProps extends BaseToastProps {
 }
 
 export const toastConfig = {
+    info: ({ text1, text2 }: CustomToastProps) => (
+        <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.infoContainer]}>
+            <View style={[toastStyles.iconContainer, toastStyles.infoIcon]}>
+                <AppIcon name="info-outline" size={20} tone="accent" />
+            </View>
+            <View style={toastStyles.textColumn}>
+                {text1 ? <Text style={toastStyles.infoTitle}>{text1}</Text> : null}
+                {text2 ? <Text style={toastStyles.messageText}>{text2}</Text> : null}
+            </View>
+        </View>
+    ),
     error: ({ text1, text2 }: CustomToastProps) => (
         <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.errorIcon]}>

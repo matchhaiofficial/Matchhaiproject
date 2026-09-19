@@ -41,6 +41,7 @@ type ChatThreadProps = {
     currentUserId?: string | null;
     messages: ChatThreadMessage[];
     participants?: ChatParticipant[];
+    showSenderIdentity?: boolean;
     loading?: boolean;
     emptyTitle?: string;
     emptySubtitle?: string;
@@ -284,6 +285,8 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     onToggleReactionPicker,
     onDismissReactionPicker,
     nowMs,
+    senderParticipant,
+    showSenderIdentity,
 }: {
     item: RenderableChatMessage;
     todayLabel: string;
@@ -299,6 +302,8 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     onToggleReactionPicker: (messageId: string) => void;
     onDismissReactionPicker: () => void;
     nowMs: number;
+    senderParticipant?: ChatParticipant;
+    showSenderIdentity: boolean;
 }) {
     const mine = item.senderUid === currentUserId;
     const isDeletedForMe =
@@ -388,7 +393,17 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
             ) : null}
             <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
                 {mine ? actionDots : null}
+                {!mine && showSenderIdentity ? (
+                    <HeaderAvatar
+                        participant={senderParticipant || { uid: item.senderUid, label: item.senderName }}
+                        size={30}
+                        borderColor={COLORS.backgroundDark}
+                    />
+                ) : null}
                 <View style={styles.bubbleWrap}>
+                    {!mine && showSenderIdentity ? (
+                        <Text style={styles.messageSenderName} numberOfLines={1}>{item.senderName}</Text>
+                    ) : null}
                     <Pressable
                         onPress={handleMessageSurfacePress}
                         onLongPress={onMessageLongPress ? openActions : undefined}
@@ -512,6 +527,7 @@ export default function ChatThread({
     currentUserId,
     messages,
     participants = [],
+    showSenderIdentity = false,
     loading = false,
     emptyTitle = "No messages yet",
     emptySubtitle = "Start the conversation.",
@@ -558,6 +574,10 @@ export default function ChatThread({
     const keyboardFrameTopRef = useRef<number | null>(null);
     const keyboardMeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nowMs = useRelativeNow(60_000);
+    const participantByUid = useMemo(
+        () => new Map(participants.map((participant) => [participant.uid, participant])),
+        [participants],
+    );
 
     const [emojiOpen, setEmojiOpen] = useState(false);
     const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -818,12 +838,15 @@ export default function ChatThread({
                 onToggleReactionPicker={toggleReactionPicker}
                 onDismissReactionPicker={dismissReactionPicker}
                 nowMs={nowMs}
+                senderParticipant={participantByUid.get(item.senderUid)}
+                showSenderIdentity={showSenderIdentity}
             />
         );
     }, [
         currentUserId,
         latestOutgoingMessageId,
         nowMs,
+        participantByUid,
         onMessageLongPress,
         onSwipeReply,
         onToggleReaction,
@@ -833,6 +856,7 @@ export default function ChatThread({
         otherParticipantCount,
         seenReceiptsByMessageId,
         todayLabel,
+        showSenderIdentity,
         toggleReactionPicker,
     ]);
 

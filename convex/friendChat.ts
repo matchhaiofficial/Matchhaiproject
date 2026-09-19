@@ -1,9 +1,16 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { filterActivePushRecipients } from "./pushDeliveryPolicy";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { markUserPresent } from "./presence";
+import {
+  CHAT_LIST_LIMIT,
+  MAX_CHATROOM_MEMBER_ROWS,
+  assertChatroomMemberRowsBounded,
+  createParticipantProfileCache,
+} from "./chatListHelpers";
 
 const chatMessageTypeValidator = v.union(
   v.literal("text"),
@@ -87,10 +94,10 @@ async function ensureChatroomMember(ctx: any, chatroomId: Id<"chatrooms">, userI
 }
 
 async function updateUnreadCounts(ctx: any, chatroomId: Id<"chatrooms">, senderUid: string, now: number) {
-  const members = await ctx.db
+  const members = assertChatroomMemberRowsBounded(await ctx.db
     .query("chatroomMembers")
     .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroomId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   for (const member of members) {
     if (String(member.userId) === String(senderUid)) {
@@ -299,9 +306,9 @@ export const sendMessage = mutation({
     await updateUnreadCounts(ctx, args.chatroomId, String(userId), now);
 
     // Push notification to the other participant
-    const recipientIds = chatroom.participantUids
+    const recipientIds = await filterActivePushRecipients(ctx, chatroom.participantUids
       .filter((uid: string) => String(uid) !== String(userId))
-      .map((uid: string) => uid as Id<"users">);
+      .map((uid: string) => uid as Id<"users">));
     if (recipientIds.length > 0) {
       await ctx.scheduler.runAfter(0, (internal as any).pushNotificationsActions.sendChatPush, {
         senderName,
@@ -350,22 +357,28 @@ export const listForUser = query({
   handler: async (ctx) => {
     const userId = await getStrictAuthenticatedUserId(ctx);
 
-    const memberships = await ctx.db
+    const recentMemberships = await ctx.db
       .query("chatroomMembers")
-      .withIndex("by_userId", (q) => q.eq("userId", String(userId)))
-      .collect();
+      .withIndex("by_userId_and_updatedAt", (q) => q.eq("userId", String(userId)))
+      .order("desc")
+      .take(CHAT_LIST_LIMIT);
+    const memberships = Array.from(
+      new Map(recentMemberships.map((membership: any) => [String(membership.chatroomId), membership])).values(),
+    );
 
     const results: any[] = [];
+    const loadParticipantProfiles = createParticipantProfileCache(ctx);
     for (const membership of memberships) {
-      const chatroom = await ctx.db.get(membership.chatroomId);
+      const chatroom: any = await ctx.db.get(membership.chatroomId);
       if (!chatroom || chatroom.type !== "dm") continue;
 
       // Get the other participant
       const otherUid = chatroom.participantUids.find(
         (uid: string) => String(uid) !== String(userId)
       );
-      const otherUser = otherUid ? await ctx.db.get(otherUid as Id<"users">) : null;
-      const friendName = otherUser?.fullName || otherUser?.username || "Friend";
+      const participantProfiles = await loadParticipantProfiles(otherUid ? [otherUid] : [], "Friend");
+      const otherUser = participantProfiles[0];
+      const friendName = otherUser?.label || "Friend";
       const friendPhotoURL = otherUser?.photoURL || null;
 
       results.push({
@@ -375,6 +388,7 @@ export const listForUser = query({
         title: friendName,
         subtitle: "Direct message",
         photoURL: friendPhotoURL,
+        avatarURL: friendPhotoURL,
         participantUids: chatroom.participantUids,
         lastMessage: chatroom.lastMessage || null,
         updatedAt: chatroom.updatedAt || chatroom.createdAt,
@@ -382,7 +396,7 @@ export const listForUser = query({
       });
     }
 
-    return results;
+    return results.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   },
 });
 
@@ -394,15 +408,19 @@ export const getUnreadCounts = query({
   handler: async (ctx) => {
     const userId = await getStrictAuthenticatedUserId(ctx);
 
-    const memberships = await ctx.db
+    const recentMemberships = await ctx.db
       .query("chatroomMembers")
-      .withIndex("by_userId", (q) => q.eq("userId", String(userId)))
-      .collect();
+      .withIndex("by_userId_and_updatedAt", (q) => q.eq("userId", String(userId)))
+      .order("desc")
+      .take(CHAT_LIST_LIMIT);
+    const memberships = Array.from(
+      new Map(recentMemberships.map((membership: any) => [String(membership.chatroomId), membership])).values(),
+    );
 
     const result: Record<string, number> = {};
     for (const membership of memberships) {
       if (!membership.unreadCount || membership.unreadCount <= 0) continue;
-      const chatroom = await ctx.db.get(membership.chatroomId);
+      const chatroom: any = await ctx.db.get(membership.chatroomId);
       if (!chatroom || chatroom.type !== "dm") continue;
 
       const friendUid = chatroom.participantUids.find(

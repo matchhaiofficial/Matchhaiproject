@@ -6,6 +6,7 @@ import Animated from "react-native-reanimated";
 
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import { AppImage } from "../../src/components/AppImage";
 import Screen from "../../src/components/Screen";
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "../../src/context/AuthContext";
@@ -28,10 +29,13 @@ const ChatroomRow = React.memo(function ChatroomRow({
 }) {
     const isDM = conversation.kind === "dm";
     const isChallenge = conversation.kind === "challenge";
+    const isTeam = conversation.kind === "team";
     const targetPath = isDM
         ? `/(player)/friend-chat/${conversation.friendId}`
         : isChallenge
             ? `/teams/challenge-chat?id=${conversation.id}`
+            : isTeam
+                ? `/teams/team-chat?teamId=${conversation.teamId}`
             : `/matchrooms/chat/${conversation.matchroomId}`;
 
     const preview =
@@ -52,9 +56,13 @@ const ChatroomRow = React.memo(function ChatroomRow({
         <Pressable onPress={handleOpen} onPressIn={onPressIn} onPressOut={onPressOut}>
             <Animated.View style={[styles.card, animatedStyle]}>
                 <View style={[styles.avatar, isDM ? styles.avatarDM : isChallenge ? styles.avatarChallenge : null]}>
-                    <Text style={styles.avatarText}>
-                        {String(conversation.title || "C").trim().charAt(0).toUpperCase()}
-                    </Text>
+                    {conversation.avatarURL ? (
+                        <AppImage source={{ uri: conversation.avatarURL }} style={styles.avatarImage} />
+                    ) : (
+                        <Text style={styles.avatarText}>
+                            {String(conversation.title || "C").trim().charAt(0).toUpperCase()}
+                        </Text>
+                    )}
                 </View>
                 <View style={styles.cardBody}>
                     <View style={styles.cardTopRow}>
@@ -94,6 +102,10 @@ export default function ChatroomsScreen() {
         api.teamChallengeChat.listForMe,
         user?._id ? {} : "skip"
     );
+    const teamChatsResult = useQuery(
+        api.teamChat.listForMe,
+        user?._id ? {} : "skip"
+    );
     const dmChatsResult = useQuery(
         api.friendChat.listForUser,
         user?._id ? {} : "skip"
@@ -101,12 +113,13 @@ export default function ChatroomsScreen() {
 
     const matchChats = matchChatsResult || [];
     const challengeChats = challengeChatsResult || [];
+    const teamChats = teamChatsResult || [];
     const dmChats = dmChatsResult || [];
-    const loading = !!user?._id && (matchChatsResult === undefined || challengeChatsResult === undefined || dmChatsResult === undefined);
+    const loading = !!user?._id && (matchChatsResult === undefined || challengeChatsResult === undefined || teamChatsResult === undefined || dmChatsResult === undefined);
 
     const conversations = useMemo(
-        () => [...matchChats, ...challengeChats, ...dmChats].sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)),
-        [challengeChats, dmChats, matchChats]
+        () => [...matchChats, ...challengeChats, ...teamChats, ...dmChats].sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+        [challengeChats, dmChats, matchChats, teamChats]
     );
 
     const normalizedSearchText = searchText.trim().toLowerCase();
@@ -130,9 +143,10 @@ export default function ChatroomsScreen() {
         recordPayloadMetric("chat.list_query_cost", conversations, {
             matchChats: matchChats.length,
             challengeChats: challengeChats.length,
+            teamChats: teamChats.length,
             dmChats: dmChats.length,
         });
-    }, [challengeChats.length, conversations, dmChats.length, matchChats.length]);
+    }, [challengeChats.length, conversations, dmChats.length, matchChats.length, teamChats.length]);
 
     const onOpenConversation = useCallback((path: string) => {
         router.push(path as any);
@@ -304,6 +318,10 @@ const styles = {
         color: "#0f172a",
         fontFamily: FONTS.heading,
         fontSize: 16,
+    },
+    avatarImage: {
+        width: "100%" as const,
+        height: "100%" as const,
     },
     cardBody: {
         flex: 1,

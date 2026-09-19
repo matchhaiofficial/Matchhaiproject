@@ -51,7 +51,7 @@ import {
   Inter_500Medium,
   Inter_600SemiBold,
   Inter_700Bold,
-  useFonts as useInter
+  useFonts as useInter,
 } from "@expo-google-fonts/inter";
 
 // Theme + Auth provider + Toast
@@ -63,7 +63,9 @@ import NotificationRuntimeBridge from "../src/components/NotificationRuntimeBrid
 import PresenceRuntimeBridge from "../src/components/PresenceRuntimeBridge";
 import PushRegistrationBridge from "../src/components/PushRegistrationBridge";
 import MatchResultGate from "../src/components/MatchResultGate";
+import AnalyticsRuntimeBridge from "../src/components/AnalyticsRuntimeBridge";
 import AuthenticatedConvexProvider from "../src/providers/AuthenticatedConvexProvider";
+import AnalyticsProvider from "../src/providers/AnalyticsProvider";
 import InAppAlertProvider from "../src/providers/InAppAlertProvider";
 import { useToast } from "../src/hooks/useToast";
 import { COLORS } from "../src/theme";
@@ -82,7 +84,7 @@ export default function RootLayout() {
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
-    Inter_700Bold
+    Inter_700Bold,
   });
 
   const ready = montLoaded && loraLoaded && martelLoaded && interLoaded;
@@ -97,9 +99,7 @@ export default function RootLayout() {
     const globalAny = globalThis as any;
     const errorUtils = globalAny.ErrorUtils;
     const previousGlobalErrorHandler =
-      typeof errorUtils?.getGlobalHandler === "function"
-        ? errorUtils.getGlobalHandler()
-        : null;
+      typeof errorUtils?.getGlobalHandler === "function" ? errorUtils.getGlobalHandler() : null;
     const previousUnhandled = globalAny.onunhandledrejection;
 
     if (typeof errorUtils?.setGlobalHandler === "function") {
@@ -191,37 +191,39 @@ export default function RootLayout() {
 
   return (
     <AppErrorBoundary autoRetry maxAutoRetries={3}>
-      <AuthenticatedConvexProvider>
-        <AuthProvider>
-          <InAppAlertProvider>
-            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
-              <StatusBar style="light" translucent backgroundColor="transparent" />
-              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
-                <NotificationRuntimeBridge />
-              </AppErrorBoundary>
-              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
-                <PresenceRuntimeBridge />
-              </AppErrorBoundary>
-              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
-                <PushRegistrationBridge />
-              </AppErrorBoundary>
-              <AppErrorBoundary autoRetry maxAutoRetries={3}>
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: { backgroundColor: COLORS.backgroundDark },
-                  }}
-                />
-              </AppErrorBoundary>
-              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
-                <MatchResultGate />
-              </AppErrorBoundary>
-              <Toast config={toastConfig} />
-            </View>
-          </InAppAlertProvider>
-        </AuthProvider>
-      </AuthenticatedConvexProvider>
+      <AnalyticsProvider>
+        <AuthenticatedConvexProvider>
+          <AuthProvider>
+            <AnalyticsRuntimeBridge />
+            <InAppAlertProvider>
+              <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
+                <StatusBar style="light" translucent backgroundColor="transparent" />
+                <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                  <NotificationRuntimeBridge />
+                </AppErrorBoundary>
+                <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                  <PresenceRuntimeBridge />
+                </AppErrorBoundary>
+                <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                  <PushRegistrationBridge />
+                </AppErrorBoundary>
+                <AppErrorBoundary autoRetry maxAutoRetries={3}>
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: COLORS.backgroundDark },
+                    }}
+                  />
+                </AppErrorBoundary>
+                <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                  <MatchResultGate />
+                </AppErrorBoundary>
+                <Toast config={toastConfig} />
+              </View>
+            </InAppAlertProvider>
+          </AuthProvider>
+        </AuthenticatedConvexProvider>
+      </AnalyticsProvider>
     </AppErrorBoundary>
   );
 }
-

@@ -9,8 +9,8 @@ import {
   KARACHI_AREAS,
   normalizeKarachiAreaLabel,
 } from "../../constants/profileOptions";
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import {
   AppBottomSheet,
@@ -24,7 +24,7 @@ import { useToast } from "../../src/hooks/useToast";
 import { BranchData, useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import { Perf } from "../../src/utils/perfInstrumentation";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 
 type LocationSearchResult = {
   display_name: string;

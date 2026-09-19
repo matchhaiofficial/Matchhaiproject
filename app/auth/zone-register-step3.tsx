@@ -9,15 +9,15 @@ import {
   PC_TYPES,
   PICKLEBALL_SURFACES,
 } from "../../constants/profileOptions";
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon, type AppIconName } from "../../src/components/AppIcon";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
 import { BranchData, useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 
 const CONSOLE_TYPES = PC_TYPES;
 const PC_SPEC_FIELDS = [

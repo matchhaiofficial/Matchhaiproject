@@ -3,6 +3,8 @@ import {
   normalizePakistaniPhone,
   formatPakistaniPhone,
   isValidPakistaniPhone,
+  isPakistaniMobileNetwork,
+  PAKISTANI_MOBILE_NETWORK_OPTIONS,
 } from "../../src/utils/phoneUtils";
 
 describe("normalizePakistaniPhone", () => {
@@ -37,5 +39,19 @@ describe("formatPakistaniPhone", () => {
   });
   it("formats +92 numbers", () => {
     expect(formatPakistaniPhone("+923001234567")).toBe("+92 300 1234 567");
+  });
+});
+
+describe("Pakistani mobile network routing", () => {
+  it("exposes the automatic option plus VeevoTech's documented PK route names", () => {
+    expect(PAKISTANI_MOBILE_NETWORK_OPTIONS).toEqual([
+      { value: "", label: "Automatic (recommended)" },
+      { value: "Mobilink-PK", label: "Jazz / Mobilink" },
+      { value: "Telenor-PK", label: "Telenor" },
+      { value: "Ufone-PK", label: "Ufone" },
+      { value: "Zong-PK", label: "Zong" },
+    ]);
+    expect(isPakistaniMobileNetwork("Mobilink-PK")).toBe(true);
+    expect(isPakistaniMobileNetwork("carrier.example")).toBe(false);
   });
 });

@@ -23,6 +23,7 @@ import { useToast } from "../../src/hooks/useToast";
 import {
   approveZoneWithdrawal,
   getZoneFinanceSummaries,
+  getZoneWithdrawalPayoutDetails,
   getZoneWithdrawalRequestsPage,
   rejectZoneWithdrawal,
   SuperAdminZoneFinanceSummary,
@@ -316,6 +317,7 @@ export default function SuperAdminWithdrawalsScreen() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [isDone, setIsDone] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedPayoutDetails, setSelectedPayoutDetails] = useState<Partial<SuperAdminWithdrawalRequest> | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState<"approve" | "reject" | null>(null);
   const [confirmAction, setConfirmAction] = useState<"approve" | "reject" | null>(null);
@@ -326,10 +328,10 @@ export default function SuperAdminWithdrawalsScreen() {
   const [amountFilter, setAmountFilter] = useState<AmountRangeKey>("Any");
   const [branchFilter, setBranchFilter] = useState<string>(ALL);
 
-  const selected = useMemo(
-    () => withdrawals.find((item) => item.id === selectedId) || null,
-    [selectedId, withdrawals],
-  );
+  const selected = useMemo(() => {
+    const row = withdrawals.find((item) => item.id === selectedId) || null;
+    return row ? { ...row, ...(selectedPayoutDetails || {}) } : null;
+  }, [selectedId, selectedPayoutDetails, withdrawals]);
 
   const mergeWithdrawals = useCallback((current: SuperAdminWithdrawalRequest[], next: SuperAdminWithdrawalRequest[]) => {
     const byId = new Map<string, SuperAdminWithdrawalRequest>();
@@ -432,6 +434,7 @@ export default function SuperAdminWithdrawalsScreen() {
 
   const closeDrawer = useCallback(() => {
     setSelectedId(null);
+    setSelectedPayoutDetails(null);
     setRejectReason("");
   }, []);
 
@@ -453,9 +456,10 @@ export default function SuperAdminWithdrawalsScreen() {
     showToast({
       type: result.changed ? "success" : "info",
       title: result.changed ? "Withdrawal approved" : "Already processed",
-      message: result.changed ? "The wallet balance was deducted." : "This withdrawal was already processed.",
+      message: result.changed ? "The reserved funds were marked for payout." : "This withdrawal was already processed.",
     });
     setSelectedId(null);
+    setSelectedPayoutDetails(null);
     setRejectReason("");
     await load("refresh");
   }, [load, selected, showToast, submitting]);
@@ -489,17 +493,25 @@ export default function SuperAdminWithdrawalsScreen() {
     showToast({
       type: result.changed ? "success" : "info",
       title: result.changed ? "Withdrawal rejected" : "Already processed",
-      message: result.changed ? "The request was marked failed." : "This withdrawal was already processed.",
+      message: result.changed ? "The request was rejected and reserved funds were returned." : "This withdrawal was already processed.",
     });
     setSelectedId(null);
+    setSelectedPayoutDetails(null);
     setRejectReason("");
     await load("refresh");
   }, [load, rejectReason, selected, showToast, submitting]);
 
-  const handleSelect = useCallback((item: SuperAdminWithdrawalRequest) => {
+  const handleSelect = useCallback(async (item: SuperAdminWithdrawalRequest) => {
     setSelectedId(item.id);
+    setSelectedPayoutDetails(null);
     setRejectReason("");
-  }, []);
+    const result = await getZoneWithdrawalPayoutDetails(item.id);
+    if (result.ok) {
+      setSelectedPayoutDetails(result.data);
+    } else {
+      showToast({ type: "error", title: "Payout details unavailable", message: result.message });
+    }
+  }, [showToast]);
 
   const renderWithdrawal = useCallback(
     ({ item }: { item: SuperAdminWithdrawalRequest }) => (

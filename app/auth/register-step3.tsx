@@ -24,8 +24,8 @@ import {
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
-import styles from "./register.styles";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
+import styles from "../../app-shared/auth/register.styles";
 
 const faceitLevelIcons: Record<number, any> = {
   1: require("../../assets/images/faceit-levels/Level 1.png"),

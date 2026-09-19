@@ -213,6 +213,13 @@ export default StyleSheet.create({
     bubbleWrap: {
         maxWidth: "78%",
     },
+    messageSenderName: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+        marginBottom: 4,
+        marginLeft: SPACING.sm,
+    },
     messagePressable: {
         borderRadius: 22,
     },

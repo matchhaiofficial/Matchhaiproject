@@ -155,11 +155,6 @@ export default function ZoneTabsLayout() {
                 name="profile"
                 options={{ title: "Profile" }}
             />
-            {/* Hide style files from navigation — unchanged */}
-            <Tabs.Screen name="_zone-dashboard.styles" options={{ href: null }} />
-            <Tabs.Screen name="dashboard.styles" options={{ href: null }} />
-            <Tabs.Screen name="branches.styles" options={{ href: null }} />
-            <Tabs.Screen name="profile.styles" options={{ href: null }} />
         </Tabs>
     );
 }

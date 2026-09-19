@@ -18,8 +18,7 @@ import { useZoneData } from "../../../src/hooks/useZoneData";
 import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import { useEffectiveKycStatus } from "../../../src/hooks/useEffectiveKycStatus";
 import { COLORS, SPACING } from "../../../src/theme";
-import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
-import styles from "./branches.styles";
+import styles from "../../../app-shared/zone/(tabs)/branches.styles";
 
 const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
 
@@ -47,12 +46,6 @@ export default function ZoneBranches() {
             ...branch,
         }));
     }, [zone?.branches]);
-
-    // Legacy detection: zones without migration flag use the old branch model
-    const usingLegacyFallback = useMemo(() => {
-        if (!zone) return false;
-        return !isZoneMigrationReady(zone) && branches.length > 0;
-    }, [zone, branches.length]);
 
     const headerGhostAction = <View style={styles.headerGhostAction} />;
 
@@ -124,17 +117,6 @@ export default function ZoneBranches() {
                 ) : null}
 
                 <Text style={styles.branchCountLabel}>{branches.length} locations</Text>
-
-                {usingLegacyFallback && (
-                    <View style={styles.noticeBox}>
-                        <Text style={styles.noticeTitle}>
-                            Legacy branch model detected
-                        </Text>
-                        <Text style={styles.noticeText}>
-                            This venue is still using the legacy branch model. Current migration state: {getZoneMigrationLabel(zone)}. Use Migration Tools if you need to inspect or retry migration.
-                        </Text>
-                    </View>
-                )}
 
                 <View style={styles.topRow}>
                     <Pressable

@@ -59,7 +59,6 @@ const AUTH_MODELS_IN_DELETE_ORDER = [
   "account",
   "verification",
   "twoFactor",
-  "passkey",
   "oauthAccessToken",
   "oauthConsent",
   "oauthApplication",

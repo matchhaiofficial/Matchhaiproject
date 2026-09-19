@@ -22,7 +22,7 @@ import {
     type ZoneBranchResource,
 } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS } from "../../../src/theme";
-import styles from "./insights.styles";
+import styles from "../../../app-shared/zone/modules/insights.styles";
 
 type Segment = "overview" | "resources" | "demand" | "finance";
 type FinanceWindow = "7d" | "30d" | "all";

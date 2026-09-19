@@ -10,7 +10,7 @@ export default function NotificationsDeepLinkAlias() {
   if (loading) return null;
   if (!user) return <Redirect href={APP_ROUTES.authLogin} />;
   if (isSuperAdminProfile(user)) {
-    return <Redirect href="/super-admin/notifications" />;
+    return <Redirect href={"/super-admin/notifications" as any} />;
   }
   if (isZoneAccount(user)) {
     return <Redirect href="/zone/modules/notifications" />;

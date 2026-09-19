@@ -1,4 +1,4 @@
-import { isZoneBookingRequestExpired } from "../../app/zone/modules/hooks/useZoneBookingsViewModel";
+import { isZoneBookingRequestExpired } from "../../app-shared/zone/modules/hooks/useZoneBookingsViewModel";
 
 const makeRequest = (overrides: Record<string, unknown> = {}) =>
   ({

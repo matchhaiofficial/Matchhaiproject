@@ -21,7 +21,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import { isChatUserOnline, useRelativeNow } from "../../src/features/chat/utils";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { COLORS } from "../../src/theme";
-import styles from "./friends.styles";
+import styles from "../../app-shared/(player)/friends.styles";
 
 type FriendListItem = {
   uid: string;

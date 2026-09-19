@@ -5,6 +5,7 @@ import { query, mutation } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { requireCurrentUser, requireSuperAdmin } from "./authz";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
+import { ensureUserBlock } from "./userBlockPolicy";
 
 const DUPLICATE_WINDOW_MS = 60 * 60 * 1000;
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -90,6 +91,9 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
 async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string | null) {
   const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
   const actor = await requireCurrentUser(ctx);
+  if (expectedUid && !expectedUser) {
+    throw new Error("The reporting account could not be verified.");
+  }
   if (expectedUser && String(expectedUser._id) !== String(actor.user._id)) {
     throw new Error("You can only perform this action for your own account.");
   }
@@ -183,6 +187,13 @@ async function insertReport(ctx: any, args: {
   messagePreview?: string;
   targetReference?: string;
 }) {
+  // Reporting a player also creates a one-way safety block. Do this even when
+  // the report itself is deduplicated so old/partial records cannot bypass the
+  // future matchroom co-membership rule.
+  if (args.reportedUserId && String(args.reportedUserId) !== String(args.reporterUid)) {
+    await ensureUserBlock(ctx, args.reporterUid, args.reportedUserId);
+  }
+
   const duplicate = await findRecentDuplicate(ctx, args);
   if (duplicate) {
     return {

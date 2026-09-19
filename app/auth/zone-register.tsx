@@ -1,10 +1,11 @@
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import { CustomSingleSelect } from "../../src/components/CustomSingleSelect";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
@@ -12,15 +13,18 @@ import {
   isEmailAvailable,
   isPhoneAvailable,
 } from "../../src/services/userService";
+import { sendPhoneOtp, verifyPhoneOtp } from "../../src/services/convex/phoneOtpService";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import {
   formatPakistaniPhone,
   isValidPakistaniPhone,
   normalizePakistaniPhone,
+  PAKISTANI_MOBILE_NETWORK_OPTIONS,
+  type PakistaniMobileNetwork,
 } from "../../src/utils/phoneUtils";
 import { Perf, PerfScope } from "../../src/utils/perfInstrumentation";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 
 type FocusField = "owner" | "brand" | "email" | "phone" | "password" | null;
 type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
@@ -33,12 +37,20 @@ export default function AdminRegisterStep1() {
   const [venueBrandName, setVenueBrandName] = useState(step1.venueBrandName);
   const [contactEmail, setContactEmail] = useState(step1.contactEmail);
   const [contactPhone, setContactPhone] = useState(step1.contactPhone);
+  const [phoneCarrier, setPhoneCarrier] = useState<PakistaniMobileNetwork>(step1.phoneCarrier || "");
   const [password, setPassword] = useState(step1.password);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [focused, setFocused] = useState<FocusField>(null);
   const [submitting, setSubmitting] = useState(false);
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>("idle");
   const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpVisible, setOtpVisible] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpMessage, setOtpMessage] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const skipPhoneOtp = __DEV__ && process.env.EXPO_PUBLIC_SKIP_PHONE_OTP === "1";
 
   const ownerRef = useRef<TextInput | null>(null);
   const brandRef = useRef<TextInput | null>(null);
@@ -49,6 +61,20 @@ export default function AdminRegisterStep1() {
   useEffect(() => {
     setCurrentStep(1);
   }, [setCurrentStep]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const { phoneE164: currentPhoneE164 } = normalizePakistaniPhone(contactPhone);
+  const phoneVerified = Boolean(step1.phoneVerified)
+    && Boolean(currentPhoneE164)
+    && step1.phoneVerifiedE164 === currentPhoneE164;
+  const effectivePhoneVerified = phoneVerified || skipPhoneOtp;
 
   const {
     isNameValid,
@@ -132,7 +158,7 @@ export default function AdminRegisterStep1() {
   const emailOk =
     isEmailValid && emailStatus !== "checking" && emailStatus !== "taken";
   const phoneOk =
-    isPhoneFormatValid && phoneStatus !== "checking" && phoneStatus !== "taken";
+    isPhoneFormatValid && phoneStatus === "available" && effectivePhoneVerified;
   const isFormValid =
     isNameValid &&
     isBrandValid &&
@@ -151,7 +177,34 @@ export default function AdminRegisterStep1() {
       next = formatPakistaniPhone(value);
     }
     setContactPhone(next);
+    if (step1.phoneVerified) {
+      setStep1({
+        phoneVerified: false,
+        phoneVerifiedAt: null,
+        phoneVerifiedE164: "",
+      });
+    }
+    setOtpCode("");
+    setOtpVisible(false);
+    setOtpMessage(null);
+    setResendCooldown(0);
     if (phoneStatus !== "idle") setPhoneStatus("idle");
+    if (next.length >= 10) void handlePhoneAvailability(next);
+  };
+
+  const handlePhoneAvailability = async (value: string) => {
+    const { phoneDigits } = normalizePakistaniPhone(value);
+    if (!phoneDigits || !isValidPakistaniPhone(value)) {
+      setPhoneStatus("idle");
+      return;
+    }
+    try {
+      setPhoneStatus("checking");
+      const available = await isPhoneAvailable(phoneDigits);
+      setPhoneStatus(available ? "available" : "taken");
+    } catch {
+      setPhoneStatus("error");
+    }
   };
 
   const handleEmailBlur = async () => {
@@ -171,19 +224,61 @@ export default function AdminRegisterStep1() {
   };
 
   const handlePhoneBlur = async () => {
-    const { phoneDigits } = normalizePakistaniPhone(contactPhone);
-    if (!phoneDigits || !isPhoneFormatValid) {
-      setPhoneStatus("idle");
+    await handlePhoneAvailability(contactPhone);
+  };
+
+  const handleSendPhoneOtp = async () => {
+    const { phoneE164 } = normalizePakistaniPhone(contactPhone);
+    if (!phoneE164 || !isPhoneFormatValid) {
+      showToast({ type: "error", title: "Invalid number", message: "Enter a valid Pakistani mobile number." });
       return;
     }
-
-    try {
-      setPhoneStatus("checking");
-      const available = await isPhoneAvailable(phoneDigits);
-      setPhoneStatus(available ? "available" : "taken");
-    } catch {
-      setPhoneStatus("error");
+    if (phoneStatus !== "available") {
+      showToast({ type: "info", title: "Check number", message: "Please wait until this phone number is confirmed available." });
+      return;
     }
+    setOtpSending(true);
+    setOtpMessage(null);
+    const result = await sendPhoneOtp(phoneE164, phoneCarrier || undefined);
+    setOtpSending(false);
+    if (!result.ok) {
+      setOtpMessage(result.message);
+      showToast({ type: "error", title: "OTP failed", message: result.message });
+      return;
+    }
+    setOtpVisible(true);
+    setOtpCode("");
+    setResendCooldown(result.cooldownSeconds || 30);
+    setOtpMessage(`Code sent to ${result.phoneMasked}.`);
+  };
+
+  const handleVerifyPhoneOtp = async () => {
+    const { phoneE164 } = normalizePakistaniPhone(contactPhone);
+    const cleanOtp = otpCode.replace(/\D/g, "");
+    if (!phoneE164 || !/^\d{6}$/.test(cleanOtp)) {
+      setOtpMessage("Enter the 6-digit verification code.");
+      return;
+    }
+    setOtpVerifying(true);
+    setOtpMessage(null);
+    const result = await verifyPhoneOtp(phoneE164, cleanOtp);
+    setOtpVerifying(false);
+    if (!result.ok) {
+      setOtpMessage(result.message);
+      showToast({ type: "error", title: "Verification failed", message: result.message });
+      return;
+    }
+    setStep1({
+      contactPhone: result.phoneE164,
+      phoneVerified: true,
+      phoneVerifiedAt: result.verifiedAt,
+      phoneVerifiedE164: result.phoneE164,
+    });
+    setContactPhone(result.phoneE164);
+    setPhoneStatus("available");
+    setOtpVisible(false);
+    setOtpCode("");
+    setOtpMessage("Phone verified.");
   };
 
   const renderAvailabilityHelper = (status: AvailabilityStatus, type: "email" | "phone") => {
@@ -234,6 +329,11 @@ export default function AdminRegisterStep1() {
             return;
           }
 
+          if (!effectivePhoneVerified || (!skipPhoneOtp && step1.phoneVerifiedE164 !== normalizePakistaniPhone(contactPhone).phoneE164)) {
+            showToast({ type: "info", title: "Verify phone", message: "Please verify the 6-digit phone OTP before continuing." });
+            return;
+          }
+
           setSubmitting(true);
           const { phoneE164 } = normalizePakistaniPhone(contactPhone);
           setStep1({
@@ -241,6 +341,10 @@ export default function AdminRegisterStep1() {
             venueBrandName: venueBrandName.trim(),
             contactEmail: contactEmail.trim(),
             contactPhone: phoneE164 || contactPhone.trim(),
+            phoneCarrier,
+            phoneVerified: true,
+            phoneVerifiedAt: skipPhoneOtp ? Date.now() : step1.phoneVerifiedAt,
+            phoneVerifiedE164: phoneE164,
             password,
             type: "gaming",
           });
@@ -282,7 +386,7 @@ export default function AdminRegisterStep1() {
       />
 
       <Text style={styles.heading}>Admin account</Text>
-      <Text style={styles.sub}>Use real login/contact details for zone access. Didit verifies owner identity after signup.</Text>
+      <Text style={styles.sub}>Use real login/contact details. Verify the 6-digit phone OTP before continuing; zone tools stay locked until Didit identity verification is approved.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Owner / primary contact" required />
@@ -428,13 +532,70 @@ export default function AdminRegisterStep1() {
               returnKeyType="next"
               onSubmitEditing={() => passRef.current?.focus()}
             />
+            <Pressable
+              onPress={handleSendPhoneOtp}
+              disabled={skipPhoneOtp || !isPhoneFormatValid || phoneStatus !== "available" || effectivePhoneVerified || otpSending || resendCooldown > 0}
+              style={({ pressed }) => [
+                styles.platformButton,
+                styles.platformButtonInline,
+                styles.phoneVerifyButton,
+                effectivePhoneVerified && styles.platformButtonActive,
+                (!isPhoneFormatValid || phoneStatus !== "available" || otpSending || resendCooldown > 0) && !effectivePhoneVerified ? { opacity: 0.5 } : null,
+                pressed ? { opacity: 0.8 } : null,
+              ]}
+            >
+              {otpSending ? <ActivityIndicator size="small" color={COLORS.text} /> : (
+                <Text style={styles.platformButtonText}>
+                  {effectivePhoneVerified ? (skipPhoneOtp ? "Verified (Dev)" : "Verified") : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Verify"}
+                </Text>
+              )}
+            </Pressable>
           </View>
           <View style={[styles.focusBar, { opacity: focused === "phone" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(phoneStatus, "phone")}
+        <Text style={[styles.helperText, { color: COLORS.muted, marginTop: 6 }]}>We will send a 6-digit OTP. It must be verified before signup can continue.</Text>
+        {otpVisible ? (
+          <View style={styles.otpRow}>
+            <View style={[styles.inputBox, styles.otpInputBox]}>
+              <TextInput
+                placeholder="6-digit code"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                keyboardType="number-pad"
+                value={otpCode}
+                maxLength={6}
+                onChangeText={(value) => setOtpCode(value.replace(/\D/g, ""))}
+              />
+            </View>
+            <Pressable
+              onPress={handleVerifyPhoneOtp}
+              disabled={otpVerifying || otpCode.length !== 6}
+              style={[styles.platformButton, styles.platformButtonInline, styles.otpSubmitButton, (otpVerifying || otpCode.length !== 6) && { opacity: 0.5 }]}
+            >
+              {otpVerifying ? <ActivityIndicator size="small" color={COLORS.text} /> : <Text style={styles.platformButtonText}>Verify OTP</Text>}
+            </Pressable>
+          </View>
+        ) : null}
+        {otpMessage ? <Text style={[styles.helperText, phoneVerified ? styles.helperOk : styles.helperWarning, { marginTop: 6 }]}>{otpMessage}</Text> : null}
         {contactPhone.trim().length > 0 && !isPhoneFormatValid && phoneStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid Pakistani mobile number.</Text>
         ) : null}
+      </View>
+
+      <View style={styles.fieldGroup}>
+        <CustomSingleSelect
+          label={<RegistrationFieldLabel label="Mobile network" required />}
+          value={PAKISTANI_MOBILE_NETWORK_OPTIONS.find((option) => option.value === phoneCarrier)?.label || PAKISTANI_MOBILE_NETWORK_OPTIONS[0].label}
+          options={PAKISTANI_MOBILE_NETWORK_OPTIONS.map((option) => option.label)}
+          onChange={(label) => {
+            const selected = PAKISTANI_MOBILE_NETWORK_OPTIONS.find((option) => option.label === label) || PAKISTANI_MOBILE_NETWORK_OPTIONS[0];
+            setPhoneCarrier(selected.value);
+            setStep1({ phoneCarrier: selected.value });
+          }}
+          icon="sensors"
+        />
+        <Text style={[styles.helperText, { color: COLORS.muted, marginTop: 6 }]}>Choose the current network for a ported number, or leave Automatic to use MNP lookup.</Text>
       </View>
 
       <View style={styles.fieldGroup}>

@@ -10,8 +10,20 @@ const VERIFY_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_SENDS_PER_HOUR = 3;
 const MAX_VERIFY_ATTEMPTS_PER_DAY = 5;
 const DEFAULT_VEEVOTECH_SMS_URL = "https://api.veevotech.com/v3/sendsms";
+const DEFAULT_VEEVOTECH_MNP_URL = "https://api.veevotech.com/v3/hrl_lookup";
 const SMS_SEND_FAILURE_MESSAGE = "Could not send OTP. Please check your number and try again.";
 const SMS_PROVIDER_FAILURE_MESSAGE = "SMS service is temporarily unavailable. Please try again later.";
+
+// These are the network names VeevoTech documents/returns for Pakistan. Keep
+// this allowlist server-side so a client cannot inject an arbitrary routing
+// value into the provider request. `undefined` means automatic MNP lookup.
+const VEEVOTECH_RECEIVER_NETWORKS = [
+  "Mobilink-PK",
+  "Telenor-PK",
+  "Ufone-PK",
+  "Zong-PK",
+] as const;
+type VeevoTechReceiverNetwork = (typeof VEEVOTECH_RECEIVER_NETWORKS)[number];
 
 type NormalizedPhone = {
   phoneE164: string;
@@ -23,6 +35,15 @@ type PhoneOtpFailure = { ok: false; message: string };
 
 function phoneOtpFailure(message: string): PhoneOtpFailure {
   return { ok: false, message };
+}
+
+function resolveRequestedReceiverNetwork(value: string | undefined) {
+  const requested = String(value || "").trim();
+  if (!requested) return { valid: true as const, receiverNetwork: undefined };
+  if ((VEEVOTECH_RECEIVER_NETWORKS as readonly string[]).includes(requested)) {
+    return { valid: true as const, receiverNetwork: requested as VeevoTechReceiverNetwork };
+  }
+  return { valid: false as const, receiverNetwork: undefined };
 }
 
 function normalizePakistaniPhone(value: string): NormalizedPhone {
@@ -171,6 +192,47 @@ function parseProviderBody(bodyText: string) {
   }
 }
 
+function extractReceiverNetwork(value: unknown) {
+  if (typeof value === "string") {
+    const direct = value.trim();
+    return /^[a-z0-9 ._-]{2,60}$/i.test(direct) ? direct : undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const network = getProviderString(record, [
+    "NETWORK_NAME",
+    "receiverNetwork",
+    "receiver_network",
+    "network",
+    "operator",
+    "carrier",
+  ]);
+  return /^[a-z0-9 ._-]{2,60}$/i.test(network) ? network : undefined;
+}
+
+async function lookupReceiverNetwork(apiHash: string, phoneE164: string, endpoint: string) {
+  const url = new URL(endpoint);
+  url.searchParams.set("hash", apiHash);
+  url.searchParams.set("phonenumber", phoneE164);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) return undefined;
+    return extractReceiverNetwork(parseProviderBody(await response.text()));
+  } catch {
+    // MNP enrichment is best-effort. Sending without receivernetwork preserves
+    // the provider's normal routing if lookup is unavailable.
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function redactProviderBody(value: unknown): unknown {
   if (typeof value === "string") return value.slice(0, 1000);
   if (!value || typeof value !== "object") return value;
@@ -239,7 +301,12 @@ function logSmsFailure(
 }
 
 export const sendPhoneOtp = action({
-  args: { phone: v.string() },
+  args: {
+    phone: v.string(),
+    // Optional for backwards compatibility. Omit it for automatic MNP/HRL
+    // lookup, or pass one of the allowlisted VeevoTech `*-PK` values.
+    receiverNetwork: v.optional(v.string()),
+  },
   handler: async (
     ctx,
     args,
@@ -255,6 +322,7 @@ export const sendPhoneOtp = action({
     const apiHash = process.env.VEEVOTECH_API_HASH;
     const senderId = process.env.VEEVOTECH_SENDER_ID;
     const smsUrl = process.env.VEEVOTECH_SMS_URL || DEFAULT_VEEVOTECH_SMS_URL;
+    const mnpUrl = process.env.VEEVOTECH_MNP_URL || DEFAULT_VEEVOTECH_MNP_URL;
 
     if (!apiHash || !senderId) {
       logSmsFailure("missing_config", {
@@ -274,6 +342,10 @@ export const sendPhoneOtp = action({
     }
 
     const { phoneE164, phoneMasked } = normalizedPhone;
+    const requestedReceiverNetwork = resolveRequestedReceiverNetwork(args.receiverNetwork);
+    if (!requestedReceiverNetwork.valid) {
+      return phoneOtpFailure("Select a supported Pakistani mobile network or Automatic.");
+    }
     const phoneHash = await sha256(phoneE164);
     const now = Date.now();
 
@@ -316,14 +388,18 @@ export const sendPhoneOtp = action({
     );
 
     try {
+      const receiverNetwork = requestedReceiverNetwork.receiverNetwork
+        || (process.env.VEEVOTECH_MNP_LOOKUP_ENABLED === "0"
+          ? undefined
+          : await lookupReceiverNetwork(apiHash, phoneE164, mnpUrl));
       const response = await fetch(smsUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
           apikey: apiHash,
-          hash: apiHash,
           receivernum: phoneE164,
           sendernum: senderId,
+          ...(receiverNetwork ? { receivernetwork: receiverNetwork } : {}),
           textmessage: `Your Matchhai verification code is ${otp}. It expires in 5 minutes. Do not share this code.`,
         }),
       });
@@ -335,6 +411,10 @@ export const sendPhoneOtp = action({
         await ctx.runMutation(internal.phoneOtp.markProviderSent, {
           verificationId,
           providerMessageId,
+          receiverNetwork: receiverNetwork || extractReceiverNetwork(providerBody),
+          providerStatus: providerBody && typeof providerBody === "object"
+            ? getProviderString(providerBody as Record<string, unknown>, ["STATUS", "status"]) || undefined
+            : undefined,
           updatedAt: Date.now(),
         });
       } else {
@@ -557,11 +637,15 @@ export const markProviderSent = internalMutation({
   args: {
     verificationId: v.id("phoneVerifications"),
     providerMessageId: v.optional(v.string()),
+    receiverNetwork: v.optional(v.string()),
+    providerStatus: v.optional(v.string()),
     updatedAt: v.number(),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.verificationId, {
       ...(args.providerMessageId ? { providerMessageId: args.providerMessageId } : {}),
+      ...(args.receiverNetwork ? { receiverNetwork: args.receiverNetwork } : {}),
+      ...(args.providerStatus ? { providerStatus: args.providerStatus } : {}),
       updatedAt: args.updatedAt,
     });
   },

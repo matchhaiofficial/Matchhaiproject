@@ -8,12 +8,15 @@ import type {
   FaceitProfileSummary,
   SteamProfileSummary,
 } from "../services/convex/externalApiService";
+import type { PakistaniMobileNetwork } from "../utils/phoneUtils";
 
 type Step1Data = {
   fullName: string;
   username: string;
   email: string;
   phone: string;
+  /** VeevoTech receiver network; empty means automatic MNP lookup. */
+  phoneCarrier: PakistaniMobileNetwork;
   phoneVerified: boolean;
   phoneVerifiedAt: number | null;
   phoneVerifiedE164: string;
@@ -136,6 +139,7 @@ const initialState: Omit<
     username: "",
     email: "",
     phone: "",
+    phoneCarrier: "",
     phoneVerified: false,
     phoneVerifiedAt: null,
     phoneVerifiedE164: "",

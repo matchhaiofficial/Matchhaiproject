@@ -38,9 +38,9 @@ import { getTeamMainRosterSize, getTeamMaxSubstitutes } from "../../src/constant
 import Logger from "../../src/utils/logger";
 import { buildLegacyTeamsHref } from "../../src/navigation/routes";
 import { getTeamMainDisplayCount } from "../../src/utils/teamRosterDisplay";
-import styles from "./[id].styles";
-import InviteFriendsSheet from "./components/InviteFriendsSheet";
-import RosterSlots from "./components/RosterSlots";
+import styles from "../../app-shared/teams/[id].styles";
+import InviteFriendsSheet from "../../app-shared/teams/components/InviteFriendsSheet";
+import RosterSlots from "../../app-shared/teams/components/RosterSlots";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 

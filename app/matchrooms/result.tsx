@@ -16,7 +16,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
-import styles from './result.styles';
+import styles from '../../app-shared/matchrooms/result.styles';
 
 interface MatchData {
     id: string;
@@ -27,6 +27,30 @@ interface MatchData {
     team1Captain: string;
     team2Captain: string;
     resultVerification?: any;
+}
+
+type ResultPlayer = { uid: string; name: string };
+
+function playersForSlots(room: any, slots: any[]): ResultPlayer[] {
+    const playersByUid = new Map(
+        (room.players || []).map((player: any) => [String(player.uid), player])
+    );
+    const resolved = new Map<string, ResultPlayer>();
+
+    for (const slot of slots || []) {
+        const uid = String(
+            slot?.user?.uid || slot?.uid || slot?.reservedFor?.uid || slot?.reservedForUid || ""
+        ).trim();
+        if (!uid) continue;
+
+        const player: any = playersByUid.get(uid);
+        const name = String(
+            player?.username || slot?.user?.username || slot?.reservedFor?.username || "Player"
+        ).trim();
+        resolved.set(uid, { uid, name: name || "Player" });
+    }
+
+    return Array.from(resolved.values());
 }
 
 export default function MatchResultSubmission() {
@@ -58,25 +82,32 @@ export default function MatchResultSubmission() {
                 setError("Match data not found");
                 return;
             }
-            // Transform Matchroom to MatchData interface expected by UI
-            // (Or update UI to use Matchroom directly - simpler to map here for now)
+            // Slot sides are the server-authoritative team assignment. Retain
+            // the old player-order fallback only for pre-slot legacy rooms.
+            let team1 = playersForSlots(room, room.slotsA || []);
+            let team2 = playersForSlots(room, room.slotsB || []);
+            if (team1.length === 0 || team2.length === 0) {
+                const mid = Math.ceil(room.players.length / 2);
+                team1 = room.players.slice(0, mid).map((player) => ({
+                    uid: player.uid,
+                    name: player.username,
+                }));
+                team2 = room.players.slice(mid).map((player) => ({
+                    uid: player.uid,
+                    name: player.username,
+                }));
+            }
 
-            // Mock team splitting for MVP visualization if not strictly defined
-            // Assume first half players are team 1, second half team 2
-            const mid = Math.ceil(room.players.length / 2);
-                const team1 = room.players.slice(0, mid);
-                const team2 = room.players.slice(mid);
-
-                setMatchData({
-                    id: room.id!,
-                    gameKey: room.game,
-                    title: room.title,
-                    team1Players: team1.map(p => ({ uid: p.uid, name: p.username })),
-                    team2Players: team2.map(p => ({ uid: p.uid, name: p.username })),
-                    team1Captain: room.resultVerification?.team1Captain || room.hostUid, // fallback to host
-                    team2Captain: room.resultVerification?.team2Captain || (team2[0]?.uid || ''), // fallback to first of team 2
-                    resultVerification: room.resultVerification
-                });
+            setMatchData({
+                id: room.id!,
+                gameKey: room.game,
+                title: room.title,
+                team1Players: team1,
+                team2Players: team2,
+                team1Captain: room.resultVerification?.team1Captain || room.captainUidA || room.hostUid,
+                team2Captain: room.resultVerification?.team2Captain || room.captainUidB || (team2[0]?.uid || ''),
+                resultVerification: room.resultVerification
+            });
         } catch (err) {
             setError("An error occurred");
         } finally {
@@ -318,4 +349,3 @@ export default function MatchResultSubmission() {
         </Screen>
     );
 }
-

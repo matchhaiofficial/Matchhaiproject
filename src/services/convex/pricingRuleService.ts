@@ -306,6 +306,33 @@ export async function getEnabledPricingRulesForZone(
     }
 }
 
+/** Player-safe pricing read. The backend only returns enabled rules for active zones. */
+export async function getPublicEnabledPricingRulesForZone(
+    zoneId: string,
+    options?: { forceRefresh?: boolean },
+): Promise<PricingRule[]> {
+    const cacheKey = `public:${zoneId}`;
+    const cache = zoneRulesCache.get(cacheKey);
+    const now = Date.now();
+    if (!options?.forceRefresh && cache && now - cache.fetchedAt < RULE_CACHE_TTL_MS) {
+        return cache.rules;
+    }
+
+    try {
+        const docs = await convex.query(api.zones.listPublicEnabledPricingRules, {
+            zoneId: zoneId as Id<"zones">,
+        });
+        const rules = sortRules(
+            docs.map((item: any) => normalizeRule(zoneId, item._id, item as Record<string, any>)),
+        );
+        zoneRulesCache.set(cacheKey, { fetchedAt: now, rules });
+        return rules;
+    } catch (error) {
+        Logger.error("pricingRuleService", "Failed to fetch public pricing rules", error);
+        return [];
+    }
+}
+
 export function subscribeZonePricingRules(
     zoneId: string,
     onData: (rules: PricingRule[]) => void,

@@ -1,6 +1,7 @@
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { isAuthorizedSuperAdmin } from "./superAdminAccess";
+import { isAccountSuspensionActive } from "./accountStatusPolicy";
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(
@@ -58,6 +59,9 @@ export async function requireCurrentUser(ctx: any) {
   }
   if (!actor.user) {
     throw new Error("User profile not found");
+  }
+  if (isAccountSuspensionActive(actor.user)) {
+    throw new Error("This account is suspended");
   }
   return actor;
 }

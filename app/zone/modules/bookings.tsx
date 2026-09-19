@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Text,
@@ -10,7 +10,7 @@ import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
-import MatchroomCard from "../../matchrooms/components/MatchroomCard";
+import MatchroomCard from "../../../app-shared/matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
@@ -34,24 +34,28 @@ import {
 } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import { toLocalDateString } from "../../../src/utils/scheduleTime";
+import {
+    closestDateTimeForClock,
+    combineLocalDateTime,
+    toLocalDateString,
+} from "../../../src/utils/scheduleTime";
 import {
     ZoneBookingsAllocationSheet,
     type ZoneBookingAllocationResourceOption,
-} from "./components/ZoneBookingsAllocationSheet";
-import { ZoneBookingsCounterOfferSheets } from "./components/ZoneBookingsCounterOfferSheets";
-import { ZoneBookingsHistorySection } from "./components/ZoneBookingsHistorySection";
-import { ZoneBookingsMatchroomsSection } from "./components/ZoneBookingsMatchroomsSection";
-import { ZoneBookingsRequestsSection } from "./components/ZoneBookingsRequestsSection";
-import { ZoneBookingsWalkinsSection } from "./components/ZoneBookingsWalkinsSection";
-import { useZoneBookingsActions } from "./hooks/useZoneBookingsActions";
+} from "../../../app-shared/zone/modules/components/ZoneBookingsAllocationSheet";
+import { ZoneBookingsCounterOfferSheets } from "../../../app-shared/zone/modules/components/ZoneBookingsCounterOfferSheets";
+import { ZoneBookingsHistorySection } from "../../../app-shared/zone/modules/components/ZoneBookingsHistorySection";
+import { ZoneBookingsMatchroomsSection } from "../../../app-shared/zone/modules/components/ZoneBookingsMatchroomsSection";
+import { ZoneBookingsRequestsSection } from "../../../app-shared/zone/modules/components/ZoneBookingsRequestsSection";
+import { ZoneBookingsWalkinsSection } from "../../../app-shared/zone/modules/components/ZoneBookingsWalkinsSection";
+import { useZoneBookingsActions } from "../../../app-shared/zone/modules/hooks/useZoneBookingsActions";
 import {
     getRequestMatchroomId,
     toDateString,
     toScheduleMillis,
     useZoneBookingsViewModel,
-} from "./hooks/useZoneBookingsViewModel";
-import styles from "./bookings.styles";
+} from "../../../app-shared/zone/modules/hooks/useZoneBookingsViewModel";
+import styles from "../../../app-shared/zone/modules/bookings.styles";
 
 type Segment = "requests" | "pending" | "matchrooms" | "walkins" | "history";
 type MatchroomFilter = "all" | "open" | "locked" | "cancelled";
@@ -72,7 +76,6 @@ type BookingFilterGroup = {
 };
 
 const HISTORY_PAGE_SIZE = 20;
-const HISTORY_MAX_LIMIT = 100;
 
 const MATCHROOM_STATUS_OPTIONS: FilterOption[] = [
     { key: "all", label: "All" },
@@ -221,12 +224,7 @@ const resourceMatchesAllocationProfile = (
     request?: ZoneBookingQueueItem | null,
 ) => {
     if (!resource.isActive) return false;
-    if (resource.lifecycleStatus === "held") {
-        const linkedRequestId = String(resource.holdRequestId || resource.bookingRequestId || "");
-        if (!linkedRequestId || linkedRequestId !== String(request?.id || "")) {
-            return false;
-        }
-    }
+    if (resource.lifecycleStatus === "maintenance") return false;
     if (normalizeResourceToken(resource.assetType) !== profile.assetType) return false;
     if ("tier" in profile && profile.tier && inferResourceTier(resource) !== profile.tier) {
         return false;
@@ -533,8 +531,6 @@ export default function ZoneBookingsModule() {
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
     const [loadingWalkIns, setLoadingWalkIns] = useState(true);
-    const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
-    const [loadingHistoryMore, setLoadingHistoryMore] = useState(false);
     const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | null>(null);
     const [errorText, setErrorText] = useState<string | null>(null);
     const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
@@ -573,32 +569,22 @@ export default function ZoneBookingsModule() {
         api.bookings.listOffersByZone,
         zone?.id ? { zoneId: zone.id as Id<"zones"> } : "skip",
     );
-    const historyRows = useQuery(
-        api.zoneAdminBooking.listBookingHistoryForZone,
-        zone?.id && segment === "history" ? { zoneId: zone.id, limit: historyLimit } : "skip",
+    const {
+        results: historyRows,
+        status: historyStatus,
+        loadMore: loadHistoryPage,
+    } = usePaginatedQuery(
+        api.zoneAdminBooking.listBookingHistoryPageForZone,
+        zone?.id && segment === "history" ? { zoneId: zone.id } : "skip",
+        { initialNumItems: HISTORY_PAGE_SIZE },
     );
-    const historyHasMore = Boolean(
-        Array.isArray(historyRows) &&
-        historyRows.length >= historyLimit &&
-        historyLimit < HISTORY_MAX_LIMIT,
-    );
-
-    useEffect(() => {
-        setHistoryLimit(HISTORY_PAGE_SIZE);
-        setLoadingHistoryMore(false);
-    }, [segment, zone?.id]);
-
-    useEffect(() => {
-        if (historyRows !== undefined) {
-            setLoadingHistoryMore(false);
-        }
-    }, [historyRows]);
-
+    const historyLoading = segment === "history" && historyStatus === "LoadingFirstPage";
+    const historyHasMore = segment === "history" && historyStatus === "CanLoadMore";
+    const loadingHistoryMore = historyStatus === "LoadingMore";
     const loadHistoryMore = useCallback(() => {
-        if (loadingHistoryMore || !historyHasMore) return;
-        setLoadingHistoryMore(true);
-        setHistoryLimit((current) => Math.min(current + HISTORY_PAGE_SIZE, HISTORY_MAX_LIMIT));
-    }, [historyHasMore, loadingHistoryMore]);
+        if (!historyHasMore) return;
+        loadHistoryPage(HISTORY_PAGE_SIZE);
+    }, [historyHasMore, loadHistoryPage]);
 
     const pageBranchAreas = useMemo(() => {
         const allAreas = new Set<string>();
@@ -882,6 +868,10 @@ export default function ZoneBookingsModule() {
         () => toClockMinutes(selectedRequest?.preferredTime) ?? toClockMinutes(counterOptions[0]?.time) ?? 12 * 60,
         [counterOptions, selectedRequest?.preferredTime],
     );
+    const originalStartAt = useMemo(() => {
+        const date = toDateString(selectedRequest?.preferredDate) || counterOptions[0]?.date;
+        return combineLocalDateTime(date, selectedRequest?.preferredTime || counterOptions[0]?.time);
+    }, [counterOptions, selectedRequest?.preferredDate, selectedRequest?.preferredTime]);
     const originalDurationMinutes = useMemo(() => {
         const explicitMinutes = Number((selectedRequest?.raw as any)?.durationMinutes || 0);
         if (Number.isFinite(explicitMinutes) && explicitMinutes > 0) return explicitMinutes;
@@ -889,24 +879,16 @@ export default function ZoneBookingsModule() {
         if (Number.isFinite(durationHours) && durationHours > 0) return Math.round(durationHours * 60);
         return 60;
     }, [selectedRequest?.raw]);
-    const allowedStartMin = originalStartMinutes - 120;
-    const allowedStartMax = originalStartMinutes + 120;
-    const originalEndMinutes = originalStartMinutes + originalDurationMinutes;
-    const allowedEndMin = originalEndMinutes - 120;
-    const allowedEndMax = originalEndMinutes + 120;
-
     const counterValidationMessage = useMemo(() => {
         const option = counterOptions[0];
         if (!option?.date || !option?.time || !option?.endTime) return "Date, start time, and end time are required.";
-        const start = toClockMinutes(option.time);
-        const end = toClockMinutes(option.endTime);
-        if (start === null || end === null) return "Use a valid start and end time.";
-        if (end <= start) return "Ending booking time must be after the starting time.";
-        if (start < allowedStartMin || start > allowedStartMax || end < allowedEndMin || end > allowedEndMax) {
+        const startAt = combineLocalDateTime(option.date, option.time);
+        if (startAt === null || originalStartAt === null) return "Use a valid start time.";
+        if (Math.abs(startAt - originalStartAt) > 2 * 60 * 60 * 1000) {
             return "Alternative time must stay within 2 hours of the original booking window.";
         }
         return "";
-    }, [allowedEndMax, allowedEndMin, allowedStartMax, allowedStartMin, counterOptions]);
+    }, [counterOptions, originalStartAt]);
 
     const pendingOffers = useMemo(() => {
         const now = Date.now();
@@ -1031,26 +1013,29 @@ export default function ZoneBookingsModule() {
             prev.map((option, optionIndex) => {
                 if (optionIndex !== index) return option;
                 if (Object.prototype.hasOwnProperty.call(patch, "time")) {
-                    const startRaw = toClockMinutes(patch.time);
-                    const start = startRaw === null
+                    const selectedTime = patch.time || "";
+                    const nextStartAt = originalStartAt === null
                         ? null
-                        : Math.max(allowedStartMin, Math.min(allowedStartMax, startRaw));
+                        : closestDateTimeForClock(originalStartAt, selectedTime);
+                    const nextStart = nextStartAt === null ? null : new Date(nextStartAt);
+                    const nextEnd = nextStartAt === null
+                        ? null
+                        : new Date(nextStartAt + originalDurationMinutes * 60 * 1000);
                     return {
                         ...option,
-                        ...(patch.date !== undefined ? { date: patch.date } : {}),
-                        time: start === null ? patch.time || "" : fromClockMinutes(start),
-                        endTime: start === null ? option.endTime : fromClockMinutes(start + originalDurationMinutes),
+                        date: nextStart ? toLocalDateString(nextStart) : option.date,
+                        time: nextStart
+                            ? fromClockMinutes(nextStart.getHours() * 60 + nextStart.getMinutes())
+                            : selectedTime,
+                        endTime: nextEnd
+                            ? fromClockMinutes(nextEnd.getHours() * 60 + nextEnd.getMinutes())
+                            : option.endTime,
                     };
                 }
                 if (Object.prototype.hasOwnProperty.call(patch, "endTime")) {
-                    const endRaw = toClockMinutes(patch.endTime);
-                    const end = endRaw === null
-                        ? null
-                        : Math.max(allowedEndMin, Math.min(allowedEndMax, endRaw));
                     return {
                         ...option,
-                        ...(patch.date !== undefined ? { date: patch.date } : {}),
-                        endTime: end === null ? patch.endTime : fromClockMinutes(end),
+                        endTime: patch.endTime,
                     };
                 }
                 return { ...option, ...patch };
@@ -1253,7 +1238,7 @@ export default function ZoneBookingsModule() {
                 allocationBranchId,
                 (rows) => {
                     setAllocationResources(
-                        rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
+                        rows.filter((resource) => resource.isActive !== false && resource.lifecycleStatus !== "maintenance"),
                     );
                     setLoadingAllocationResources(false);
                 },
@@ -1593,7 +1578,7 @@ export default function ZoneBookingsModule() {
 
             {segment === "history" ? (
                 <ZoneBookingsHistorySection
-                    loading={historyRows === undefined}
+                    loading={historyLoading}
                     loadingMore={loadingHistoryMore}
                     onLoadMore={loadHistoryMore}
                     rows={(historyRows || []) as any[]}

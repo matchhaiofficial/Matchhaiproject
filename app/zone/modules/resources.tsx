@@ -46,7 +46,7 @@ import {
 import { COLORS } from "../../../src/theme";
 import { getResourceLifecycleLabel } from "../../../src/utils/statusLabels";
 import { isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
-import styles from "./resources.styles";
+import styles from "../../../app-shared/zone/modules/resources.styles";
 
 type AssetFilter =
     | "all"
@@ -69,7 +69,9 @@ type ResourceSection = {
 };
 
 const STATUS_FILTERS: StatusFilter[] = ["all", "available", "held", "booked", "maintenance"];
-const STATUS_OPTIONS: ResourceLifecycleStatus[] = ["available", "held", "booked", "maintenance"];
+// Held/booked are calendar-backed states managed by booking allocation. Manual
+// inventory controls only toggle global availability.
+const STATUS_OPTIONS: ResourceLifecycleStatus[] = ["available", "maintenance"];
 const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 const ALLOCATION_DATE_FILTERS: Array<{ key: AllocationDateFilter; label: string }> = [
     { key: "all", label: "Any date" },
@@ -507,11 +509,11 @@ export default function ZoneResourcesModule() {
         return [{ key: "all", label: "All games" }, ...games.map((game) => ({ key: game, label: formatGameLabel(game) }))];
     }, [upcomingAllocatedMatchrooms]);
 
-    const filteredResources = useMemo(
-        () =>
+    const filterResources = useCallback(
+        (mode: "grid" | "allocation") =>
             resources.filter((item) => {
                 const allocatedMatchroom = matchroomByResourceId.get(item.id);
-                if (viewMode === "allocation") {
+                if (mode === "allocation") {
                     if (!allocatedMatchroom) return false;
                     if (
                         allocationGameFilter !== "all" &&
@@ -555,9 +557,11 @@ export default function ZoneResourcesModule() {
             resources,
             searchQuery,
             statusFilter,
-            viewMode,
         ],
     );
+    const gridResources = useMemo(() => filterResources("grid"), [filterResources]);
+    const allocationResources = useMemo(() => filterResources("allocation"), [filterResources]);
+    const filteredResources = viewMode === "allocation" ? allocationResources : gridResources;
 
     const activeFilterCount = useMemo(
         () =>
@@ -881,8 +885,8 @@ export default function ZoneResourcesModule() {
 
             <SegmentedTabs
                 items={[
-                    { key: "grid", label: "Resource Grid", badge: filteredResources.length },
-                    { key: "allocation", label: "Allocation", badge: filteredResources.length },
+                    { key: "grid", label: "Resource Grid", badge: gridResources.length },
+                    { key: "allocation", label: "Allocation", badge: allocationResources.length },
                 ]}
                 value={viewMode}
                 onChange={(value) => setViewMode(value)}
@@ -1117,6 +1121,9 @@ export default function ZoneResourcesModule() {
                                         </Pressable>
                                     </View>
                                 </View>
+                                <Text style={styles.selectionPanelMeta}>
+                                    Use Maintenance for globally unavailable equipment. Held and Booked are set automatically by dated bookings; use Bookings → Walk-ins for phone or counter reservations.
+                                </Text>
                                 <Text style={styles.selectionPanelSubLabel}>Set selected status</Text>
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bulkStatusScroll}>
                                     <View style={styles.bulkStatusRowCompact}>

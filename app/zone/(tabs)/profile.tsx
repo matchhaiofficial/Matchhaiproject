@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -41,8 +41,8 @@ import { getZoneBranchDisplayName, getZoneBranchId } from "../../../src/utils/zo
 import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
-} from "../../(player)/components/PlayerSurface";
-import styles from "./profile.styles";
+} from "../../../app-shared/(player)/components/PlayerSurface";
+import styles from "../../../app-shared/zone/(tabs)/profile.styles";
 
 const toPositiveNumber = (value: unknown) => {
     const parsed = Number(String(value ?? "").trim());
@@ -138,6 +138,7 @@ export default function ZoneProfile() {
         currentKyc,
         status: effectiveKycStatus,
         accessAllowed: kycVerified,
+        reviewActive: kycReviewActive,
     } = useEffectiveKycStatus();
     const kycStartActionLabel =
         effectiveKycStatus === "rejected"
@@ -168,6 +169,7 @@ export default function ZoneProfile() {
         bankName: string;
         maskedAccount: string;
     } | null>(null);
+    const withdrawalRequestKeyRef = useRef<string | null>(null);
     const [showLogoutDialog, setShowLogoutDialog] = useState(false);
     const tabBarScrollClearance = useTabBarClearance(SPACING.xxl);
     const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.xxl, tabBarScrollClearance);
@@ -245,6 +247,7 @@ export default function ZoneProfile() {
         setWithdrawAmount("");
         setWithdrawBankName("");
         setWithdrawAccountNumber("");
+        withdrawalRequestKeyRef.current = null;
     };
 
     const submitWithdrawRequest = async () => {
@@ -257,6 +260,10 @@ export default function ZoneProfile() {
             return;
         }
         if (!user?._id || !selectedWithdrawBranch || !canSubmitWithdrawal || withdrawSubmitting || withdrawSuccess) return;
+        if (!withdrawalRequestKeyRef.current) {
+            withdrawalRequestKeyRef.current = `mobile_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+        }
+        const requestKey = withdrawalRequestKeyRef.current;
         setWithdrawSubmitting(true);
         const result = await requestZoneWithdrawal({
             userId: user._id,
@@ -269,6 +276,7 @@ export default function ZoneProfile() {
             ownerName,
             ownerEmail: zone?.contactEmail || user?.email,
             venueName,
+            requestKey,
         });
         setWithdrawSubmitting(false);
         if (!result.ok) {
@@ -419,10 +427,14 @@ export default function ZoneProfile() {
                             label={kycVerified ? "Verified" : String(effectiveKycStatus || "Not started").replace(/_/g, " ")}
                         />
                     </View>
-                    {!kycVerified ? (
+                    {!kycVerified && !kycReviewActive ? (
                         <AppButton style={styles.logoutButton} onPress={handleStartVerification}>
                             {kycStartActionLabel}
                         </AppButton>
+                    ) : kycReviewActive ? (
+                        <Text style={styles.profileMetaText}>
+                            Identity review is in progress. Zone tools unlock after approval; profile settings and help remain available.
+                        </Text>
                     ) : user?.kycVerifiedAt ? (
                         <Text style={styles.profileMetaText}>
                             Verified {new Date(user.kycVerifiedAt).toLocaleDateString()}

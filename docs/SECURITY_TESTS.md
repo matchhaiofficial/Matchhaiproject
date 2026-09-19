@@ -4,7 +4,7 @@ This document covers Phase 5: what is automated today, and the staging/manual
 procedures for cases that cannot be safely or fully automated yet.
 
 > **Guardrails:** never run these against production. No real Easypaisa calls.
-> Use the staging Convex deployment (`quick-panda-920`) with seeded test data
+> Use the QA Convex deployment (`striped-dog-623`) with seeded test data
 > (see [TEST_DATA.md](./TEST_DATA.md)).
 
 ## Automated coverage (`npm run test:security`)

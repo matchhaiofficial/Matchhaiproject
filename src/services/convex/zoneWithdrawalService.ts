@@ -14,6 +14,7 @@ export async function requestZoneWithdrawal(input: {
   ownerName?: string;
   ownerEmail?: string;
   venueName?: string;
+  requestKey: string;
 }) {
   try {
     const result = await convex.action(api.zoneWithdrawals.requestZoneWithdrawal, {
@@ -27,6 +28,7 @@ export async function requestZoneWithdrawal(input: {
       ownerName: input.ownerName,
       ownerEmail: input.ownerEmail,
       venueName: input.venueName,
+      requestKey: input.requestKey,
     });
     return { ok: true as const, reference: result.reference as string };
   } catch (error: any) {

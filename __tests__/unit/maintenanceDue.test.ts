@@ -1,4 +1,5 @@
 import {
+  CHALLENGE_ACCEPT_TTL_MS,
   FUTURE_MAINTENANCE_DUE_AT,
   STALE_PAYMENT_RECONCILE_AFTER_MS,
   STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
@@ -51,6 +52,16 @@ describe("maintenance due-time helpers", () => {
         now,
       ),
     ).toBeUndefined();
+  });
+
+  it("expires pending challenges at the acceptance TTL before a later match date", () => {
+    const createdAt = now;
+    expect(
+      getTeamChallengeLifecycleDueAt(
+        { status: "pending", createdAt, scheduledAt: now + 30 * 24 * 60 * 60 * 1000 },
+        now,
+      ),
+    ).toBe(createdAt + CHALLENGE_ACCEPT_TTL_MS);
   });
 
   it("schedules only active payment attempts", () => {

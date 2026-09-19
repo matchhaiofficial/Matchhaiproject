@@ -276,8 +276,8 @@ export default function ZoneWalletScreen() {
                 iconColor: COLORS.textSecondary,
             },
             {
-                label: "Pending",
-                value: fmt(summary.pendingBalance),
+                label: "Pending Earnings",
+                value: fmt(summary.pendingEarnings ?? 0),
                 iconName: "pending",
                 iconColor: COLORS.warning,
             },
@@ -378,6 +378,21 @@ export default function ZoneWalletScreen() {
                                 {summary.pendingWithdrawals} withdrawal
                                 {summary.pendingWithdrawals > 1 ? "s" : ""}{" "}
                                 pending ({fmt(summary.pendingBalance)})
+                            </Text>
+                        ) : null}
+                        {Number(summary.pendingEarningCount || 0) > 0 ? (
+                            <Text style={styles.pendingNote}>
+                                {summary.pendingEarningCount} matchroom payout
+                                {summary.pendingEarningCount > 1 ? "s" : ""} pending clearing
+                                {summary.nextPayoutEligibleAt
+                                    ? ` until ${new Date(summary.nextPayoutEligibleAt).toLocaleString("en-PK", {
+                                        month: "short",
+                                        day: "numeric",
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                    })}`
+                                    : ""}
+                                . Available balance updates automatically after clearing.
                             </Text>
                         ) : null}
                     </View>
