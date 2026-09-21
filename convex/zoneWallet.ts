@@ -165,6 +165,8 @@ function serializeTransaction(
     grossAmount: metadata?.grossAmount ?? null,
     payoutRate: metadata?.payoutRate ?? null,
     pilotApplied: metadata?.pilotApplied ?? null,
+    adminDecision: metadata?.adminDecision ?? null,
+    rejectionReason: metadata?.rejectionReasonSafe ?? null,
   };
 }
 

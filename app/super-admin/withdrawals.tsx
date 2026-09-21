@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -314,8 +314,9 @@ export default function SuperAdminWithdrawalsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
+  const cursorRef = useRef<string | null>(null);
+  const isDoneRef = useRef(false);
+  const loadingMoreRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedPayoutDetails, setSelectedPayoutDetails] = useState<Partial<SuperAdminWithdrawalRequest> | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -340,23 +341,30 @@ export default function SuperAdminWithdrawalsScreen() {
   }, []);
 
   const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
-    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "more" && (loadingMoreRef.current || isDoneRef.current)) return;
+    if (mode !== "more") {
+      cursorRef.current = null;
+      isDoneRef.current = false;
+    }
     if (mode === "initial") setLoading(true);
-    else if (mode === "more") setLoadingMore(true);
+    else if (mode === "more") {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
     else setRefreshing(true);
     const [result, financeResult] = await Promise.all([
       getZoneWithdrawalRequestsPage({
         status: tabToBackendStatus(statusTab),
         limit: 50,
-        cursor: mode === "more" ? cursor : null,
+        cursor: mode === "more" ? cursorRef.current : null,
         search: search.trim() || undefined,
       }),
       getZoneFinanceSummaries({ limit: 80 }),
     ]);
     if (result.ok) {
       setWithdrawals((current) => mode === "more" ? mergeWithdrawals(current, result.data.page) : result.data.page);
-      setCursor(result.data.continueCursor);
-      setIsDone(result.data.isDone);
+      cursorRef.current = result.data.continueCursor;
+      isDoneRef.current = result.data.isDone;
     }
     else showToast({ type: "error", title: "Withdrawals failed", message: result.message });
     if (financeResult.ok) {
@@ -366,9 +374,12 @@ export default function SuperAdminWithdrawalsScreen() {
       showToast({ type: "error", title: "Zone finance failed", message: financeResult.message });
     }
     if (mode === "initial") setLoading(false);
-    else if (mode === "more") setLoadingMore(false);
+    else if (mode === "more") {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
     else setRefreshing(false);
-  }, [cursor, isDone, loadingMore, mergeWithdrawals, search, showToast, statusTab]);
+  }, [mergeWithdrawals, search, showToast, statusTab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -615,7 +626,13 @@ export default function SuperAdminWithdrawalsScreen() {
       )}
 
       {/* ── Withdrawal detail drawer ── */}
-      <AppDrawer visible={Boolean(selected)} onClose={closeDrawer} drawerStyle={s.drawer} keyboardAware>
+      <AppDrawer
+        visible={Boolean(selected)}
+        onClose={closeDrawer}
+        drawerStyle={s.drawer}
+        keyboardAware
+        contentSafeAreaEdges={["top", "bottom"]}
+      >
         <View style={s.drawerContent}>
           <AppModalHeader
             title="Withdrawal detail"
@@ -776,7 +793,7 @@ export default function SuperAdminWithdrawalsScreen() {
         <AppModalHeader title="Reject withdrawal" onClose={() => setConfirmAction(null)} />
         <AppModalBody contentContainerStyle={s.confirmBody}>
           <Text style={s.confirmText}>
-            Reject this withdrawal request? The reason is stored for admin context and is not sent in the notification.
+            Reject this withdrawal request? The reason will be shown to the Zone Admin in the notification and wallet history.
           </Text>
         </AppModalBody>
         <AppModalFooter>
@@ -878,7 +895,15 @@ const s = StyleSheet.create({
   financeFootnote: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11, lineHeight: 16 },
 
   // ── Drawer ──
-  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
+  drawer: {
+    width: DRAWER_WIDTH,
+    flex: 1,
+    marginLeft: Math.max(0, (Dimensions.get("window").width - DRAWER_WIDTH) / 2),
+    backgroundColor: COLORS.backgroundDark,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
   drawerContent: { flex: 1 },
   drawerBody: { gap: SPACING.lg },
 

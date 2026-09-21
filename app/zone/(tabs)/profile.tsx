@@ -88,6 +88,9 @@ const getBranchInventorySummary = (branch: any) => {
 
 const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 const BANK_OPTIONS = [
+    "JazzCash",
+    "Easypaisa",
+    "NayaPay",
     "Habib Bank Limited (HBL)",
     "National Bank of Pakistan (NBP)",
     "United Bank Limited (UBL)",
@@ -643,6 +646,9 @@ export default function ZoneProfile() {
                                 onChange={setWithdrawBankName}
                                 icon="payment"
                                 placeholder="Select bank"
+                                modalTitle="Select payout method"
+                                searchable
+                                searchPlaceholder="Search bank or wallet"
                                 containerStyle={styles.withdrawSelectContainer}
                             />
                             {!withdrawBankName ? (

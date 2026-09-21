@@ -1457,6 +1457,7 @@ async function notifyMatchroomCancelledPlayers(
   matchroomId: Id<"matchrooms">,
   reason: string,
   note?: string,
+  cancelledByUid?: string,
 ) {
   const recipients = getMatchroomNotificationRecipientUids(room);
   let notified = 0;
@@ -1481,6 +1482,7 @@ async function notifyMatchroomCancelledPlayers(
           matchroomTitle: room.title || "Matchroom",
           reason,
           note: note || "",
+          cancelledByUid: cancelledByUid || null,
           href: `/matchrooms/${String(matchroomId)}`,
         },
       });
@@ -5254,7 +5256,7 @@ export async function performAdminCancel(
     reason: cancellationReason,
   });
 
-  await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, cancellationReason, args.note);
+  await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, cancellationReason, args.note, args.adminUid);
 
   return { ok: true, message: "Lobby cancelled and players notified.", alreadyCancelled: false };
 }
@@ -5842,13 +5844,26 @@ export const requestToJoinMatchroom = mutation({
       const existingExpiresAt =
         existingPendingRequest.expiresAt ||
         getCappedMatchroomExpiryOrThrow(room, JOIN_REQUEST_TTL_MS, "Join request", now);
-      const pendingIntentId = await createPendingApprovalBookingIntent(ctx, {
+      const existingIntents = await ctx.db
+        .query("bookingIntents")
+        .withIndex("by_createdByUid_matchroomId", (q: any) =>
+          q.eq("createdByUid", actor.convexUser._id).eq("matchroomId", room._id),
+        )
+        .collect();
+      const existingActiveIntent = existingIntents
+        .filter((intent: any) =>
+          intent.paymentStatus !== "paid"
+          && intent.status !== "cancelled"
+          && intent.status !== "expired",
+        )
+        .sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0];
+      const pendingIntentId = existingActiveIntent?._id || await createPendingApprovalBookingIntent(ctx, {
         room,
         createdByUid: actor.convexUser._id,
         createdByUsername: args.fromUsername,
         role,
         targetTeam,
-        requestedSlotId: args.slotId || existingData?.slotId || null,
+        requestedSlotId: existingData?.slotId || args.slotId || null,
         sourceNotificationId: existingPendingRequest._id,
         expiresAt: existingExpiresAt,
       });

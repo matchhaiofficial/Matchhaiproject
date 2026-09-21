@@ -67,6 +67,7 @@ export interface Notification {
     opponentTeamName?: string;
     reason?: string;
     note?: string;
+    cancelledByUid?: string;
   };
   data?: any;
   expiresAt?: number;

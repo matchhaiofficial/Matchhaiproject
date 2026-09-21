@@ -2846,6 +2846,7 @@ export const rejectZoneWithdrawal = mutation({
       zoneAdminUserId: withdrawal.userId,
       decision: "rejected",
       amount: Number(withdrawal.amount || 0),
+      rejectionReason: reason,
     });
 
     await insertSuperAdminAuditLog(ctx, admin, {

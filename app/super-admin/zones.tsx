@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
@@ -117,8 +117,9 @@ export default function SuperAdminZonesScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
+  const cursorRef = useRef<string | null>(null);
+  const isDoneRef = useRef(false);
+  const loadingMoreRef = useRef(false);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cityFilter, setCityFilter] = useState<string>(ALL);
@@ -132,28 +133,38 @@ export default function SuperAdminZonesScreen() {
   }, []);
 
   const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
-    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "more" && (loadingMoreRef.current || isDoneRef.current)) return;
+    if (mode !== "more") {
+      cursorRef.current = null;
+      isDoneRef.current = false;
+    }
     if (mode === "initial") setLoading(true);
     else if (mode === "refresh") setRefreshing(true);
-    else setLoadingMore(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
 
     const result = await getZonesPage({
       status: tab,
       limit: PAGE_SIZE,
-      cursor: mode === "more" ? cursor : null,
+      cursor: mode === "more" ? cursorRef.current : null,
     });
     if (result.ok) {
       setZones((previous) => mode === "more" ? mergeZones(previous, result.data.page) : result.data.page);
-      setCursor(result.data.continueCursor);
-      setIsDone(result.data.isDone);
+      cursorRef.current = result.data.continueCursor;
+      isDoneRef.current = result.data.isDone;
     } else {
       showToast({ type: "error", title: "Zones failed", message: result.message });
     }
 
     if (mode === "initial") setLoading(false);
     else if (mode === "refresh") setRefreshing(false);
-    else setLoadingMore(false);
-  }, [cursor, isDone, loadingMore, mergeZones, showToast, tab]);
+    else {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [mergeZones, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");

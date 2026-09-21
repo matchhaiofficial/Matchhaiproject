@@ -143,6 +143,29 @@ export default StyleSheet.create({
   phoneVerifyButton: {
     marginLeft: SPACING.sm,
   },
+  phoneVerifyButtonReady: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accent,
+  },
+  phoneVerificationNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: `${COLORS.warning}66`,
+    backgroundColor: `${COLORS.warning}12`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  phoneVerificationNoticeText: {
+    flex: 1,
+    color: COLORS.text,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: TEXT_SIZES.caption,
+    lineHeight: 18,
+  },
   inputPlaceholderOverlay: {
     position: "absolute",
     left: 44,

@@ -539,7 +539,7 @@ export default function TeamMatchChallengeDetails() {
             showToast({ type: "warning", title: "Chat locked", message: "Chat becomes active after challenge acceptance." });
             return;
         }
-        router.push(`/teams/challenge-chat?id=${challenge.id}` as any);
+        router.push(`/teams/challenge-chat?id=${encodeURIComponent(String(challenge.chatId))}` as any);
     };
 
     // Captain-to-captain share. The challenge route is captain-only (getById

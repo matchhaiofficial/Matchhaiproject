@@ -261,7 +261,10 @@ export const listActiveIntentsByUserForMatchroom = query({
       (intent.status === "approved_pending_payment" ||
         intent.status === "pending_approvals" ||
         intent.status === "approved")
-    ).map(serializeBookingIntent);
+    )
+      .sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 1)
+      .map(serializeBookingIntent);
   },
 });
 

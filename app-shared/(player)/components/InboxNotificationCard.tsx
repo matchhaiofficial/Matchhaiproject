@@ -219,8 +219,13 @@ export function InboxNotificationCard({
     .trim()
     .toLowerCase();
   const friendlyReason = normalizeReasonLabel(reasonCode);
+  const wasClosedByRecipient =
+    isMatchCancelledAdmin &&
+    String(item.meta?.cancelledByUid || "") === String(item.toUid || "");
   const senderName =
-    (item.fromUsername || "").trim() || (isBookingNotification ? "Venue Admin" : "Someone");
+    wasClosedByRecipient
+      ? "You"
+      : (item.fromUsername || "").trim() || (isBookingNotification ? "Venue Admin" : "Someone");
   const fallbackMessage = (() => {
     const raw = String(item.message || item.title || "").trim();
     if (raw) {

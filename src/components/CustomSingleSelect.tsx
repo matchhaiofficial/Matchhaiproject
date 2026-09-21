@@ -1,7 +1,8 @@
-import React, { useState, type ReactNode } from "react";
+import React, { useMemo, useState, type ReactNode } from "react";
 import {
     Pressable,
     Text,
+    TextInput,
     View,
     ViewStyle,
 } from "react-native";
@@ -18,6 +19,9 @@ interface CustomSelectProps {
     icon?: AppIconName;
     placeholder?: string;
     containerStyle?: ViewStyle;
+    searchable?: boolean;
+    searchPlaceholder?: string;
+    modalTitle?: string;
 }
 
 export const CustomSingleSelect = ({
@@ -28,8 +32,20 @@ export const CustomSingleSelect = ({
     icon,
     placeholder,
     containerStyle,
+    searchable = false,
+    searchPlaceholder = "Search options",
+    modalTitle,
 }: CustomSelectProps) => {
     const [visible, setVisible] = useState(false);
+    const [search, setSearch] = useState("");
+    const visibleOptions = useMemo(() => {
+        const needle = search.trim().toLowerCase();
+        return needle ? options.filter((item) => item.toLowerCase().includes(needle)) : options;
+    }, [options, search]);
+    const close = () => {
+        setVisible(false);
+        setSearch("");
+    };
 
     return (
         <View style={[styles.container, containerStyle]}>
@@ -64,20 +80,34 @@ export const CustomSingleSelect = ({
 
             <AppPickerSheet
                 visible={visible}
-                onClose={() => setVisible(false)}
+                onClose={close}
             >
                 <AppModalHeader
-                    title={typeof label === "string" ? `Select ${label}` : "Select option"}
-                    onClose={() => setVisible(false)}
+                    title={modalTitle || (typeof label === "string" ? `Select ${label}` : "Select option")}
+                    onClose={close}
                     compact
                 />
                 <AppModalBody scroll contentContainerStyle={styles.modalBodyContent}>
-                    {options.map((item) => (
+                    {searchable ? (
+                        <View style={styles.searchBox}>
+                            <AppIcon name="search" size="md" tone="muted" />
+                            <TextInput
+                                value={search}
+                                onChangeText={setSearch}
+                                placeholder={searchPlaceholder}
+                                placeholderTextColor={COLORS.muted}
+                                style={styles.searchInput}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                            />
+                        </View>
+                    ) : null}
+                    {visibleOptions.map((item) => (
                         <Pressable
                             key={item}
                             onPress={() => {
                                 onChange(item);
-                                setVisible(false);
+                                close();
                             }}
                             style={styles.optionItem}
                         >
@@ -94,9 +124,11 @@ export const CustomSingleSelect = ({
                             )}
                         </Pressable>
                     ))}
+                    {searchable && visibleOptions.length === 0 ? (
+                        <Text style={styles.emptyText}>No matching options.</Text>
+                    ) : null}
                 </AppModalBody>
             </AppPickerSheet>
         </View>
     );
 };
-

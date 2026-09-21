@@ -704,6 +704,14 @@ export default function Register() {
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Phone Number" required />
+        {!effectivePhoneVerified ? (
+          <View style={styles.phoneVerificationNotice}>
+            <AppIcon name="verified-user" size={18} color={COLORS.warning} />
+            <Text style={styles.phoneVerificationNoticeText}>
+              Required: enter your number, tap Verify, then enter the 6-digit SMS code.
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.inputBox}>
           <View style={styles.inputRow}>
             <AppIcon
@@ -759,6 +767,7 @@ export default function Register() {
                 styles.platformButton,
                 styles.platformButtonInline,
                 styles.phoneVerifyButton,
+                canSendOtp && styles.phoneVerifyButtonReady,
                 effectivePhoneVerified && styles.platformButtonActive,
                 (!canSendOtp || resendCooldown > 0 || otpSending || skipPhoneOtp) && !effectivePhoneVerified
                   ? { opacity: 0.5 }

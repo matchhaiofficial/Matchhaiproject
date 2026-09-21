@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -146,8 +146,9 @@ export default function SuperAdminAuditLogsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
+  const cursorRef = useRef<string | null>(null);
+  const isDoneRef = useRef(false);
+  const loadingMoreRef = useRef(false);
 
   const mergeRows = useCallback((current: SuperAdminAuditLog[], next: SuperAdminAuditLog[]) => {
     const seen = new Set(current.map((row) => row.id));
@@ -155,10 +156,17 @@ export default function SuperAdminAuditLogsScreen() {
   }, []);
 
   const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
-    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "more" && (loadingMoreRef.current || isDoneRef.current)) return;
+    if (mode !== "more") {
+      cursorRef.current = null;
+      isDoneRef.current = false;
+    }
     if (mode === "initial") setLoading(true);
     else if (mode === "refresh") setRefreshing(true);
-    else setLoadingMore(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
 
     const result = await getSuperAdminAuditLogsPage({
       status: statusFilter === "all" ? undefined : statusFilter,
@@ -168,21 +176,24 @@ export default function SuperAdminAuditLogsScreen() {
       targetId: search.trim() || undefined,
       from: dateRangeToFrom(dateFilter),
       limit: 50,
-      cursor: mode === "more" ? cursor : null,
+      cursor: mode === "more" ? cursorRef.current : null,
     });
 
     if (result.ok) {
       setRows((previous) => mode === "more" ? mergeRows(previous, result.data.page) : result.data.page);
-      setCursor(result.data.continueCursor);
-      setIsDone(result.data.isDone);
+      cursorRef.current = result.data.continueCursor;
+      isDoneRef.current = result.data.isDone;
     } else {
       showToast({ type: "error", title: "Audit logs failed", message: result.message });
     }
 
     if (mode === "initial") setLoading(false);
     else if (mode === "refresh") setRefreshing(false);
-    else setLoadingMore(false);
-  }, [actionFilter, adminFilter, cursor, dateFilter, isDone, loadingMore, mergeRows, moduleFilter, search, showToast, statusFilter]);
+    else {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [actionFilter, adminFilter, dateFilter, mergeRows, moduleFilter, search, showToast, statusFilter]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");

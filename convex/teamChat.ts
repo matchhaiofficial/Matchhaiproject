@@ -187,7 +187,9 @@ export const getChat = query({
     return {
       teamId: args.teamId,
       teamName: state.team?.name || "Team",
-      participantUids: chatroom?.participantUids || state.memberUids,
+      // Membership is authoritative. A chatroom projection can briefly lag when
+      // somebody joins or leaves because queries cannot repair it themselves.
+      participantUids: state.memberUids,
       lastReadBy: chatroom?.lastReadBy || {},
       updatedAt: chatroom?.updatedAt || chatroom?.createdAt || null,
     };

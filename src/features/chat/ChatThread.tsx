@@ -16,7 +16,7 @@ import {
     View,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import EmojiPicker from "rn-emoji-keyboard";
+import { EmojiKeyboard } from "rn-emoji-keyboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppIcon } from "../../components/AppIcon";
@@ -1048,7 +1048,8 @@ export default function ChatThread({
                                                     <Pressable
                                                         onPress={() => {
                                                             dismissReactionPicker();
-                                                            setEmojiOpen(true);
+                                                            Keyboard.dismiss();
+                                                            setEmojiOpen((current) => !current);
                                                         }}
                                                         disabled={composerDisabled || sending}
                                                         style={styles.composerEmojiAction}
@@ -1100,6 +1101,15 @@ export default function ChatThread({
                                             </View>
                                     </View>
                             ) : null}
+                            {emojiOpen && showComposer ? (
+                                <View style={styles.inlineEmojiKeyboard}>
+                                    <EmojiKeyboard
+                                        onEmojiSelected={handleEmojiSelected}
+                                        enableSearchBar={false}
+                                        enableRecentlyUsed
+                                    />
+                                </View>
+                            ) : null}
                             </View>
                         </KeyboardAvoidingView>
                     </View>
@@ -1117,12 +1127,6 @@ export default function ChatThread({
                         onPickFile={onPickFile || (() => undefined)}
                     />
                 ) : null}
-                <EmojiPicker
-                    open={emojiOpen}
-                    onClose={() => setEmojiOpen(false)}
-                    onEmojiSelected={handleEmojiSelected}
-                    allowMultipleSelections
-                />
             </GestureHandlerRootView>
         </Screen>
     );

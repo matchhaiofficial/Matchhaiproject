@@ -46,6 +46,16 @@ describe("notification deep-link route normalization", () => {
     ).toBe("/zone/modules/bookings?segment=matchrooms&matchroomId=room_1");
   });
 
+  it("keeps super-admin matchroom notifications inside the admin navigator", () => {
+    expect(
+      buildNotificationRoute({
+        type: "match_result_finalized",
+        recipientRole: "super_admin",
+        route: "/matchrooms/kd72fj5rck4bkrnw7wka68fsn98ee123",
+      }),
+    ).toBe("/super-admin/matchroom/kd72fj5rck4bkrnw7wka68fsn98ee123");
+  });
+
   it("normalizes role-specific KYC, withdrawal, support, and report routes", () => {
     expect(
       buildNotificationRoute({

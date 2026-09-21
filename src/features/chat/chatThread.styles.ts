@@ -489,6 +489,17 @@ export default StyleSheet.create({
         minHeight: 76,
         overflow: "visible",
     },
+    inlineEmojiKeyboard: {
+        height: 310,
+        backgroundColor: COLORS.cardDark,
+        borderLeftWidth: 1,
+        borderRightWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderBottomLeftRadius: 24,
+        borderBottomRightRadius: 24,
+        overflow: "hidden",
+    },
     composerContent: {
         width: "100%",
     },
