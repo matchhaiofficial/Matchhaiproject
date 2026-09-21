@@ -11,18 +11,20 @@ export const KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE =
   `${KYC_VERIFICATION_REQUIRED_MESSAGE} Only profile settings and help are available right now.`;
 
 export const KYC_VERIFICATION_PENDING_MESSAGE =
-  "Your verification is pending review. You can use MatchHai while Didit reviews it; access will lock again if verification is declined.";
+  "Your verification is under review. MatchHai gameplay features unlock after approval; profile settings and help remain available.";
 
 export function isKycVerificationBypassEnabled(): boolean {
   return (
-    process.env.EXPO_PUBLIC_SKIP_KYC_VERIFICATION === "1" ||
-    process.env.EXPO_PUBLIC_SKIP_PHONE_OTP === "1"
+    __DEV__ && (
+      process.env.EXPO_PUBLIC_SKIP_KYC_VERIFICATION === "1" ||
+      process.env.EXPO_PUBLIC_SKIP_PHONE_OTP === "1"
+    )
   );
 }
 
 export function isKycAccessAllowed(status?: string | null): boolean {
   if (isKycVerificationBypassEnabled()) return true;
-  return status === "verified" || status === "pending" || status === "in_progress" || status === "in_review";
+  return status === "verified";
 }
 
 export function isKycReviewActive(status?: string | null): boolean {

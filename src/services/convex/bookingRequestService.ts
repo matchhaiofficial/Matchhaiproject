@@ -249,6 +249,7 @@ export async function createBookingRequest(
       selectedZoneRateKey: (data as any).selectedZoneRateKey,
       matchroomId: data.matchroomId as Id<"matchrooms"> | undefined,
       lifecycleStatus: (data as any).lifecycleStatus,
+      workflowVersion: "canonical_v2",
       notes: data.notes || data.description,
     });
 

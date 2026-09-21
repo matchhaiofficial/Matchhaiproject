@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
@@ -144,8 +144,9 @@ export default function SuperAdminNotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
+  const cursorRef = useRef<string | null>(null);
+  const isDoneRef = useRef(false);
+  const loadingMoreRef = useRef(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -158,19 +159,26 @@ export default function SuperAdminNotificationsScreen() {
   }, []);
 
   const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
-    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "more" && (loadingMoreRef.current || isDoneRef.current)) return;
+    if (mode !== "more") {
+      cursorRef.current = null;
+      isDoneRef.current = false;
+    }
     if (mode === "initial") setLoading(true);
     else if (mode === "refresh") setRefreshing(true);
-    else setLoadingMore(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
     const result = await getSuperAdminNotificationsPage({
       tab,
       limit: 50,
-      cursor: mode === "more" ? cursor : null,
+      cursor: mode === "more" ? cursorRef.current : null,
     });
     if (result.ok) {
       setItems((previous) => mode === "more" ? mergeItems(previous, result.data.page) : result.data.page);
-      setCursor(result.data.continueCursor);
-      setIsDone(result.data.isDone);
+      cursorRef.current = result.data.continueCursor;
+      isDoneRef.current = result.data.isDone;
       if (tab === "unread") {
         void setLocalBadgeCount(Number(result.data.total || 0));
       }
@@ -179,8 +187,11 @@ export default function SuperAdminNotificationsScreen() {
     }
     if (mode === "initial") setLoading(false);
     else if (mode === "refresh") setRefreshing(false);
-    else setLoadingMore(false);
-  }, [cursor, isDone, loadingMore, mergeItems, showToast, tab]);
+    else {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [mergeItems, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");

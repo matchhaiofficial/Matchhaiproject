@@ -5,19 +5,17 @@ export type PollingSubscriptionCallback<T> = {
 
 export type SharedPollingState<T> = {
     callbacks: Set<PollingSubscriptionCallback<T>>;
-    interval: ReturnType<typeof setInterval> | null;
+    unsubscribe: (() => void) | null;
     lastPayloadSignature: string | null;
     lastRows: T[] | null;
-    inFlight: boolean;
 };
 
 export function createSharedPollingState<T>(): SharedPollingState<T> {
     return {
         callbacks: new Set(),
-        interval: null,
+        unsubscribe: null,
         lastPayloadSignature: null,
         lastRows: null,
-        inFlight: false,
     };
 }
 
@@ -67,8 +65,6 @@ export function releasePollingSubscription<T>(
         return;
     }
 
-    if (currentState.interval) {
-        clearInterval(currentState.interval);
-    }
+    currentState.unsubscribe?.();
     store.delete(key);
 }

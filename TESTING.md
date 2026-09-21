@@ -4,6 +4,7 @@ Master index for the testing & load-testing foundation. Detailed docs:
 - Load testing → [`load-tests/README.md`](./load-tests/README.md)
 - E2E (Maestro) → [`.maestro/README.md`](./.maestro/README.md)
 - Monitoring → [`docs/MONITORING.md`](./docs/MONITORING.md)
+- Convex QA usage snapshot → [`docs/CONVEX_QA_USAGE_SNAPSHOT.md`](./docs/CONVEX_QA_USAGE_SNAPSHOT.md)
 - Test data / seeding → [`docs/TEST_DATA.md`](./docs/TEST_DATA.md)
 - Security / race / abuse → [`docs/SECURITY_TESTS.md`](./docs/SECURITY_TESTS.md)
 - Page coverage map → [`docs/PAGE_COVERAGE.md`](./docs/PAGE_COVERAGE.md)
@@ -29,6 +30,8 @@ npm test
 npm run test:unit       # __tests__/unit  (pure logic / services)
 npm run test:ui         # __tests__/ui    (component render)
 npm run test:security   # __tests__/security
+npm run test:convex     # in-memory Convex functions and scheduled jobs
+npm run qa:convex:usage # read-only QA scheduler/usage snapshot (fixed QA target)
 npm run test:watch      # watch mode
 npm run test:coverage   # coverage report -> ./coverage
 ```
@@ -39,6 +42,8 @@ npm run test:coverage   # coverage report -> ./coverage
 | Unit / service | `__tests__/unit` | game labels & roles, availability, match config, matchroom lifecycle/time, status labels, notification taxonomy, payment copy & safe errors, phone utils, pricing rules, skill rating, zone lifecycle, team roster, super-admin access. |
 | UI / component | `__tests__/ui` | MatchroomCard (full/expired/completed/seats/price/request/joined, no match code), ZonePicker (loading/empty/rate), SegmentedTabs, SkillBadge. |
 | Security | `__tests__/security` | backend auth gates (negative), super-admin escalation, matchroom lock/overfill abuse, mutation negative-auth matrix (`it.todo`). |
+| Journey contracts | `__tests__/security/journeyWiringContracts.test.ts` | Source-level server/client wiring checks for matchrooms, team challenges, chat, reports/blocks, signup/OTP/KYC, zone admin, and super-admin flows; not E2E. |
+| Usage safety | `__tests__/security/*Usage*Contracts.test.ts`, `__tests__/unit/*DueSafety.test.ts`, `convex-test/` | Static scheduler/reactivity guardrails, executable deadline invariants, and an in-memory Convex scheduled lifecycle test. |
 | Coverage tracker | `__tests__/coverage` | `it.todo` smoke list for screens pending RNTL automation. |
 
 ## E2E (Maestro)
@@ -47,17 +52,18 @@ npm run e2e:maestro            # all flows in .maestro/
 npm run e2e:maestro:android
 npm run e2e:maestro:ios
 ```
-Requires Maestro installed + an EAS **development**/**preview** build (staging
-Convex). Seed staging first (see TEST_DATA.md). Credentials come from a
-gitignored `.maestro/.env.e2e` (copy `.maestro/.env.e2e.example`).
+Requires Maestro installed plus a native test build, which is currently
+deferred. QA is performed through Expo Go against the local QA Convex
+configuration; the repository currently exposes only the production EAS
+profile. Seed staging first (see TEST_DATA.md). Credentials come from a
+gitignored `.maestro/.env.e2e` (copy `.maestro/.env.e2e.example`) when native
+E2E testing is re-enabled.
 
-### Build for E2E (staging only)
-```bash
-eas build --profile development --platform android   # or ios
-# or preview (apk, internal):
-eas build --profile preview --platform android
-```
-Do **not** build the `production` profile here.
+### Build for E2E (deferred)
+
+No development or preview EAS profile is active. Do not build the `production`
+profile for staging E2E. Re-enable a reviewed native QA profile before using
+Maestro against staging.
 
 ## Load testing (k6)
 ```bash

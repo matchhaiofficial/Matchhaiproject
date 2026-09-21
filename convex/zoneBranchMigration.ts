@@ -2,6 +2,8 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
+import { requireOwnedZone } from "./authz";
+import { refreshBranchResourceCapacitySnapshot } from "./resourceCapacity";
 
 // ============================================
 // QUERIES
@@ -11,8 +13,7 @@ import { requireKycVerified } from "./kycGate";
 export const getZoneBranches = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) return [];
+    const { zone } = await requireOwnedZone(ctx, args.zoneId);
 
     const branches = Array.isArray(zone.branches) ? zone.branches : [];
     return branches.map((b: any, index: number) => ({
@@ -44,6 +45,11 @@ const sanitizeIdToken = (value: string) =>
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
+function getMigratedBranchId(branch: any, index: number) {
+  return sanitizeIdToken(branch?.id || branch?.branchDisplayName || `branch_${index + 1}`)
+    || `branch_${index + 1}`;
+}
+
 const toPositiveInt = (value: unknown) => {
   const parsed = parseInt(String(value ?? ""), 10);
   return isFinite(parsed) && parsed > 0 ? parsed : 0;
@@ -57,7 +63,13 @@ export async function migrateZoneBranchesInternal(ctx: any, zoneId: any) {
   const now = Date.now();
 
   if (zone.migration?.perBranchSeatModel) {
+    const existingBranches = Array.isArray(zone.branches) ? zone.branches : [];
+    const normalizedBranches = existingBranches.map((branch: any, index: number) => ({
+      ...branch,
+      id: getMigratedBranchId(branch, index),
+    }));
     await ctx.db.patch(zoneId, {
+      branches: normalizedBranches,
       migration: {
         ...zone.migration,
         perBranchSeatModel: true,
@@ -70,6 +82,13 @@ export async function migrateZoneBranchesInternal(ctx: any, zoneId: any) {
       },
       updatedAt: now,
     });
+    for (const branch of normalizedBranches) {
+      await refreshBranchResourceCapacitySnapshot(ctx, {
+        zoneId,
+        branchId: branch.id,
+        now,
+      });
+    }
     return {
       branchCount: Number(zone.migration?.branchCount || (Array.isArray(zone.branches) ? zone.branches.length : 0)),
       resourceCount: Number(zone.migration?.resourceCount || 0),
@@ -106,12 +125,12 @@ export async function migrateZoneBranchesInternal(ctx: any, zoneId: any) {
   });
 
   let resourceCount = 0;
+  const migratedBranches: any[] = [];
 
   for (let branchIndex = 0; branchIndex < legacyBranches.length; branchIndex++) {
     const branch = legacyBranches[branchIndex] as any;
-    const branchId = sanitizeIdToken(
-      branch.id || branch.branchDisplayName || `branch_${branchIndex + 1}`
-    ) || `branch_${branchIndex + 1}`;
+    const branchId = getMigratedBranchId(branch, branchIndex);
+    migratedBranches.push({ ...branch, id: branchId });
 
     const pricing = branch.pricing || {};
 
@@ -178,9 +197,11 @@ export async function migrateZoneBranchesInternal(ctx: any, zoneId: any) {
         }
       }
     }
+    await refreshBranchResourceCapacitySnapshot(ctx, { zoneId, branchId, now });
   }
 
   await ctx.db.patch(zoneId, {
+    branches: migratedBranches,
     migration: {
       ...zone.migration,
       perBranchSeatModel: true,
@@ -211,22 +232,14 @@ export const migrateZoneBranches = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found.");
-
-    if (String(zone.ownerUid) !== args.ownerUid) {
-      const user = await ctx.db.get(zone.ownerUid);
-      if (!user || user.authId !== args.ownerUid) {
-        throw new Error("Only the zone owner can run migration.");
-      }
-    }
+    const { user: actor } = await requireOwnedZone(ctx, args.zoneId);
 
     const result = await migrateZoneBranchesInternal(ctx, args.zoneId);
     await recordZoneAuditEvent(ctx, {
       zoneId: String(args.zoneId),
       module: "migration",
       action: result.skipped ? "run_branch_migration_skipped" : "run_branch_migration",
-      actorUid: args.ownerUid,
+      actorUid: String(actor._id),
       targetType: "zone",
       targetId: String(args.zoneId),
       summary: result.skipped

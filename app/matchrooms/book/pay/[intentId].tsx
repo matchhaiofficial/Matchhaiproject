@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { useAction } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import {
     ActivityIndicator,
     ScrollView,
@@ -41,7 +41,7 @@ import {
 } from "../../../../src/utils/phoneUtils";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
 import { getUserFacingErrorMessage } from "../../../../src/utils/userFacingErrors";
-import styles from "./pay.styles";
+import styles from "../../../../app-shared/matchrooms/book/pay/pay.styles";
 
 const shouldFallbackToOtc = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error || "");
@@ -57,6 +57,8 @@ export default function MockPaymentScreen() {
     const { user } = useAuth();
     const { showToast } = useToast();
     const startCheckout = useAction((api as any).easypaisa.startCheckout);
+    const easypaisaCapability = useQuery(api.easypaisa.getCapability, {});
+    const easypaisaAvailable = easypaisaCapability?.available === true;
 
     const [intent, setIntent] = useState<BookingIntent | null>(null);
     const [loading, setLoading] = useState(true);
@@ -118,6 +120,14 @@ export default function MockPaymentScreen() {
 
     const startEasypaisaBookingCheckout = async () => {
         if (!intentId || !user?._id || processing) return;
+        if (!easypaisaAvailable) {
+            showToast({
+                type: "warning",
+                title: "Easypaisa unavailable",
+                message: easypaisaCapability?.reason || "Easypaisa is unavailable. You can use your existing MatchHai Wallet balance.",
+            });
+            return;
+        }
         if (intent?.expiresAt && intent.expiresAt <= Date.now()) {
             showToast({
                 type: "warning",
@@ -323,7 +333,9 @@ export default function MockPaymentScreen() {
                         style={[
                             styles.methodOption,
                             paymentMethod === "easypaisa" && styles.methodOptionActive,
+                            !easypaisaAvailable && styles.methodOptionDisabled,
                         ]}
+                        disabled={!easypaisaAvailable}
                         onPress={() => setPaymentMethod("easypaisa")}
                     >
                         <View style={styles.methodIcon}>
@@ -331,11 +343,15 @@ export default function MockPaymentScreen() {
                         </View>
                         <View style={styles.methodCopy}>
                             <Text style={styles.methodName}>{FEATURE_READINESS.payments.easypaisa.label}</Text>
-                            <Text style={styles.methodDetail}>{FEATURE_READINESS.payments.easypaisa.description}</Text>
+                            <Text style={styles.methodDetail}>
+                                {easypaisaAvailable
+                                    ? FEATURE_READINESS.payments.easypaisa.description
+                                    : easypaisaCapability?.reason || "Easypaisa is unavailable. Use your existing MatchHai Wallet balance instead."}
+                            </Text>
                         </View>
                         <StatusPill
                             tone={paymentMethod === "easypaisa" ? "info" : "neutral"}
-                            label={paymentMethod === "easypaisa" ? "Selected" : "Available"}
+                            label={!easypaisaAvailable ? "Unavailable" : paymentMethod === "easypaisa" ? "Selected" : "Available"}
                         />
                     </Pressable>
                     {!hasEnoughWallet && paymentMethod === "wallet" ? (
@@ -364,7 +380,7 @@ export default function MockPaymentScreen() {
                     onPress={handleMockPayment}
                     disabled={payDisabled}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={payDisabled ? styles.payBtnDisabled : undefined}
+                    style={[styles.payBtn, payDisabled && styles.payBtnDisabled]}
                 >
                     {processing ? (
                         <ActivityIndicator color="#FFF" />

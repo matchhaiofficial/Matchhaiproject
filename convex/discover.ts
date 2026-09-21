@@ -3,10 +3,11 @@ import { v } from "convex/values";
 import { isUserHiddenFromPublic } from "./userVisibility";
 import { requireCurrentUser } from "./authz";
 import { MATCHROOM_LOCK_BEFORE_START_MS } from "./timing";
+import { isPhysicalGameDisabled } from "../constants/gameAvailability";
+import { getKarachiDayStartMillis, parseKarachiDateTimeMillis } from "./karachiDateTime";
 
 const ACTIVE_FRIEND_REQUEST_TYPES = new Set(["friend_request", "social.friend_request"]);
 const ACTIVE_TEAM_JOIN_REQUEST_TYPES = new Set(["team_join_request", "team.join_request"]);
-const DISABLED_PHYSICAL_GAME_KEYS = new Set(["futsal", "indoor_cricket", "padel", "pickleball"]);
 const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
 
 function normalizeGameKey(value?: string | null) {
@@ -19,7 +20,7 @@ function normalizeGameKey(value?: string | null) {
 }
 
 function isDisabledPhysicalGame(value?: string | null) {
-  return DISABLED_PHYSICAL_GAME_KEYS.has(normalizeGameKey(value));
+  return isPhysicalGameDisabled(value);
 }
 
 function isPcSetupGame(value?: string | null) {
@@ -89,9 +90,7 @@ function parseRoomStartAt(room: any) {
   const date = String(room?.scheduledDate || "").trim();
   const time = String(room?.scheduledTime || "").trim();
   if (!date) return null;
-  const parsed = new Date(`${date}T${time || "00:00"}`);
-  const ms = parsed.getTime();
-  return Number.isNaN(ms) ? null : ms;
+  return parseKarachiDateTimeMillis(date, time || "00:00");
 }
 
 function matchesTimeline(room: any, timeline: string) {
@@ -99,8 +98,7 @@ function matchesTimeline(room: any, timeline: string) {
   const startAt = parseRoomStartAt(room);
   if (startAt == null) return false;
 
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayStart = getKarachiDayStartMillis(Date.now()) || Date.now();
   const todayEnd = todayStart + 24 * 60 * 60 * 1000;
 
   if (timeline === "today") {

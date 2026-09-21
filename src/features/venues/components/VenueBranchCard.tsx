@@ -9,6 +9,7 @@ export default function VenueBranchCard({
   branchName,
   address,
   areaCityLabel,
+  operatingHoursSummary,
   branchCountLabel,
   hasMap,
   hasPhone,
@@ -22,6 +23,7 @@ export default function VenueBranchCard({
   branchName: string;
   address: string;
   areaCityLabel: string;
+  operatingHoursSummary: string;
   branchCountLabel: string;
   hasMap: boolean;
   hasPhone: boolean;
@@ -84,6 +86,14 @@ export default function VenueBranchCard({
         <View style={styles.branchTitleWrap}>
           <Text style={styles.addressText}>{address}</Text>
           <Text style={styles.subAddressText}>{areaCityLabel}</Text>
+        </View>
+      </View>
+
+      <View style={styles.addressRow}>
+        <AppIcon name="schedule" size="md" tone="muted" />
+        <View style={styles.branchTitleWrap}>
+          <Text style={styles.addressText}>Operating hours</Text>
+          <Text style={styles.subAddressText}>{operatingHoursSummary}</Text>
         </View>
       </View>
 

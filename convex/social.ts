@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { internal, api } from "./_generated/api";
 import { isUserDeleted, isUserHiddenFromPublic } from "./userVisibility";
 import { isRecentlyPresent } from "./presence";
+import { requireCurrentUser, requireSelf } from "./authz";
+import { ensureUserBlock, isEitherUserBlocked } from "./userBlockPolicy";
 
 function doesUserPlayGame(friend: any, game: string) {
   switch (game) {
@@ -174,6 +176,7 @@ export const areFriends = query({
 export const listBlocked = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.userId);
     const blocks = await ctx.db
       .query("userBlocks")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -207,6 +210,7 @@ export const isBlocked = query({
     blockedUserId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.userId);
     const block = await ctx.db
       .query("userBlocks")
       .withIndex("by_userId_and_blockedUserId", (q) =>
@@ -225,23 +229,11 @@ export const isEitherBlocked = query({
     userId2: v.id("users"),
   },
   handler: async (ctx, args) => {
-    const block1 = await ctx.db
-      .query("userBlocks")
-      .withIndex("by_userId_and_blockedUserId", (q) =>
-        q.eq("userId", args.userId1).eq("blockedUserId", args.userId2)
-      )
-      .unique();
-
-    if (block1) return true;
-
-    const block2 = await ctx.db
-      .query("userBlocks")
-      .withIndex("by_userId_and_blockedUserId", (q) =>
-        q.eq("userId", args.userId2).eq("blockedUserId", args.userId1)
-      )
-      .unique();
-
-    return block2 !== null;
+    const actor = await requireCurrentUser(ctx);
+    if (![String(args.userId1), String(args.userId2)].includes(String(actor.user._id))) {
+      throw new Error("You can only check blocks involving your own account.");
+    }
+    return await isEitherUserBlocked(ctx, args.userId1, args.userId2);
   },
 });
 
@@ -257,6 +249,10 @@ export const sendFriendRequest = mutation({
     toUid: v.id("users"),
   },
   handler: async (ctx, args): Promise<any> => {
+    const { user: sender } = await requireSelf(ctx, args.fromUid);
+    if (String(args.fromUid) === String(args.toUid)) {
+      throw new Error("You cannot send a friend request to yourself.");
+    }
     // Super Admin / hidden accounts are not social entities and cannot be
     // friended (defense-in-depth: they never appear in discovery/search either).
     const target = await ctx.db.get(args.toUid);
@@ -314,7 +310,7 @@ export const sendFriendRequest = mutation({
     const notificationResult: any = await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       toUid: args.toUid,
       fromUid: args.fromUid,
-      fromUsername: args.fromUsername,
+      fromUsername: sender.username || sender.fullName || "Player",
       type: "social.friend_request",
       status: "pending",
       dedupeKey: entityKey,
@@ -322,7 +318,7 @@ export const sendFriendRequest = mutation({
       entityId: String(args.fromUid),
       route: "/(player)/inbox",
       title: "New Friend Request",
-      body: `${args.fromUsername} wants to be your friend`,
+      body: `${sender.username || sender.fullName || "A player"} wants to be your friend`,
       expiresAt: now + sevenDaysMs,
       data: {
         href: "/(player)/inbox",
@@ -348,6 +344,7 @@ export const respondFriendRequest = mutation({
     if (notification.status !== "pending") {
       throw new Error("Request already responded to");
     }
+    await requireSelf(ctx, notification.toUid);
 
     const now = Date.now();
     const decision = args.accept ? "accepted" : "rejected";
@@ -360,21 +357,41 @@ export const respondFriendRequest = mutation({
       if (!fromUser || !toUser) {
         throw new Error("User not found");
       }
+      if (await isEitherUserBlocked(ctx, notification.fromUid, notification.toUid)) {
+        throw new Error("This friend request can no longer be accepted.");
+      }
+
+      const existingForward = await ctx.db
+        .query("friendships")
+        .withIndex("by_userId_and_friendId", (q) =>
+          q.eq("userId", notification.fromUid!).eq("friendId", notification.toUid)
+        )
+        .unique();
+      const existingReverse = await ctx.db
+        .query("friendships")
+        .withIndex("by_userId_and_friendId", (q) =>
+          q.eq("userId", notification.toUid).eq("friendId", notification.fromUid!)
+        )
+        .unique();
 
       // Create bidirectional friendship
-      await ctx.db.insert("friendships", {
-        userId: notification.fromUid,
-        friendId: notification.toUid,
-        friendUsername: toUser.username,
-        createdAt: now,
-      });
+      if (!existingForward) {
+        await ctx.db.insert("friendships", {
+          userId: notification.fromUid,
+          friendId: notification.toUid,
+          friendUsername: toUser.username,
+          createdAt: now,
+        });
+      }
 
-      await ctx.db.insert("friendships", {
-        userId: notification.toUid,
-        friendId: notification.fromUid,
-        friendUsername: fromUser.username,
-        createdAt: now,
-      });
+      if (!existingReverse) {
+        await ctx.db.insert("friendships", {
+          userId: notification.toUid,
+          friendId: notification.fromUid,
+          friendUsername: fromUser.username,
+          createdAt: now,
+        });
+      }
     }
 
     // Update notification
@@ -419,6 +436,7 @@ export const removeFriend = mutation({
     friendId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.userId);
     // Delete both directions
     const friendship1 = await ctx.db
       .query("friendships")
@@ -452,44 +470,8 @@ export const blockUser = mutation({
     blockedUserId: v.id("users"),
   },
   handler: async (ctx, args) => {
-    // Check if already blocked
-    const existingBlock = await ctx.db
-      .query("userBlocks")
-      .withIndex("by_userId_and_blockedUserId", (q) =>
-        q.eq("userId", args.userId).eq("blockedUserId", args.blockedUserId)
-      )
-      .unique();
-
-    if (existingBlock) {
-      return existingBlock._id; // Already blocked
-    }
-
-    // Remove any existing friendship
-    const friendship1 = await ctx.db
-      .query("friendships")
-      .withIndex("by_userId_and_friendId", (q) =>
-        q.eq("userId", args.userId).eq("friendId", args.blockedUserId)
-      )
-      .unique();
-
-    const friendship2 = await ctx.db
-      .query("friendships")
-      .withIndex("by_userId_and_friendId", (q) =>
-        q.eq("userId", args.blockedUserId).eq("friendId", args.userId)
-      )
-      .unique();
-
-    if (friendship1) await ctx.db.delete(friendship1._id);
-    if (friendship2) await ctx.db.delete(friendship2._id);
-
-    // Create block record
-    const blockId = await ctx.db.insert("userBlocks", {
-      userId: args.userId,
-      blockedUserId: args.blockedUserId,
-      createdAt: Date.now(),
-    });
-
-    return blockId;
+    await requireSelf(ctx, args.userId);
+    return await ensureUserBlock(ctx, args.userId, args.blockedUserId);
   },
 });
 
@@ -500,6 +482,7 @@ export const unblockUser = mutation({
     blockedUserId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.userId);
     const block = await ctx.db
       .query("userBlocks")
       .withIndex("by_userId_and_blockedUserId", (q) =>

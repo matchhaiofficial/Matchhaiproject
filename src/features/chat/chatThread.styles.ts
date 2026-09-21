@@ -213,6 +213,13 @@ export default StyleSheet.create({
     bubbleWrap: {
         maxWidth: "78%",
     },
+    messageSenderName: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+        marginBottom: 4,
+        marginLeft: SPACING.sm,
+    },
     messagePressable: {
         borderRadius: 22,
     },
@@ -481,6 +488,17 @@ export default StyleSheet.create({
         paddingTop: SPACING.md,
         minHeight: 76,
         overflow: "visible",
+    },
+    inlineEmojiKeyboard: {
+        height: 310,
+        backgroundColor: COLORS.cardDark,
+        borderLeftWidth: 1,
+        borderRightWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderBottomLeftRadius: 24,
+        borderBottomRightRadius: 24,
+        overflow: "hidden",
     },
     composerContent: {
         width: "100%",

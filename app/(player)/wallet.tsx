@@ -66,7 +66,7 @@ import {
     cleanConvexErrorMessage,
     getUserFacingErrorMessage,
 } from "../../src/utils/userFacingErrors";
-import styles from "./wallet.styles";
+import styles from "../../app-shared/(player)/wallet.styles";
 
 type WalletTab = "overview" | "transactions";
 type WalletFilterType =
@@ -439,6 +439,7 @@ export default function WalletScreen() {
   const [walletHistoryLoading, setWalletHistoryLoading] = useState(false);
   const [walletHistoryLoadingMore, setWalletHistoryLoadingMore] = useState(false);
   const [walletHistoryTotal, setWalletHistoryTotal] = useState(0);
+  const [walletHistoryTruncated, setWalletHistoryTruncated] = useState(false);
 
   const bookingIntents = useQuery(
     api.bookings.listIntentsByUser,
@@ -451,6 +452,8 @@ export default function WalletScreen() {
       ? { userId, orderRefNum: String(activeOrderRef || params.orderRefNum) }
       : "skip",
   );
+  const easypaisaCapability = useQuery(api.easypaisa.getCapability, {});
+  const easypaisaAvailable = easypaisaCapability?.available === true;
   const syncCheckoutStatus = useAction(
     (api as any).easypaisa.syncTransactionStatus,
   );
@@ -527,6 +530,7 @@ export default function WalletScreen() {
       setWalletHistoryCursor(null);
       setWalletHistoryDone(true);
       setWalletHistoryTotal(0);
+      setWalletHistoryTruncated(false);
       return;
     }
     const append = options?.append === true;
@@ -548,6 +552,7 @@ export default function WalletScreen() {
       setWalletHistoryCursor(result?.continueCursor ?? null);
       setWalletHistoryDone(Boolean(result?.isDone));
       setWalletHistoryTotal(Number(result?.total || page.length));
+      setWalletHistoryTruncated(Boolean(result?.truncated));
     } catch (error) {
       Logger.error("Wallet", "Failed to fetch wallet history page", error);
     } finally {
@@ -886,6 +891,14 @@ export default function WalletScreen() {
 
   const handleAddFunds = async () => {
     if (!userId || addingFunds) return;
+    if (!easypaisaAvailable) {
+      showToast({
+        type: "warning",
+        title: "Easypaisa unavailable",
+        message: easypaisaCapability?.reason || "Easypaisa is unavailable for wallet top-ups in this environment.",
+      });
+      return;
+    }
     const amount = Number(addAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast({
@@ -965,7 +978,7 @@ export default function WalletScreen() {
           { key: "overview", label: "Overview" },
           {
             key: "transactions",
-            label: `Transactions (${walletHistoryTotal || walletHistory.length || 0})`,
+            label: `Transactions (${walletHistoryTotal || walletHistory.length || 0}${walletHistoryTruncated ? "+" : ""})`,
           },
         ]}
         value={activeTab}
@@ -988,11 +1001,22 @@ export default function WalletScreen() {
           ListHeaderComponent={
             walletTransactions.length > 0 ? (
               <View style={styles.transactionFilterBar}>
-                <Text style={styles.transactionFilterSummary}>
-                  {filteredWalletHistory.length} of {walletTransactions.length} transaction
-                  {walletTransactions.length === 1 ? "" : "s"}
-                  {walletHistoryTotal > walletTransactions.length ? ` loaded (${walletHistoryTotal} total)` : ""}
-                </Text>
+                <View style={styles.transactionFilterCopy}>
+                  <Text style={styles.transactionFilterSummary}>
+                    {filteredWalletHistory.length} of {walletTransactions.length} transaction
+                    {walletTransactions.length === 1 ? "" : "s"}
+                    {walletHistoryTotal > walletTransactions.length
+                      ? ` loaded (${walletHistoryTotal}${walletHistoryTruncated ? "+ recent" : " total"})`
+                      : walletHistoryTruncated
+                        ? " (recent history)"
+                        : ""}
+                  </Text>
+                  {walletHistoryTruncated ? (
+                    <Text style={styles.transactionFilterSummary}>
+                      Older transactions are not included in this view. Contact support if you need a complete statement.
+                    </Text>
+                  ) : null}
+                </View>
                 <Pressable
                   onPress={() => setFilterDrawerOpen(true)}
                   style={({ pressed }) => [
@@ -1064,8 +1088,9 @@ export default function WalletScreen() {
               <AppCard style={styles.addFundsCard}>
                 <Text style={styles.addFundsTitle}>Add Funds</Text>
                 <Text style={styles.addFundsSubtext}>
-                  Choose a quick amount and start an Easypaisa payment without
-                  leaving MatchHai.
+                  {easypaisaAvailable
+                    ? "Choose a quick amount and start an Easypaisa payment without leaving MatchHai."
+                    : easypaisaCapability?.reason || "Easypaisa is unavailable for wallet top-ups in this environment."}
                 </Text>
                 <View style={styles.quickAmountRow}>
                   {quickAmounts.map((amount) => (
@@ -1098,7 +1123,7 @@ export default function WalletScreen() {
                   <AppButton
                     style={styles.addFundsBtn}
                     onPress={handleAddFunds}
-                    disabled={!userId || addingFunds}
+                    disabled={!userId || addingFunds || !easypaisaAvailable}
                     loading={addingFunds}
                     perf={{
                       actionKey: "wallet_topup_start",
@@ -1107,7 +1132,7 @@ export default function WalletScreen() {
                       },
                     }}
                   >
-                    {!userId ? "Profile unavailable" : "Top up"}
+                    {!userId ? "Profile unavailable" : !easypaisaAvailable ? "Unavailable" : "Top up"}
                   </AppButton>
                 </View>
               </AppCard>
@@ -1130,11 +1155,11 @@ export default function WalletScreen() {
                     <Text style={[styles.summarySubText, { marginTop: 8 }]}>
                       Next step:{" "}
                       {checkoutStatus.actionRequired === "pay_with_token"
-                        ? `Pay with OTC token ${checkoutStatus.paymentToken || ""}`.trim()
+                        ? "Use the OTC token shown when this payment started"
                         : "Approve in Easypaisa"}
                     </Text>
                   ) : null}
-                  {checkoutStatus.lastError ? (
+                  {checkoutStatus.hasSyncIssue ? (
                     <Text
                       style={[
                         styles.summarySubText,

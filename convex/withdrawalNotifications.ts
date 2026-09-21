@@ -82,15 +82,17 @@ export async function notifyZoneAdminWithdrawalDecision(ctx: any, input: {
   zoneAdminUserId: Id<"users">;
   decision: "approved" | "rejected";
   amount?: number;
+  rejectionReason?: string;
 }) {
   const type = input.decision === "approved" ? "withdrawal.approved" : "withdrawal.rejected";
   const title = input.decision === "approved" ? "Withdrawal approved" : "Withdrawal rejected";
   const amountStr = typeof input.amount === "number" && input.amount > 0
     ? `PKR ${Math.round(input.amount).toLocaleString()}`
     : "your withdrawal";
+  const rejectionReason = String(input.rejectionReason || "").trim();
   const body = input.decision === "approved"
     ? `Your withdrawal request for ${amountStr} has been approved.`
-    : `Your withdrawal request for ${amountStr} was not approved. Check your wallet for details.`;
+    : `Your withdrawal request for ${amountStr} was not approved.${rejectionReason ? ` Reason: ${rejectionReason}` : " Check your wallet for details."}`;
 
   try {
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
@@ -109,6 +111,7 @@ export async function notifyZoneAdminWithdrawalDecision(ctx: any, input: {
       data: {
         withdrawalId: String(input.withdrawalId),
         decision: input.decision,
+        rejectionReason: rejectionReason || null,
         route: ZONE_ADMIN_WITHDRAWAL_ROUTE,
         href: ZONE_ADMIN_WITHDRAWAL_ROUTE,
       },

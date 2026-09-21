@@ -287,6 +287,7 @@ export default function PlayerVenueDetailsScreen() {
               branchName={selectedBranch.displayName}
               address={selectedBranch.formattedAddress}
               areaCityLabel={selectedBranch.areaCityLabel}
+              operatingHoursSummary={selectedBranch.operatingHoursSummary}
               branchCountLabel={venue.branchCountLabel}
               hasMap={selectedBranch.hasMap}
               hasPhone={selectedBranch.hasPhone}

@@ -2,8 +2,8 @@ import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
-import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import RegistrationFieldLabel from "../../app-shared/auth/components/RegistrationFieldLabel";
+import RegistrationStepHeader from "../../app-shared/auth/components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
@@ -20,8 +20,10 @@ import {
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
-import styles from "./register.styles";
+import styles from "../../app-shared/auth/register.styles";
 import { DEFAULT_CITY, normalizeKarachiAreaList } from "../../constants/profileOptions";
+import { captureAnalyticsEvent } from "../../src/lib/analytics/posthog";
+import { classifyAnalyticsFailure } from "../../src/lib/analytics/privacy";
 
 export default function RegisterStep4() {
   const {
@@ -34,8 +36,7 @@ export default function RegisterStep4() {
     registrationPhase = "idle",
     registrationSubStep = 0,
     setRegistrationProgress,
-  } =
-    useOnboardingStore();
+  } = useOnboardingStore();
   const { showToast, hideToast } = useToast();
   const { refreshSession } = useAuth();
 
@@ -55,26 +56,13 @@ export default function RegisterStep4() {
     // Don't redirect away if we're in success flow
     if (visiblePhase === "success" || visiblePhase === "submitting") return;
     const { phoneE164 } = normalizePakistaniPhone(step1.phone || "");
-    const phoneVerified =
-      Boolean(step1.phoneVerified) &&
-      Boolean(phoneE164) &&
-      step1.phoneVerifiedE164 === phoneE164;
-    if (
-      !step1.fullName.trim() ||
-      !step1.username.trim() ||
-      !step1.email.trim() ||
-      !step1.password ||
-      !phoneVerified
-    ) {
+    const phoneVerified = Boolean(step1.phoneVerified) && Boolean(phoneE164) && step1.phoneVerifiedE164 === phoneE164;
+    if (!step1.fullName.trim() || !step1.username.trim() || !step1.email.trim() || !step1.password || !phoneVerified) {
       router.replace("/auth/register");
       return;
     }
     const hasActivity =
-      step2.playsCs2 ||
-      (step2 as any).playsCs16 ||
-      (step2 as any).playsValorant ||
-      step2.playsFc ||
-      step2.playsTekken;
+      step2.playsCs2 || (step2 as any).playsCs16 || (step2 as any).playsValorant || step2.playsFc || step2.playsTekken;
     if (!step2.selectedAreas.length || !hasActivity) {
       router.replace("/auth/register-step2");
     }
@@ -96,10 +84,8 @@ export default function RegisterStep4() {
     const details: string[] = [];
     const futsalPositions = (((step2 as any).futsalPositions ?? []) as string[]) || [];
     const indoorCricketRole = ((step2 as any).indoorCricketRole as string) ?? null;
-    const indoorCricketBowlingStyle =
-      ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
-    const indoorCricketBattingStyle =
-      ((step2 as any).indoorCricketBattingStyle as string) ?? null;
+    const indoorCricketBowlingStyle = ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
+    const indoorCricketBattingStyle = ((step2 as any).indoorCricketBattingStyle as string) ?? null;
     const padelRole = ((step2 as any).padelRole as string) ?? null;
     const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
 
@@ -140,8 +126,7 @@ export default function RegisterStep4() {
     [step3],
   );
 
-  const allAgreementsChecked =
-    step4.agreeTerms && step4.agreePrivacy && step4.consentMatchHistory;
+  const allAgreementsChecked = step4.agreeTerms && step4.agreePrivacy && step4.consentMatchHistory;
 
   useEffect(() => {
     if (registrationPhase !== "success") return;
@@ -163,15 +148,13 @@ export default function RegisterStep4() {
 
     const { fullName, username, email, phone, password, ageRange } = step1;
     const { phoneE164 } = normalizePakistaniPhone(phone || "");
-    const phoneVerified =
-      Boolean(step1.phoneVerified) &&
-      Boolean(phoneE164) &&
-      step1.phoneVerifiedE164 === phoneE164;
+    const phoneVerified = Boolean(step1.phoneVerified) && Boolean(phoneE164) && step1.phoneVerifiedE164 === phoneE164;
     if (!fullName.trim() || !username.trim() || !email.trim() || !password || !phoneVerified) {
       showToast({
         type: "error",
         title: "Missing details",
-        message: "Some of your account details are missing or your phone is not verified. Please complete Step 1 again.",
+        message:
+          "Some of your account details are missing or your phone is not verified. Please complete Step 1 again.",
       });
       router.replace("/auth/register");
       return;
@@ -198,7 +181,10 @@ export default function RegisterStep4() {
           ageRange?.trim() || undefined,
         );
         if (!signUpResult || !signUpResult.ok) {
-          throw { step: 1, message: signUpResult?.message || "Auth creation failed." };
+          throw {
+            step: 1,
+            message: signUpResult?.message || "Auth creation failed.",
+          };
         }
         userId = signUpResult.userId as string;
         setRegisteredUserId(userId);
@@ -220,30 +206,33 @@ export default function RegisterStep4() {
         };
       }
 
-      const saveStep2Result = await saveOnboardingStep2(userId as any, {
-        areasPreferred: normalizeKarachiAreaList(step2.selectedAreas),
-        playsCs2: step2.playsCs2,
-        cs2Role: step2.cs2Role,
-        playsCs16: (step2 as any).playsCs16 ?? false,
-        cs16Role: (step2 as any).cs16Role ?? null,
-        playsValorant: (step2 as any).playsValorant ?? false,
-        valorantRole: (step2 as any).valorantRole ?? null,
-        playsFc: step2.playsFc,
-        fcTeam: step2.fcTeam.trim() || null,
-        fcFormation: step2.fcFormation,
-        playsTekken: step2.playsTekken,
-        tekkenFavorites: step2.tekkenFavorites,
-        playsFutsal: false,
-        playsIndoorCricket: false,
-        playsPadel: false,
-        playsPickleball: false,
-        futsalPositions: [],
-        indoorCricketRole: null,
-        indoorCricketBowlingStyle: null,
-        indoorCricketBattingStyle: null,
-        padelRole: null,
-        pickleballRole: null,
-      } as any);
+      const saveStep2Result = await saveOnboardingStep2(
+        userId as any,
+        {
+          areasPreferred: normalizeKarachiAreaList(step2.selectedAreas),
+          playsCs2: step2.playsCs2,
+          cs2Role: step2.cs2Role,
+          playsCs16: (step2 as any).playsCs16 ?? false,
+          cs16Role: (step2 as any).cs16Role ?? null,
+          playsValorant: (step2 as any).playsValorant ?? false,
+          valorantRole: (step2 as any).valorantRole ?? null,
+          playsFc: step2.playsFc,
+          fcTeam: step2.fcTeam.trim() || null,
+          fcFormation: step2.fcFormation,
+          playsTekken: step2.playsTekken,
+          tekkenFavorites: step2.tekkenFavorites,
+          playsFutsal: false,
+          playsIndoorCricket: false,
+          playsPadel: false,
+          playsPickleball: false,
+          futsalPositions: [],
+          indoorCricketRole: null,
+          indoorCricketBowlingStyle: null,
+          indoorCricketBattingStyle: null,
+          padelRole: null,
+          pickleballRole: null,
+        } as any,
+      );
       if (!saveStep2Result.ok) {
         throw { step: 2, message: saveStep2Result.message };
       }
@@ -284,6 +273,10 @@ export default function RegisterStep4() {
 
       setPhase("success");
       setRegistrationProgress("success", 5);
+      captureAnalyticsEvent("player_registered", {
+        account_type: "player",
+        outcome: "success",
+      });
 
       showToast({
         type: "success",
@@ -295,6 +288,11 @@ export default function RegisterStep4() {
       }, 650);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
+      captureAnalyticsEvent("player_registration_failed", {
+        account_type: "player",
+        step: failedAt,
+        failure_category: classifyAnalyticsFailure(error),
+      });
       setCurrentSubStep(failedAt);
       setPhase("partial-fail");
       setRegistrationProgress("partial-fail", failedAt);
@@ -321,90 +319,90 @@ export default function RegisterStep4() {
     return (
       <View style={styles.loadingOverlay}>
         <View style={styles.loadingContent}>
-            {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
-              <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
-            ) : null}
-            {visiblePhase === "success" ? (
-              <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
-            ) : null}
-            {visiblePhase === "partial-fail" ? (
-              <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
-            ) : null}
+          {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
+            <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
+          ) : null}
+          {visiblePhase === "success" ? (
+            <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
+          ) : null}
+          {visiblePhase === "partial-fail" ? (
+            <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
+          ) : null}
 
-            <Text style={styles.loadingPhaseTitle}>
-              {visiblePhase === "submitting"
-                ? "Setting up your profile..."
-                : visiblePhase === "partial-fail"
-                  ? "Setup interrupted"
-                  : "Welcome aboard"}
-            </Text>
+          <Text style={styles.loadingPhaseTitle}>
+            {visiblePhase === "submitting"
+              ? "Setting up your profile..."
+              : visiblePhase === "partial-fail"
+                ? "Setup interrupted"
+                : "Welcome aboard"}
+          </Text>
 
-            <View style={{ width: "100%", marginBottom: 20 }}>
-              {steps.map((step, index) => {
-                const isDone = visibleSubStep > step.id || visiblePhase === "success";
-                const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
-                const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
+          <View style={{ width: "100%", marginBottom: 20 }}>
+            {steps.map((step, index) => {
+              const isDone = visibleSubStep > step.id || visiblePhase === "success";
+              const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
+              const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
 
-                return (
-                  <View key={step.id}>
-                    <View style={styles.progressStep}>
-                      <View style={styles.progressIcon}>
-                        {isDone ? (
-                          <AppIcon name="check-circle" size={20} color={COLORS.success} />
-                        ) : isFailed ? (
-                          <AppIcon name="cancel" size={20} color={COLORS.error} />
-                        ) : isActive ? (
-                          <ActivityIndicator size="small" color={COLORS.accent} />
-                        ) : (
-                          <AppIcon
-                            name="radio-button-unchecked"
-                            size={20}
-                            color="rgba(255,255,255,0.2)"
-                          />
-                        )}
-                      </View>
-                      <Text
-                        style={[
-                          styles.progressText,
-                          isActive && styles.progressTextActive,
-                          isDone && styles.progressTextDone,
-                          isFailed && { color: COLORS.error },
-                        ]}
-                      >
-                        {step.label}
-                      </Text>
+              return (
+                <View key={step.id}>
+                  <View style={styles.progressStep}>
+                    <View style={styles.progressIcon}>
+                      {isDone ? (
+                        <AppIcon name="check-circle" size={20} color={COLORS.success} />
+                      ) : isFailed ? (
+                        <AppIcon name="cancel" size={20} color={COLORS.error} />
+                      ) : isActive ? (
+                        <ActivityIndicator size="small" color={COLORS.accent} />
+                      ) : (
+                        <AppIcon name="radio-button-unchecked" size={20} color="rgba(255,255,255,0.2)" />
+                      )}
                     </View>
-                    {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                    <Text
+                      style={[
+                        styles.progressText,
+                        isActive && styles.progressTextActive,
+                        isDone && styles.progressTextDone,
+                        isFailed && { color: COLORS.error },
+                      ]}
+                    >
+                      {step.label}
+                    </Text>
                   </View>
-                );
-              })}
-            </View>
+                  {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                </View>
+              );
+            })}
+          </View>
 
-            {visiblePhase === "partial-fail" ? (
-              <>
-                <Text
-                  style={[
-                    styles.helperText,
-                    styles.helperError,
-                    { textAlign: "center", marginBottom: 20 },
-                  ]}
-                >
-                  {errorDetails}
-                </Text>
-                <AppButton onPress={handleFinalSignUp} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
-                  Retry failed steps
-                </AppButton>
-                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); setRegistrationProgress("idle", 0); hideToast(); }} style={{ padding: 10 }}>
-                  <Text style={{ color: COLORS.muted }}>Cancel</Text>
-                </Pressable>
-              </>
-            ) : null}
-
-            {visiblePhase === "success" ? (
-              <Text style={[styles.progressText, { textAlign: "center" }]}>
-                Redirecting you to the next screen...
+          {visiblePhase === "partial-fail" ? (
+            <>
+              <Text style={[styles.helperText, styles.helperError, { textAlign: "center", marginBottom: 20 }]}>
+                {errorDetails}
               </Text>
-            ) : null}
+              <AppButton
+                onPress={handleFinalSignUp}
+                size="lg"
+                style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}
+              >
+                Retry failed steps
+              </AppButton>
+              <Pressable
+                onPress={() => {
+                  setPhase("idle");
+                  setSubmitting(false);
+                  setRegistrationProgress("idle", 0);
+                  hideToast();
+                }}
+                style={{ padding: 10 }}
+              >
+                <Text style={{ color: COLORS.muted }}>Cancel</Text>
+              </Pressable>
+            </>
+          ) : null}
+
+          {visiblePhase === "success" ? (
+            <Text style={[styles.progressText, { textAlign: "center" }]}>Redirecting you to the next screen...</Text>
+          ) : null}
         </View>
       </View>
     );
@@ -412,11 +410,7 @@ export default function RegisterStep4() {
 
   if (visiblePhase !== "idle") {
     return (
-      <Screen
-        style={styles.screen}
-        contentStyle={styles.loadingScreenContainer}
-        routeKey="/auth/register-step4"
-      >
+      <Screen style={styles.screen} contentStyle={styles.loadingScreenContainer} routeKey="/auth/register-step4">
         {renderLoadingOverlay()}
       </Screen>
     );
@@ -456,9 +450,7 @@ export default function RegisterStep4() {
       />
 
       <Text style={styles.heading}>One last check</Text>
-      <Text style={styles.sub}>
-        Review your account details, preferences, and optional links before you submit.
-      </Text>
+      <Text style={styles.sub}>Review your account details, preferences, and optional links before you submit.</Text>
 
       <View style={styles.reviewSectionCard}>
         {sectionHeader("person", "Account details", "/auth/register")}
@@ -489,9 +481,7 @@ export default function RegisterStep4() {
           </View>
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>City and age range</Text>
-            <Text style={styles.reviewValue}>
-              {[step1.city || "Karachi", step1.ageRange || "Not set"].join(" | ")}
-            </Text>
+            <Text style={styles.reviewValue}>{[step1.city || "Karachi", step1.ageRange || "Not set"].join(" | ")}</Text>
           </View>
         </View>
       </View>
@@ -571,23 +561,16 @@ export default function RegisterStep4() {
           </Text>
         </Pressable>
 
-        <Pressable
-          onPress={() => setStep4({ consentMatchHistory: !step4.consentMatchHistory })}
-          style={styles.termRow}
-        >
+        <Pressable onPress={() => setStep4({ consentMatchHistory: !step4.consentMatchHistory })} style={styles.termRow}>
           <View style={[styles.termBox, step4.consentMatchHistory && styles.termBoxChecked]}>
             {step4.consentMatchHistory ? <View style={styles.termBoxInner} /> : null}
           </View>
-          <Text style={styles.termText}>
-            I consent to MatchHai using my match history for matchmaking and stats.
-          </Text>
+          <Text style={styles.termText}>I consent to MatchHai using my match history for matchmaking and stats.</Text>
         </Pressable>
 
         {!allAgreementsChecked ? (
           <View style={styles.helperTextRow}>
-            <Text style={[styles.helperText, styles.helperWarning]}>
-              Please tick all three checkboxes to continue.
-            </Text>
+            <Text style={[styles.helperText, styles.helperWarning]}>Please tick all three checkboxes to continue.</Text>
           </View>
         ) : null}
       </View>
@@ -596,15 +579,14 @@ export default function RegisterStep4() {
         <Text style={styles.backLinkText}>Back to optional account links</Text>
       </Pressable>
 
-      <View style={[styles.buttonShadowWrapper, allAgreementsChecked && !submitting && styles.buttonShadowWrapperActive]}>
+      <View
+        style={[styles.buttonShadowWrapper, allAgreementsChecked && !submitting && styles.buttonShadowWrapperActive]}
+      >
         <AppButton
           onPress={handleFinalSignUp}
           disabled={submitting || !allAgreementsChecked}
           size="lg"
-          style={[
-            styles.primaryBtn,
-            !allAgreementsChecked || submitting ? styles.primaryBtnDisabled : null,
-          ]}
+          style={[styles.primaryBtn, !allAgreementsChecked || submitting ? styles.primaryBtnDisabled : null]}
         >
           {submitting ? "Submitting..." : "Sign up and continue"}
         </AppButton>

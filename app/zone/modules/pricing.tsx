@@ -42,7 +42,7 @@ import {
 import { subscribeZoneBranches, type ZoneBranch } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS, SPACING } from "../../../src/theme";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
-import styles from "./pricing.styles";
+import styles from "../../../app-shared/zone/modules/pricing.styles";
 
 const ASSET_TYPES: PricingRuleAssetType[] = ["pc", "console"];
 

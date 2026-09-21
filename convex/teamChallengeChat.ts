@@ -1,10 +1,17 @@
 import { v } from "convex/values";
+import { filterActivePushRecipients } from "./pushDeliveryPolicy";
 
 import { mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys, toChatUserKey } from "./chatIdentity";
+import {
+  CHAT_LIST_LIMIT,
+  MAX_CHATROOM_MEMBER_ROWS,
+  assertChatroomMemberRowsBounded,
+  createParticipantProfileCache,
+} from "./chatListHelpers";
 import { markUserPresent } from "./presence";
 
 const chatMessageTypeValidator = v.union(
@@ -62,10 +69,10 @@ async function ensureChallengeChatMember(ctx: any, chatId: string, userId: Id<"u
 
 async function syncChallengeChatMembers(ctx: any, chatId: string, participantUids: Id<"users">[], now: number) {
   const normalized = normalizeChatUserKeys(participantUids || []);
-  const existingMembers = await ctx.db
+  const existingMembers = assertChatroomMemberRowsBounded(await ctx.db
     .query("teamChallengeChatMembers")
     .withIndex("by_chatId", (q: any) => q.eq("chatId", chatId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   const existingByUserId = new Map(existingMembers.map((member: any) => [String(member.userId), member]));
   for (const rawUserId of normalized) {
@@ -89,10 +96,10 @@ async function syncChallengeChatMembers(ctx: any, chatId: string, participantUid
 }
 
 async function updateChallengeUnreadCounts(ctx: any, chatId: string, senderUid: Id<"users">, now: number) {
-  const members = await ctx.db
+  const members = assertChatroomMemberRowsBounded(await ctx.db
     .query("teamChallengeChatMembers")
     .withIndex("by_chatId", (q: any) => q.eq("chatId", chatId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   for (const member of members) {
     if (String(member.userId) === String(senderUid)) {
@@ -190,11 +197,16 @@ export const listForMe = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getStrictAuthenticatedUserId(ctx);
-    const memberships = await ctx.db
+    const recentMemberships = await ctx.db
       .query("teamChallengeChatMembers")
-      .withIndex("by_userId", (q: any) => q.eq("userId", userId))
-      .collect();
+      .withIndex("by_userId_and_updatedAt", (q: any) => q.eq("userId", userId))
+      .order("desc")
+      .take(CHAT_LIST_LIMIT);
+    const memberships = Array.from(
+      new Map(recentMemberships.map((membership: any) => [String(membership.chatId), membership])).values(),
+    );
 
+    const loadParticipantProfiles = createParticipantProfileCache(ctx);
     return await Promise.all(
       memberships.map(async (membership: any) => {
         const chat = await ctx.db
@@ -204,6 +216,8 @@ export const listForMe = query({
         if (!chat) return null;
 
         const challenge = chat.challengeId ? await ctx.db.get(chat.challengeId) : null;
+        const participantProfiles = await loadParticipantProfiles(chat.participantUids || [], "Captain");
+        const participants = participantProfiles;
         return {
           id: chat.chatId,
           kind: "challenge" as const,
@@ -213,12 +227,14 @@ export const listForMe = query({
               : "Captains chat",
           subtitle: challenge?.status ? String(challenge.status).replace(/_/g, " ") : "Challenge chat",
           participantUids: (chat.participantUids || []).map((value: any) => String(value)),
+          participants,
+          avatarURL: participants.find((participant: any) => participant.uid !== String(userId))?.photoURL || null,
           lastMessage: chat.lastMessage || null,
           updatedAt: chat.updatedAt || chat.createdAt,
           unreadCount: Number(membership.unreadCount || 0),
         };
       })
-    ).then((rows) => rows.filter(Boolean));
+    ).then((rows) => rows.filter(Boolean).sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
   },
 });
 
@@ -369,8 +385,10 @@ export const sendMessage = mutation({
     await updateChallengeUnreadCounts(ctx, args.chatId, userId, now);
 
     // Schedule push notification to the other captain
-    const recipientIds = participantIds
-      .filter((pid) => String(pid) !== String(userId));
+    const recipientIds = await filterActivePushRecipients(
+      ctx,
+      participantIds.filter((pid) => String(pid) !== String(userId)),
+    );
     if (recipientIds.length > 0) {
       await ctx.scheduler.runAfter(0, (internal as any).pushNotificationsActions.sendChatPush, {
         senderName,

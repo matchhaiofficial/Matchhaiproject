@@ -1,10 +1,18 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { filterActivePushRecipients } from "./pushDeliveryPolicy";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys } from "./chatIdentity";
 import { markUserPresent } from "./presence";
+import { assertKycAccessAllowed } from "./kycGate";
+import {
+  CHAT_LIST_LIMIT,
+  MAX_CHATROOM_MEMBER_ROWS,
+  assertChatroomMemberRowsBounded,
+  createParticipantProfileCache,
+} from "./chatListHelpers";
 
 type UserIdString = string;
 
@@ -39,7 +47,10 @@ type MatchroomAccessState =
   | { status: "unauthenticated" };
 
 async function getMatchroomActorUserId(ctx: any): Promise<Id<"users">> {
-  return await getStrictAuthenticatedUserId(ctx);
+  const userId = await getStrictAuthenticatedUserId(ctx);
+  const user = await ctx.db.get(userId);
+  assertKycAccessAllowed(user);
+  return userId;
 }
 
 async function getSenderProfile(ctx: any, userId: Id<"users">) {
@@ -201,10 +212,10 @@ async function ensureChatroomMember(ctx: any, chatroomId: any, userId: UserIdStr
 
 async function syncChatroomMembers(ctx: any, chatroomId: any, participantUids: UserIdString[], now: number) {
   const normalized = normalizeChatUserKeys(participantUids || []);
-  const existingMembers = await ctx.db
+  const existingMembers = assertChatroomMemberRowsBounded(await ctx.db
     .query("chatroomMembers")
     .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroomId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   const existingByUserId = new Map(existingMembers.map((member: any) => [String(member.userId), member]));
   for (const userId of normalized) {
@@ -227,11 +238,16 @@ async function syncChatroomMembers(ctx: any, chatroomId: any, participantUids: U
   }
 }
 
-async function updateUnreadCounts(ctx: any, chatroomId: any, senderUid: UserIdString, now: number) {
-  const members = await ctx.db
+async function updateUnreadCounts(
+  ctx: any,
+  chatroomId: any,
+  senderUid: UserIdString,
+  now: number,
+) {
+  const members = assertChatroomMemberRowsBounded(await ctx.db
     .query("chatroomMembers")
     .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroomId))
-    .collect();
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
 
   for (const member of members) {
     if (String(member.userId) === String(senderUid)) {
@@ -288,6 +304,29 @@ export const getMatchroomAccess = query({
   },
 });
 
+export const getUnreadCountForMatchroom = query({
+  args: { matchroomId: v.id("matchrooms") },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const state = await getMatchroomAccessState(ctx, args.matchroomId);
+    if (state.status !== "ok") return 0;
+
+    const chatroom = await ctx.db
+      .query("chatrooms")
+      .withIndex("by_matchroomId", (q) => q.eq("matchroomId", args.matchroomId))
+      .unique();
+    if (!chatroom) return 0;
+
+    const membership = await ctx.db
+      .query("chatroomMembers")
+      .withIndex("by_chatroomId_and_userId", (q) =>
+        q.eq("chatroomId", chatroom._id).eq("userId", String(state.userId)),
+      )
+      .unique();
+    return Math.max(0, Number(membership?.unreadCount || 0));
+  },
+});
+
 export const getOrCreateForMatchroom = mutation({
   args: {
     matchroomId: v.id("matchrooms"),
@@ -334,10 +373,16 @@ export const listForUser = query({
   handler: async (ctx) => {
     const actorId = await getMatchroomActorUserId(ctx);
 
-    const memberships = await ctx.db
+    const recentMemberships = await ctx.db
       .query("chatroomMembers")
-      .withIndex("by_userId", (q) => q.eq("userId", String(actorId)))
-      .collect();
+      .withIndex("by_userId_and_updatedAt", (q) => q.eq("userId", String(actorId)))
+      .order("desc")
+      .take(CHAT_LIST_LIMIT);
+    const memberships = Array.from(
+      new Map(recentMemberships.map((membership: any) => [String(membership.chatroomId), membership])).values(),
+    );
+
+    const loadParticipantProfiles = createParticipantProfileCache(ctx);
 
     return await Promise.all(
       memberships.map(async (membership: any) => {
@@ -347,6 +392,8 @@ export const listForUser = query({
         if (chatroom.type === "dm" || !chatroom.matchroomId) return null;
 
         const matchroom = (await ctx.db.get(chatroom.matchroomId)) as any;
+        const participantProfiles = await loadParticipantProfiles(chatroom.participantUids || [], "Player");
+        const participants = participantProfiles;
         return {
           id: chatroom._id,
           kind: "matchroom" as const,
@@ -354,12 +401,14 @@ export const listForUser = query({
           title: matchroom?.title || "Matchroom chat",
           subtitle: matchroom?.location || matchroom?.game || "Match chat",
           participantUids: chatroom.participantUids,
+          participants,
+          avatarURL: participants.find((participant: any) => participant.uid !== String(actorId))?.photoURL || null,
           lastMessage: chatroom.lastMessage || null,
           updatedAt: chatroom.updatedAt || chatroom.createdAt,
           unreadCount: Number(membership.unreadCount || 0),
         };
       })
-    ).then((rows) => rows.filter(Boolean));
+    ).then((rows) => rows.filter(Boolean).sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0)));
   },
 });
 
@@ -489,9 +538,9 @@ export const sendMessage = mutation({
     await updateUnreadCounts(ctx, args.chatroomId, String(userId), now);
 
     // Schedule push notification to other participants
-    const recipientIds = (chatroom.participantUids || [])
+    const recipientIds = await filterActivePushRecipients(ctx, (chatroom.participantUids || [])
       .filter((uid: string) => String(uid) !== String(userId))
-      .map((uid: string) => uid as Id<"users">);
+      .map((uid: string) => uid as Id<"users">));
     if (recipientIds.length > 0) {
       await ctx.scheduler.runAfter(0, (internal as any).pushNotificationsActions.sendChatPush, {
         senderName,
@@ -577,14 +626,14 @@ export const sendMessageToMatchroom = mutation({
       updatedAt: now,
     });
 
+    const participantUids = getMatchroomParticipantUids(matchroom);
     await ensureChatroomMember(ctx, chatroom._id, String(userId), now);
     await updateUnreadCounts(ctx, chatroom._id, String(userId), now);
 
     // Schedule push notification to other participants
-    const participantUids = getMatchroomParticipantUids(matchroom);
-    const recipientIds = participantUids
+    const recipientIds = await filterActivePushRecipients(ctx, participantUids
       .filter((uid) => String(uid) !== String(userId))
-      .map((uid) => uid as Id<"users">);
+      .map((uid) => uid as Id<"users">));
     if (recipientIds.length > 0) {
       await ctx.scheduler.runAfter(0, (internal as any).pushNotificationsActions.sendChatPush, {
         senderName,
@@ -599,23 +648,25 @@ export const sendMessageToMatchroom = mutation({
   },
 });
 
+async function deleteMessageForCurrentParticipant(ctx: any, messageId: Id<"chatMessages">) {
+  const message = await ctx.db.get(messageId);
+  if (!message) throw new Error("Message not found");
+  const { userId } = await requireAuthorizedChatroomParticipant(ctx, message.chatroomId);
+
+  const deletedFor = message.deletedFor || [];
+  if (!deletedFor.includes(String(userId))) {
+    await ctx.db.patch(messageId, {
+      deletedFor: [...deletedFor, String(userId)],
+    });
+  }
+  return true;
+}
+
 export const deleteForMe = mutation({
   args: {
     messageId: v.id("chatMessages"),
   },
-  handler: async (ctx, args) => {
-    const message = await ctx.db.get(args.messageId);
-    if (!message) throw new Error("Message not found");
-    const { userId } = await requireAuthorizedChatroomParticipant(ctx, message.chatroomId);
-
-    const deletedFor = message.deletedFor || [];
-    if (!deletedFor.includes(String(userId))) {
-      await ctx.db.patch(args.messageId, {
-        deletedFor: [...deletedFor, String(userId)],
-      });
-    }
-    return true;
-  },
+  handler: async (ctx, args) => deleteMessageForCurrentParticipant(ctx, args.messageId),
 });
 
 export const markRead = mutation({
@@ -803,7 +854,8 @@ export const unpinMessage = mutation({
 
 export const deleteMessage = mutation({
   args: { messageId: v.id("chatMessages") },
-  handler: async () => {
-    throw new Error("Full message deletion is disabled.");
-  },
+  // Backwards-compatible alias: older clients asked for a destructive global
+  // delete. Preserve the endpoint while routing it through the authenticated,
+  // per-participant hide used by current clients.
+  handler: async (ctx, args) => deleteMessageForCurrentParticipant(ctx, args.messageId),
 });

@@ -33,7 +33,7 @@ import {
 import { signOutUser } from "../../../src/services/convex/authService";
 import { setLocalBadgeCount } from "../../../src/services/localNotifications";
 import { COLORS, SPACING } from "../../../src/theme";
-import styles from "./index.styles";
+import styles from "../../../app-shared/super-admin/(tabs)/index.styles";
 
 type MetricConfig = {
   label: string;

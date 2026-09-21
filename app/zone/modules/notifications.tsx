@@ -33,7 +33,7 @@ import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
 import { getNotificationCategoryIcon, getNotificationCategoryLabel } from "../../../src/utils/notificationCategories";
-import styles from "./notifications.styles";
+import styles from "../../../app-shared/zone/modules/notifications.styles";
 
 type AdminNotification = {
     id: string;
@@ -281,7 +281,13 @@ export default function ZoneNotificationsModule() {
     const openBookings = useCallback((params: Record<string, any>) => {
         router.push({
             pathname: "/zone/modules/bookings",
-            params,
+            params: {
+                ...params,
+                // A notification can target the same screen with different context.
+                // Make that navigation distinct so Expo Router does not retain the
+                // previous notification's list position and focus state.
+                t: String(params.t || Date.now()),
+            },
         } as any);
     }, [router]);
 
@@ -310,13 +316,19 @@ export default function ZoneNotificationsModule() {
             return;
         }
         if (type === "zone.matchroom_full") {
-            router.push(buildNotificationRoute({
-                type,
-                route: item.route,
-                recipientRole: "zone_admin",
-                matchroomId: meta.matchroomId || item.matchroomId,
-                data: meta,
-            }) as any);
+            if (!matchroomId) {
+                showToast({
+                    type: "warning",
+                    title: "Matchroom unavailable",
+                    message: "This notification is missing its matchroom reference.",
+                });
+                return;
+            }
+            openBookings({
+                segment: "matchrooms",
+                matchroomId,
+                t: item.id,
+            });
             return;
         }
         if (type.includes("match") && (meta.matchroomId || item.matchroomId)) {
@@ -344,7 +356,7 @@ export default function ZoneNotificationsModule() {
             expandedRequestId: requestId || undefined,
             matchroomId: meta.matchroomId || item.matchroomId,
         });
-    }, [markSeenIfPending, openBookings, router]);
+    }, [markSeenIfPending, openBookings, router, showToast]);
 
     const handleClearAll = useCallback(async () => {
         if (!user?._id || items.length === 0) return;

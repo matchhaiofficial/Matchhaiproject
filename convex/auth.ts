@@ -157,6 +157,13 @@ export const getCurrentUser = query({
 export const getUserByAuthId = query({
   args: { authId: v.string() },
   handler: async (ctx, args) => {
+    const authUser = await authComponent.getAuthUser(ctx);
+    const candidateAuthIds = [authUser?.userId, (authUser as any)?.id, authUser?._id]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    if (!authUser || !candidateAuthIds.includes(String(args.authId || "").trim())) {
+      return null;
+    }
     return await ctx.db
       .query("users")
       .withIndex("by_authId", (q) => q.eq("authId", args.authId))
@@ -176,11 +183,23 @@ export const linkAuthToUser = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const authUser = await authComponent.getAuthUser(ctx);
+    const requestedAuthId = String(args.authId || "").trim();
+    const candidateAuthIds = [authUser?.userId, (authUser as any)?.id, authUser?._id]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    if (
+      !authUser
+      || !candidateAuthIds.includes(requestedAuthId)
+      || String(authUser.email || "").trim().toLowerCase() !== args.email.trim().toLowerCase()
+    ) {
+      throw new Error("Authenticated account does not match profile link request.");
+    }
 
     // Check if user already exists
     const existingUser = await ctx.db
       .query("users")
-      .withIndex("by_authId", (q) => q.eq("authId", args.authId))
+      .withIndex("by_authId", (q) => q.eq("authId", requestedAuthId))
       .unique();
 
     if (existingUser) {
@@ -189,7 +208,7 @@ export const linkAuthToUser = mutation({
 
     // Create new user record
     const userId = await ctx.db.insert("users", {
-      authId: args.authId,
+      authId: requestedAuthId,
       email: args.email.toLowerCase(),
       fullName: args.fullName,
       username: args.username,

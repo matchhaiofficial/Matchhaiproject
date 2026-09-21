@@ -3,12 +3,13 @@ import { api } from "./_generated/api";
 import { v } from "convex/values";
 import {
   KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL,
+  assertKycFullyVerified,
   requireKycVerified,
 } from "./kycGate";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "MatchHai <no-reply@matchhai.com>";
-const WITHDRAWAL_REQUEST_EMAIL = "admin@matchhai.com";
+const WITHDRAWAL_REQUEST_EMAIL = String(process.env.WITHDRAWAL_REQUEST_EMAIL || "").trim();
 
 async function sendResendEmail(input: { to: string; subject: string; text: string; html?: string }) {
   if (!RESEND_API_KEY) {
@@ -68,12 +69,14 @@ export const requestZoneWithdrawal = action({
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
+    requestKey: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ ok: true; reference: string }> => {
     const { profile } = await requireKycVerified(ctx, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);
     if (!profile) {
       throw new Error("User profile not found.");
     }
+    assertKycFullyVerified(profile, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);
     const requester = await ctx.runQuery(api.users.getById, { userId: args.userId });
     if (!requester || String(requester._id) !== String(profile._id)) {
       throw new Error("Not authorized.");
@@ -84,7 +87,20 @@ export const requestZoneWithdrawal = action({
       throw new Error("Please select a bank.");
     }
     const { accountNumberRaw, accountNumberMasked, accountNumberLast4 } = maskAccountNumber(args.accountNumber);
-    const result: { reference: string; createdAt: number; walletBalance: number } = await ctx.runMutation(
+    const result: {
+      reference: string;
+      createdAt: number;
+      walletBalance: number;
+      amount: number;
+      bankName: string;
+      accountNumberMasked: string;
+      branchId: string;
+      branchName: string;
+      ownerName: string | null;
+      ownerEmail: string | null;
+      venueName: string | null;
+      zoneId: string;
+    } = await ctx.runMutation(
       api.wallet.createZoneWithdrawalTransaction,
       {
         userId: profile._id,
@@ -99,6 +115,7 @@ export const requestZoneWithdrawal = action({
         ownerName: args.ownerName,
         ownerEmail: args.ownerEmail,
         venueName: args.venueName,
+        requestKey: args.requestKey,
       },
     );
     const requestedAt = new Date(result.createdAt).toLocaleString("en-PK", {
@@ -109,25 +126,37 @@ export const requestZoneWithdrawal = action({
     const lines = [
       "Zone admin withdrawal request",
       `Time: ${requestedAt}`,
-      `Amount: PKR ${Math.round(args.amount).toLocaleString("en-US")}`,
-      `Venue: ${args.venueName || "Not provided"}`,
-      `Branch: ${args.branchName} (${args.branchId})`,
-      `Bank: ${bankName}`,
-      `Account number: ${accountNumberRaw}`,
-      `Account number (masked): ${accountNumberMasked}`,
-      `Owner: ${args.ownerName || "Not provided"}`,
-      `Owner email: ${args.ownerEmail || "Not provided"}`,
+      `Amount: PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
+      `Venue: ${result.venueName || "Not provided"}`,
+      `Branch: ${result.branchName} (${result.branchId})`,
+      `Bank: ${result.bankName}`,
+      `Account number (masked): ${result.accountNumberMasked}`,
+      `Owner: ${result.ownerName || "Not provided"}`,
+      `Owner email: ${result.ownerEmail || "Not provided"}`,
       `User ID: ${String(profile._id)}`,
-      `Zone ID: ${args.zoneId || "Not provided"}`,
+      `Zone ID: ${result.zoneId}`,
       `Reference: ${result.reference}`,
     ];
 
-    await sendResendEmail({
-      to: WITHDRAWAL_REQUEST_EMAIL,
-      subject: `Withdrawal request: ${args.venueName || args.ownerName || "Zone Admin"} - PKR ${Math.round(args.amount).toLocaleString("en-US")}`,
-      text: lines.join("\n"),
-      html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap">${lines.join("\n")}</pre>`,
-    });
+    try {
+      if (WITHDRAWAL_REQUEST_EMAIL) {
+        await sendResendEmail({
+          to: WITHDRAWAL_REQUEST_EMAIL,
+          subject: `Withdrawal request: ${result.venueName || result.ownerName || "Zone Admin"} - PKR ${Math.round(result.amount).toLocaleString("en-US")}`,
+          text: lines.join("\n"),
+        });
+      } else {
+        console.warn("[zoneWithdrawals] WITHDRAWAL_REQUEST_EMAIL is not configured; durable in-app notifications remain active");
+      }
+    } catch (error) {
+      // The durable request and balance reservation have already committed.
+      // Email is an operational alert, so its failure must never invite a
+      // duplicate retry by making the successful withdrawal look failed.
+      console.error("[zoneWithdrawals] Withdrawal saved but email delivery failed", {
+        reference: result.reference,
+        error: error instanceof Error ? error.message : "Unknown email error",
+      });
+    }
 
     return { ok: true, reference: result.reference };
   },

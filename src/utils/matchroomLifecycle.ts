@@ -5,6 +5,7 @@ import {
     DAY_MS,
     MATCHROOM_LOCK_BEFORE_START_MS,
 } from "../constants/timing";
+import { combineKarachiDateTime } from "./scheduleTime";
 
 // Legacy fallback TTL (older docs without scheduled timestamps)
 const ROOM_TTL_MS = 48 * 60 * 60 * 1000;
@@ -44,9 +45,8 @@ export function parseScheduledStartAt(room: any): Date | null {
     const time = String(room?.scheduledTime || "").trim();
     if (!date || !time) return null;
 
-    // Treat as local time (consistent with existing date/time storage)
-    const dt = new Date(`${date}T${time}`);
-    return Number.isNaN(dt.getTime()) ? null : dt;
+    const millis = combineKarachiDateTime(date, time);
+    return millis === null ? null : new Date(millis);
 }
 
 export function getRoomLockAt(room: any): Date | null {

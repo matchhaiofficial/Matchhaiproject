@@ -50,7 +50,7 @@ export const buildMerchantHashedReq = internalAction({
   },
 });
 
-const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
+const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "").trim().toLowerCase();
 const EASYPAISA_REST_BASE_URL = String(process.env.EASYPAISA_REST_BASE_URL || "").trim();
 const EASYPAISA_API_USERNAME = String(process.env.EASYPAISA_API_USERNAME || "").trim();
 const EASYPAISA_API_PASSWORD = String(process.env.EASYPAISA_API_PASSWORD || "").trim();
@@ -78,6 +78,11 @@ function normalizeTransportError(error: unknown) {
 }
 
 function ensureRestConfig(requireAccountNum = false) {
+  const enabled = String(process.env.EASYPAISA_ENABLED || "").trim() === "1";
+  const environment = String(process.env.EASYPAISA_ENV || "").trim().toLowerCase();
+  if (!enabled || !["staging", "production"].includes(environment)) {
+    throw new Error("Easypaisa provider operations are disabled.");
+  }
   if (!EASYPAISA_API_USERNAME || !EASYPAISA_API_PASSWORD) {
     throw new Error("Easypaisa REST credentials are not configured.");
   }

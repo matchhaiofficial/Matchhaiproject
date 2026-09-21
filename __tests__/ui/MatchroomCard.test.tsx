@@ -2,7 +2,7 @@
 // seats remaining, date/time, price, request/joined actions, and NO match code/QR.
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react-native";
-import MatchroomCard from "../../app/matchrooms/components/MatchroomCard";
+import MatchroomCard from "../../app-shared/matchrooms/components/MatchroomCard";
 
 const FUTURE = "2026-12-10";
 const PAST = "2020-01-01";

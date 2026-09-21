@@ -28,7 +28,7 @@ import { useEntrance } from "../../../src/motion/useEntrance";
 import { usePressScale } from "../../../src/motion/usePressScale";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import styles from "./discover.styles";
+import styles from "../../../app-shared/(player)/(tabs)/discover.styles";
 
 const ALLOWED_SEGMENTS: DiscoverSegment[] = [
   "matchrooms",

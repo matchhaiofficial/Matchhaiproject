@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -10,7 +10,7 @@ import {
   AdminPageHeader,
   AdminSearchFilterBar,
 } from "../../src/components/AdminSurface";
-import { AppButton } from "../../src/components/AppPrimitives";
+import { AppButton, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
@@ -24,7 +24,7 @@ import {
   setUserSuspension,
   type SuperAdminUser,
 } from "../../src/services/convex/superAdminService";
-import { COLORS, SPACING } from "../../src/theme";
+import { COLORS, FONTS, SPACING } from "../../src/theme";
 
 type UserTab = "all" | "player" | "zone";
 
@@ -35,6 +35,13 @@ function formatDate(value?: number | null) {
 
 function statusTone(status?: string | null) {
   return status === "suspended" ? "danger" as const : "success" as const;
+}
+
+function kycTone(status?: string | null) {
+  if (status === "verified") return "success" as const;
+  if (status === "rejected" || status === "expired") return "danger" as const;
+  if (status === "pending" || status === "in_progress" || status === "in_review") return "warning" as const;
+  return "neutral" as const;
 }
 
 function formatLabel(value: string) {
@@ -97,7 +104,11 @@ const UserRow = React.memo(function UserRow({
 }) {
   const suspended = user.accountStatus === "suspended";
   const isDeleted = (user as any).suspensionReason === "account_deletion_processed";
+  const deletionStatus = user.accountDeletionStatus;
+  const deletionPending = deletionStatus === "queued" || deletionStatus === "running";
+  const deletionStopped = deletionStatus === "blocked" || deletionStatus === "failed";
   const isSuperAdmin = user.role === "super_admin" || user.role === "super-admin";
+  const kycStatus = user.kycVerificationStatus || "not_started";
   // A non-primary Super Admin cannot suspend/reactivate/delete another Super Admin.
   // The backend enforces this too; this just hides actions that would be rejected.
   const canAct = !isSuperAdmin || canManageSuperAdmins;
@@ -105,12 +116,14 @@ const UserRow = React.memo(function UserRow({
     <AdminListCard
       title={user.fullName || user.username || "Unknown user"}
       subtitle={user.email}
-      statusLabel={isDeleted ? "Deleted" : suspended ? "Suspended" : "Active"}
-      statusTone={isDeleted || suspended ? "danger" : "success"}
+      statusLabel={isDeleted ? "Deleted" : deletionPending ? "Deletion Pending" : deletionStopped ? `Deletion ${formatLabel(deletionStatus!)}` : suspended ? "Suspended" : "Active"}
+      statusTone={isDeleted || suspended || deletionStopped ? "danger" : deletionPending ? "warning" : "success"}
       actions={
-        !canAct ? null : isDeleted ? (
+        !canAct || deletionPending ? null : isDeleted ? (
+          null
+        ) : deletionStopped ? (
           <AppButton size="sm" variant="danger" loading={busy} onPress={() => onDelete(user)}>
-            Re-run Cleanup
+            Retry Deletion
           </AppButton>
         ) : suspended ? (
           <AppButton size="sm" variant="success" loading={busy} onPress={() => onReactivate(user)}>
@@ -134,8 +147,15 @@ const UserRow = React.memo(function UserRow({
         <AdminInfoLine label="Username" value={user.username || "N/A"} />
         <AdminInfoLine label="Type" value={user.accountType === "zone" ? "Zone Admin" : "Player"} />
         <AdminInfoLine label="Role" value={user.role || "Standard"} />
+        <View style={styles.kycRow}>
+          <Text style={styles.kycLabel}>KYC</Text>
+          <StatusPill tone={kycTone(kycStatus)} label={formatLabel(kycStatus)} />
+        </View>
         <AdminInfoLine label="Created" value={formatDate(user.createdAt)} />
         {suspended ? <AdminInfoLine label="Reason" value={(user as any).suspensionReason || "No reason recorded"} /> : null}
+        {deletionStatus ? <AdminInfoLine label="Deletion status" value={formatLabel(deletionStatus)} /> : null}
+        {user.accountDeletionStage ? <AdminInfoLine label="Deletion stage" value={formatLabel(user.accountDeletionStage)} /> : null}
+        {user.accountDeletionError ? <AdminInfoLine label="Deletion issue" value={user.accountDeletionError} /> : null}
       </View>
     </AdminListCard>
   );
@@ -157,8 +177,9 @@ export default function SuperAdminUsersScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
+  const cursorRef = useRef<string | null>(null);
+  const isDoneRef = useRef(false);
+  const loadingMoreRef = useRef(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [bootstrappingAdmins, setBootstrappingAdmins] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -173,26 +194,36 @@ export default function SuperAdminUsersScreen() {
   }, []);
 
   const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
-    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "more" && (loadingMoreRef.current || isDoneRef.current)) return;
+    if (mode !== "more") {
+      cursorRef.current = null;
+      isDoneRef.current = false;
+    }
     if (mode === "initial") setLoading(true);
     else if (mode === "refresh") setRefreshing(true);
-    else setLoadingMore(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
     const result = await getUsersPage({
       accountType: tab === "all" ? undefined : tab,
       limit: PAGE_SIZE,
-      cursor: mode === "more" ? cursor : null,
+      cursor: mode === "more" ? cursorRef.current : null,
     });
     if (result.ok) {
       setUsers((previous) => mode === "more" ? mergeUsers(previous, result.data.page) : result.data.page);
-      setCursor(result.data.continueCursor);
-      setIsDone(result.data.isDone);
+      cursorRef.current = result.data.continueCursor;
+      isDoneRef.current = result.data.isDone;
     } else {
       showToast({ type: "error", title: "Users failed", message: result.message });
     }
     if (mode === "initial") setLoading(false);
     else if (mode === "refresh") setRefreshing(false);
-    else setLoadingMore(false);
-  }, [cursor, isDone, loadingMore, mergeUsers, showToast, tab]);
+    else {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [mergeUsers, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -285,7 +316,7 @@ export default function SuperAdminUsersScreen() {
             const result = await deleteUserAccount(user.id);
             setBusyUserId(null);
             if (result.ok) {
-              showToast({ type: "success", title: "Account deleted", message: "User data anonymized and sessions revoked." });
+              showToast({ type: "success", title: "Deletion scheduled", message: result.message || "The account will be anonymized after safety checks complete." });
               await load("refresh");
             } else {
               showToast({ type: "error", title: "Deletion failed", message: result.message });
@@ -451,5 +482,7 @@ const styles = StyleSheet.create({
   footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   infoStack: { gap: SPACING.sm },
+  kycRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.sm },
+  kycLabel: { color: COLORS.textSecondary, fontFamily: FONTS.body, fontSize: 13 },
   actionStack: { gap: SPACING.xs },
 });

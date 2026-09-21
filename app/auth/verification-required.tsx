@@ -12,7 +12,7 @@ import { useStartDiditKyc } from "../../src/hooks/useDiditKyc";
 import { COLORS } from "../../src/theme";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycReviewActive } from "../../src/utils/verificationGate";
 import { isAuthenticatedProfileReady } from "../../src/utils/authReadiness";
-import styles from "./login.styles";
+import styles from "../../app-shared/auth/login.styles";
 
 function formatKycReason(reason?: string | null) {
   const value = String(reason || "").trim();

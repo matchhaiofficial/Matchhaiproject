@@ -9,6 +9,8 @@ export const FEATURE_READINESS = {
       label: "Easypaisa",
       description:
         "Start an Easypaisa payment directly from MatchHai. Mobile Account is the default flow, with OTC available when explicitly enabled.",
+      unavailableMessage:
+        "Easypaisa is unavailable in this environment.",
     },
     card: {
       enabled: false,

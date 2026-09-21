@@ -121,6 +121,31 @@ function isZoneWithdrawalTransaction(tx: any) {
     (tx.metadata as any)?.source === "zone_admin_withdrawal_request";
 }
 
+function getPendingVenuePayoutAmount(room: any, zone: any, now = Date.now()) {
+  if (!room || room.status !== "completed" || room.resultVerification?.status !== "resolved") return 0;
+  if (room.venuePayoutStatus === "paid") return 0;
+  const eligibleAt = Number(
+    room.venuePayoutEligibleAt ||
+    (Number(room.resultVerification?.resolvedAt || 0) + 24 * 60 * 60 * 1000),
+  );
+  // Keep showing an overdue-but-not-yet-credited payout until the one-shot
+  // settlement callback commits it. This prevents a misleading zero during
+  // scheduler latency or a transient callback retry.
+  if (!Number.isFinite(eligibleAt) || eligibleAt <= 0) return 0;
+  const storedAmount = Number(room.venuePayoutAmount || 0);
+  if (Number.isFinite(storedAmount) && storedAmount > 0) return storedAmount;
+  const merchantSettlementAmount = Number(room.merchantSettlementAmount || 0);
+  const hostPaymentAmount = Number(room.paymentAmount || 0);
+  const expectedGross = Math.max(0, Number(room.pricing?.perPlayer || 0) * Math.max(1, Number(room.maxPlayers || room.currentPlayers || 1)));
+  const grossAmount = Math.max(merchantSettlementAmount, hostPaymentAmount, expectedGross);
+  if (!Number.isFinite(grossAmount) || grossAmount <= 0) return 0;
+  const normalRate = Number.isFinite(Number(zone?.normalPayoutRate)) ? Number(zone.normalPayoutRate) : 0.9;
+  const pilotRate = Number.isFinite(Number(zone?.pilotPayoutRate)) ? Number(zone.pilotPayoutRate) : 1;
+  const pilotApplied = zone?.pilotStatus === "active" && typeof zone?.pilotEndsAt === "number" && now <= zone.pilotEndsAt;
+  const rate = Math.min(1, Math.max(0, pilotApplied ? pilotRate : normalRate));
+  return Math.round(grossAmount * rate * 100) / 100;
+}
+
 function serializeTransaction(
   tx: any,
   branchContext: { branchId: string | null; branchName: string | null },
@@ -140,6 +165,8 @@ function serializeTransaction(
     grossAmount: metadata?.grossAmount ?? null,
     payoutRate: metadata?.payoutRate ?? null,
     pilotApplied: metadata?.pilotApplied ?? null,
+    adminDecision: metadata?.adminDecision ?? null,
+    rejectionReason: metadata?.rejectionReasonSafe ?? null,
   };
 }
 
@@ -163,6 +190,34 @@ export const getSummary = query({
       .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", actor.user._id))
       .order("desc")
       .collect();
+
+    // Completed rooms retain a pending venue payout marker during the 24-hour
+    // clearing window. This indexed, bounded read makes those earnings visible
+    // immediately while keeping them out of the withdrawable wallet balance.
+    const completedRooms = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_zoneOwnerUid_and_status", (q) =>
+        q.eq("zoneOwnerUid", String(actor.user._id)).eq("status", "completed"),
+      )
+      .order("desc")
+      .take(200);
+    const pendingPayoutNow = Date.now();
+    const pendingVenuePayouts: any[] = [];
+    for (const room of completedRooms) {
+      const roomBranchId = String(room.branchId || room.confirmedBranchId || "").trim() || null;
+      if ((!requestedBranchId || roomBranchId === requestedBranchId) &&
+        getPendingVenuePayoutAmount(room, actor.zone, pendingPayoutNow) > 0) {
+        pendingVenuePayouts.push(room);
+      }
+    }
+    const pendingEarnings = (await Promise.all(
+      pendingVenuePayouts.map((room) => getPendingVenuePayoutAmount(room, actor.zone, pendingPayoutNow)),
+    )).reduce((sum, amount) => sum + amount, 0);
+    const nextPayoutEligibleAt = pendingVenuePayouts.reduce<number | null>((earliest, room) => {
+      const eligibleAt = Number(room.venuePayoutEligibleAt || 0);
+      if (!Number.isFinite(eligibleAt) || eligibleAt <= 0) return earliest;
+      return earliest === null || eligibleAt < earliest ? eligibleAt : earliest;
+    }, null);
 
     const scopedTxns: any[] = [];
     for (const tx of txns) {
@@ -196,6 +251,9 @@ export const getSummary = query({
     return {
       availableBalance: actor.user.walletBalance ?? 0,
       pendingBalance: pendingWithdrawalAmount,
+      pendingEarnings,
+      pendingEarningCount: pendingVenuePayouts.length,
+      nextPayoutEligibleAt,
       totalEarned,
       totalWithdrawn,
       todayEarned,

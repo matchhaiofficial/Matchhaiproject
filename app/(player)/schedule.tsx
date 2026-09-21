@@ -26,7 +26,7 @@ import {
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { getRoomStartDate } from "../../src/utils/timeFilters";
-import styles from "./schedule.styles";
+import styles from "../../app-shared/(player)/schedule.styles";
 
 type ScheduleTab = UserScheduleTab;
 type ScheduleDateFilter = "Any" | "Today" | "Tomorrow" | "This Week";

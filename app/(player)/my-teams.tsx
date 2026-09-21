@@ -19,7 +19,7 @@ import { COLORS } from "../../src/theme";
 import { isPhysicalGameDisabled } from "../../constants/gameAvailability";
 import Logger from "../../src/utils/logger";
 import { getTeamMainDisplayRoster } from "../../src/utils/teamRosterDisplay";
-import styles from "./(tabs)/teams.styles"; // Reuse styles from tabs/teams
+import styles from "../../app-shared/(player)/(tabs)/teams.styles"; // Reuse styles from tabs/teams
 
 const HIT_SLOP_8 = { top: 8, bottom: 8, left: 8, right: 8 } as const;
 

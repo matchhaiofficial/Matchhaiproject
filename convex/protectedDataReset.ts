@@ -73,7 +73,6 @@ const AUTH_MODELS_IN_DELETE_ORDER = [
   "account",
   "verification",
   "twoFactor",
-  "passkey",
   "oauthAccessToken",
   "oauthConsent",
   "oauthApplication",
@@ -85,7 +84,6 @@ const AUTH_MODELS_WITH_USER_ID = new Set([
   "session",
   "account",
   "twoFactor",
-  "passkey",
   "oauthAccessToken",
   "oauthConsent",
   "oauthApplication",
@@ -247,7 +245,6 @@ async function deleteAuthModelBatch(
     case "session":
     case "account":
     case "twoFactor":
-    case "passkey":
     case "oauthAccessToken":
     case "oauthConsent":
     case "oauthApplication":

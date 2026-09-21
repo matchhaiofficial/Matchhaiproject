@@ -51,7 +51,7 @@ export default function SuperAdminLayout() {
     // before any Super Admin surface is reachable. Backend authz is unaffected;
     // this is an additional in-app gate keyed on the per-user flag.
     if (user.mustChangePassword === true) {
-        return <Redirect href="/auth/change-password" />;
+        return <Redirect href={"/auth/change-password" as any} />;
     }
 
     return (
@@ -79,4 +79,3 @@ export default function SuperAdminLayout() {
         </Stack>
     );
 }
-

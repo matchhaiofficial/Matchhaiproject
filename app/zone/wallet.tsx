@@ -116,6 +116,7 @@ const ZoneTxRow = React.memo(({ item }: { item: any }) => {
     const sign = getTxSign(item);
     const amountColor =
         sign === "+" ? COLORS.successBright : COLORS.error;
+    const displayStatus = item.adminDecision === "rejected" ? "rejected" : String(item.status || "");
 
     return (
         <AppCard style={styles.txCard}>
@@ -134,6 +135,11 @@ const ZoneTxRow = React.memo(({ item }: { item: any }) => {
                             Ref: {String(item.reference).slice(-12)}
                         </Text>
                     ) : null}
+                    {item.status === "failed" && item.rejectionReason ? (
+                        <Text style={styles.txReason}>
+                            Reason: {String(item.rejectionReason)}
+                        </Text>
+                    ) : null}
                 </View>
                 <View style={styles.txRight}>
                     <Text style={[styles.txAmount, { color: amountColor }]}>
@@ -143,8 +149,7 @@ const ZoneTxRow = React.memo(({ item }: { item: any }) => {
                     <StatusPill
                         tone={tone}
                         label={
-                            String(item.status).charAt(0).toUpperCase() +
-                            String(item.status).slice(1)
+                            displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)
                         }
                     />
                 </View>
@@ -276,8 +281,8 @@ export default function ZoneWalletScreen() {
                 iconColor: COLORS.textSecondary,
             },
             {
-                label: "Pending",
-                value: fmt(summary.pendingBalance),
+                label: "Pending Earnings",
+                value: fmt(summary.pendingEarnings ?? 0),
                 iconName: "pending",
                 iconColor: COLORS.warning,
             },
@@ -378,6 +383,21 @@ export default function ZoneWalletScreen() {
                                 {summary.pendingWithdrawals} withdrawal
                                 {summary.pendingWithdrawals > 1 ? "s" : ""}{" "}
                                 pending ({fmt(summary.pendingBalance)})
+                            </Text>
+                        ) : null}
+                        {Number(summary.pendingEarningCount || 0) > 0 ? (
+                            <Text style={styles.pendingNote}>
+                                {summary.pendingEarningCount} matchroom payout
+                                {summary.pendingEarningCount > 1 ? "s" : ""} pending clearing
+                                {summary.nextPayoutEligibleAt
+                                    ? ` until ${new Date(summary.nextPayoutEligibleAt).toLocaleString("en-PK", {
+                                        month: "short",
+                                        day: "numeric",
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                    })}`
+                                    : ""}
+                                . Available balance updates automatically after clearing.
                             </Text>
                         ) : null}
                     </View>
@@ -729,6 +749,13 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: COLORS.textSecondary,
         opacity: 0.65,
+    },
+    txReason: {
+        fontFamily: FONTS.interRegular,
+        fontSize: 12,
+        lineHeight: 17,
+        color: COLORS.error,
+        marginTop: 2,
     },
     txAmount: {
         fontFamily: FONTS.heading,

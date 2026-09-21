@@ -140,11 +140,17 @@ export function buildSuperAdminSupportTicketHref(ticketId?: unknown) {
   return id ? `/super-admin/support-ticket/${encodeURIComponent(id)}` : APP_ROUTES.superAdminSupportTickets;
 }
 
-function normalizeExplicitNotificationRoute(route?: string | null) {
+function normalizeExplicitNotificationRoute(route?: string | null, role?: string) {
   const text = asRouteString(route);
   if (!text) return undefined;
   if (text === "/zone/profile") return APP_ROUTES.zoneProfile;
   if (text === "/super-admin/reports") return APP_ROUTES.superAdminReports;
+  if (role === "super_admin" || role === "super-admin") {
+    const playerMatchroom = text.match(/^\/matchrooms\/([^/?#]+)(?:[?#].*)?$/);
+    if (playerMatchroom?.[1]) {
+      return buildSuperAdminMatchroomHref(decodeURIComponent(playerMatchroom[1]));
+    }
+  }
   return text;
 }
 
@@ -152,7 +158,7 @@ export function buildNotificationRoute(input: NotificationRouteInput) {
   const data = input.data || {};
   const type = String(input.type || data.canonicalType || "").trim().toLowerCase();
   const role = String(input.recipientRole || data.recipientRole || "").trim().toLowerCase();
-  const explicitRoute = normalizeExplicitNotificationRoute(input.route || input.href || data.route || data.href);
+  const explicitRoute = normalizeExplicitNotificationRoute(input.route || input.href || data.route || data.href, role);
   const matchroomId = input.matchroomId || data.matchroomId;
   const teamId = input.teamId || data.teamId;
   const requestId = data.requestId || data.requestRef;

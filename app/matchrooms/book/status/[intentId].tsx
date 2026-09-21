@@ -25,7 +25,7 @@ import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { PAYMENT_VERIFICATION_SAFE_MESSAGE, PAYMENT_SUPPORT_WITH_ORDER_HINT } from "../../../../src/utils/paymentUiCopy";
 import { buildLegacyMatchroomsHref } from "../../../../src/navigation/routes";
-import styles from "./status.styles";
+import styles from "../../../../app-shared/matchrooms/book/status/status.styles";
 
 export default function BookingStatusScreen() {
     const { intentId, gateway, paymentStatus: paymentStatusParam, orderRefNum } = useLocalSearchParams() as {
@@ -549,12 +549,12 @@ export default function BookingStatusScreen() {
                             valueStyle={styles.orderValue}
                         />
                     ) : null}
-                    {checkoutStatus?.lastError && !isCompleted ? (
+                    {checkoutStatus?.hasSyncIssue && !isCompleted ? (
                         <Text style={styles.expiredHint}>
                             Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                         </Text>
                     ) : null}
-                    {activeOrderRefNum && !isCompleted && (isGatewayFailed || isGatewayPending || checkoutStatus?.lastError) ? (
+                    {activeOrderRefNum && !isCompleted && (isGatewayFailed || isGatewayPending || checkoutStatus?.hasSyncIssue) ? (
                         <Text style={styles.expiredHint}>
                             {PAYMENT_SUPPORT_WITH_ORDER_HINT}
                         </Text>
@@ -562,7 +562,7 @@ export default function BookingStatusScreen() {
                     {isGatewayPending && checkoutStatus?.actionRequired ? (
                         <Text style={styles.expiredHint}>
                             Next step: {checkoutStatus.actionRequired === "pay_with_token"
-                                ? `Pay with OTC token ${checkoutStatus.paymentToken || ""}`.trim()
+                                ? "Use the OTC token shown when this payment started"
                                 : "Approve in Easypaisa"}
                         </Text>
                     ) : null}

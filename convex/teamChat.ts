@@ -4,6 +4,12 @@ import { Id } from "./_generated/dataModel";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { isUserHiddenFromPublic } from "./userVisibility";
 import { markUserPresent } from "./presence";
+import {
+  CHAT_LIST_LIMIT,
+  MAX_CHATROOM_MEMBER_ROWS,
+  assertChatroomMemberRowsBounded,
+  createParticipantProfileCache,
+} from "./chatListHelpers";
 
 // ============================================
 // TEAM CHAT (private, members-only)
@@ -47,14 +53,41 @@ function isActiveTeam(team: any): boolean {
   return !(team.status === "deleted" || Boolean(team.deletedAt));
 }
 
+async function syncTeamChatMembers(ctx: any, chatroomId: Id<"chatrooms">, memberUids: string[], now: number) {
+  const existing = assertChatroomMemberRowsBounded(await ctx.db
+    .query("chatroomMembers")
+    .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroomId))
+    .take(MAX_CHATROOM_MEMBER_ROWS + 1));
+  const normalized = new Set(memberUids.map(String));
+  const existingByUserId = new Map(existing.map((member: any) => [String(member.userId), member]));
+
+  for (const userId of normalized) {
+    if (existingByUserId.has(userId)) continue;
+    await ctx.db.insert("chatroomMembers", {
+      chatroomId,
+      userId,
+      joinedAt: now,
+      lastReadAt: now,
+      unreadCount: 0,
+      updatedAt: now,
+    });
+  }
+  for (const member of existing) {
+    if (!normalized.has(String(member.userId))) await ctx.db.delete(member._id);
+  }
+}
+
 // Canonical member list for a team chat: every accepted teamMembers row, minus
 // any soft-deleted / hidden account (so deleted or removed users never remain
 // in the members-only chat participant list).
-async function getTeamMemberUids(ctx: any, teamId: Id<"teams">): Promise<string[]> {
+async function getTeamMemberUids(ctx: any, teamId: Id<"teams">, limit: number): Promise<string[]> {
   const members = await ctx.db
     .query("teamMembers")
     .withIndex("by_teamId", (q: any) => q.eq("teamId", teamId))
-    .collect();
+    .take(Math.max(1, Math.floor(Number(limit || 1))) + 1);
+  if (members.length > limit) {
+    throw new Error("Team roster exceeds its configured member capacity.");
+  }
   const uids = new Set<string>();
   for (const m of members) {
     if (!m?.odxerId) continue;
@@ -83,7 +116,10 @@ async function getTeamAccessState(ctx: any, teamId: Id<"teams">): Promise<TeamAc
   const actor = await ctx.db.get(userId);
   if (!actor || isUserHiddenFromPublic(actor)) return { status: "forbidden" };
 
-  const memberUids = await getTeamMemberUids(ctx, teamId);
+  const memberLimit = Number.isFinite(Number(team.maxMembers)) && Number(team.maxMembers) > 0
+    ? Math.floor(Number(team.maxMembers))
+    : 7;
+  const memberUids = await getTeamMemberUids(ctx, teamId, memberLimit);
   if (!memberUids.includes(String(userId))) {
     return { status: "forbidden" };
   }
@@ -116,6 +152,7 @@ async function syncTeamChatroom(ctx: any, teamId: Id<"teams">, memberUids: strin
       updatedAt: now,
     });
     chatroom = await ctx.db.get(chatroomId);
+    await syncTeamChatMembers(ctx, chatroom!._id, memberUids, now);
     return chatroom!;
   }
 
@@ -126,6 +163,7 @@ async function syncTeamChatroom(ctx: any, teamId: Id<"teams">, memberUids: strin
     await ctx.db.patch(chatroom._id, { participantUids: memberUids, updatedAt: now });
     chatroom = await ctx.db.get(chatroom._id);
   }
+  await syncTeamChatMembers(ctx, chatroom!._id, memberUids, now);
   return chatroom!;
 }
 
@@ -149,7 +187,9 @@ export const getChat = query({
     return {
       teamId: args.teamId,
       teamName: state.team?.name || "Team",
-      participantUids: chatroom?.participantUids || state.memberUids,
+      // Membership is authoritative. A chatroom projection can briefly lag when
+      // somebody joins or leaves because queries cannot repair it themselves.
+      participantUids: state.memberUids,
       lastReadBy: chatroom?.lastReadBy || {},
       updatedAt: chatroom?.updatedAt || chatroom?.createdAt || null,
     };
@@ -271,6 +311,18 @@ export const sendMessage = mutation({
       updatedAt: now,
     });
 
+    const members = assertChatroomMemberRowsBounded(await ctx.db
+      .query("chatroomMembers")
+      .withIndex("by_chatroomId", (q: any) => q.eq("chatroomId", chatroom!._id))
+      .take(MAX_CHATROOM_MEMBER_ROWS + 1));
+    for (const member of members) {
+      await ctx.db.patch(member._id, {
+        unreadCount: String(member.userId) === String(state.userId) ? 0 : Number(member.unreadCount || 0) + 1,
+        lastReadAt: String(member.userId) === String(state.userId) ? now : member.lastReadAt,
+        updatedAt: now,
+      });
+    }
+
     return messageId;
   },
 });
@@ -284,10 +336,97 @@ export const markRead = mutation({
       .withIndex("by_teamId", (q: any) => q.eq("teamId", args.teamId))
       .unique();
     if (!chatroom) return { ok: true };
+    const membership = await ctx.db
+      .query("chatroomMembers")
+      .withIndex("by_chatroomId_and_userId", (q: any) => q.eq("chatroomId", chatroom._id).eq("userId", String(state.userId)))
+      .unique();
+    if (membership) {
+      await ctx.db.patch(membership._id, { unreadCount: 0, lastReadAt: Date.now(), updatedAt: Date.now() });
+    }
     await ctx.db.patch(chatroom._id, {
       lastReadBy: { ...(chatroom.lastReadBy || {}), [String(state.userId)]: Date.now() },
       updatedAt: Date.now(),
     });
     return { ok: true };
+  },
+});
+
+/** Bounded conversation rows for the shared player chat list. */
+export const listForMe = query({
+  args: {},
+  returns: v.array(v.object({
+    id: v.id("chatrooms"),
+    kind: v.literal("team"),
+    teamId: v.id("teams"),
+    title: v.string(),
+    subtitle: v.string(),
+    participantUids: v.array(v.string()),
+    participants: v.array(v.object({
+      uid: v.string(),
+      label: v.string(),
+      photoURL: v.union(v.string(), v.null()),
+    })),
+    avatarURL: v.union(v.string(), v.null()),
+    lastMessage: v.any(),
+    updatedAt: v.number(),
+    unreadCount: v.number(),
+  })),
+  handler: async (ctx) => {
+    const userId = await getStrictAuthenticatedUserId(ctx);
+    const recentMemberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_userId", (q: any) => q.eq("odxerId", userId))
+      .order("desc")
+      .take(CHAT_LIST_LIMIT);
+    const memberships = Array.from(
+      new Map(recentMemberships.map((membership: any) => [String(membership.teamId), membership])).values(),
+    );
+
+    const loadParticipantProfiles = createParticipantProfileCache(ctx);
+    const rows = await Promise.all(memberships.map(async (membership: any) => {
+      const team: any = await ctx.db.get(membership.teamId);
+      if (!isActiveTeam(team)) return null;
+      const chatroom = await ctx.db
+        .query("chatrooms")
+        .withIndex("by_teamId", (q: any) => q.eq("teamId", membership.teamId))
+        .unique();
+      if (!chatroom) return null;
+      const participantProfiles = await loadParticipantProfiles(chatroom.participantUids || [], "Member");
+      const participants = participantProfiles;
+      const member = await ctx.db
+        .query("chatroomMembers")
+        .withIndex("by_chatroomId_and_userId", (q: any) => q.eq("chatroomId", chatroom._id).eq("userId", String(userId)))
+        .unique();
+      const legacyLastReadAt = Number(chatroom.lastReadBy?.[String(userId)] || 0);
+      const legacyUnreadCount = !member && legacyLastReadAt > 0
+        ? (await ctx.db
+            .query("chatMessages")
+            .withIndex("by_chatroomId_and_createdAt", (q: any) =>
+              q.eq("chatroomId", chatroom._id).gt("createdAt", legacyLastReadAt),
+            )
+            .order("asc")
+            // Legacy rooms have no chatroomMembers unread counter. Preserve
+            // their historical unread behavior with a bounded recovery scan;
+            // newly-synced rooms use the O(team-size) counter path above.
+            .take(200))
+            .filter((message: any) => String(message.senderUid) !== String(userId)).length
+        : 0;
+      return {
+        id: chatroom._id,
+        kind: "team" as const,
+        teamId: membership.teamId,
+        title: team.name || "Team chat",
+        subtitle: "Team chat",
+        participantUids: chatroom.participantUids || [],
+        participants,
+        avatarURL: participants.find((participant: any) => participant.uid !== String(userId))?.photoURL || null,
+        lastMessage: chatroom.lastMessage || null,
+        updatedAt: chatroom.updatedAt || chatroom.createdAt,
+        unreadCount: member ? Number(member.unreadCount || 0) : legacyUnreadCount,
+      };
+    }));
+    return rows
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   },
 });
